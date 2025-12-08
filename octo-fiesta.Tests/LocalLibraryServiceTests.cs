@@ -1,6 +1,11 @@
 using octo_fiesta.Services;
 using octo_fiesta.Models;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Moq;
+using Moq.Protected;
+using System.Net;
 
 namespace octo_fiesta.Tests;
 
@@ -8,6 +13,7 @@ public class LocalLibraryServiceTests : IDisposable
 {
     private readonly LocalLibraryService _service;
     private readonly string _testDownloadPath;
+    private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
 
     public LocalLibraryServiceTests()
     {
@@ -21,7 +27,25 @@ public class LocalLibraryServiceTests : IDisposable
             })
             .Build();
 
-        _service = new LocalLibraryService(configuration);
+        // Mock HttpClient
+        var mockHandler = new Mock<HttpMessageHandler>();
+        mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", 
+                ItExpr.IsAny<HttpRequestMessage>(), 
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":false,\"count\":100}}}")
+            });
+        
+        var httpClient = new HttpClient(mockHandler.Object);
+        _mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
+
+        var subsonicSettings = Options.Create(new SubsonicSettings { Url = "http://localhost:4533" });
+        var mockLogger = new Mock<ILogger<LocalLibraryService>>();
+
+        _service = new LocalLibraryService(configuration, _mockHttpClientFactory.Object, subsonicSettings, mockLogger.Object);
     }
 
     public void Dispose()
@@ -151,5 +175,46 @@ public class LocalLibraryServiceTests : IDisposable
 
         // Assert - nothing to assert, just checking it doesn't throw
         Assert.True(true);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_ReturnsTrue()
+    {
+        // Act
+        var result = await _service.TriggerLibraryScanAsync();
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task GetScanStatusAsync_ReturnsScanStatus()
+    {
+        // Act
+        var result = await _service.GetScanStatusAsync();
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.False(result.Scanning);
+        Assert.Equal(100, result.Count);
+    }
+
+    [Theory]
+    [InlineData("ext-deezer-123", true, "deezer", "123")]
+    [InlineData("ext-spotify-abc123", true, "spotify", "abc123")]
+    [InlineData("ext-tidal-999-888", true, "tidal", "999-888")]
+    [InlineData("123456", false, null, null)]
+    [InlineData("", false, null, null)]
+    [InlineData("ext-", false, null, null)]
+    [InlineData("ext-deezer", false, null, null)]
+    public void ParseSongId_VariousInputs_ReturnsExpected(string songId, bool expectedIsExternal, string? expectedProvider, string? expectedExternalId)
+    {
+        // Act
+        var (isExternal, provider, externalId) = _service.ParseSongId(songId);
+
+        // Assert
+        Assert.Equal(expectedIsExternal, isExternal);
+        Assert.Equal(expectedProvider, provider);
+        Assert.Equal(expectedExternalId, externalId);
     }
 }

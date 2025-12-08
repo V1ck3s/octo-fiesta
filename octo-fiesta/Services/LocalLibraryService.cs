@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Xml.Linq;
+using Microsoft.Extensions.Options;
 using octo_fiesta.Models;
 
 namespace octo_fiesta.Services;
@@ -26,6 +29,16 @@ public interface ILocalLibraryService
     /// Parse un ID de chanson pour déterminer s'il est externe ou local
     /// </summary>
     (bool isExternal, string? provider, string? externalId) ParseSongId(string songId);
+    
+    /// <summary>
+    /// Déclenche un scan de la bibliothèque Subsonic
+    /// </summary>
+    Task<bool> TriggerLibraryScanAsync();
+    
+    /// <summary>
+    /// Récupère le statut actuel du scan
+    /// </summary>
+    Task<ScanStatus?> GetScanStatusAsync();
 }
 
 /// <summary>
@@ -36,13 +49,27 @@ public class LocalLibraryService : ILocalLibraryService
 {
     private readonly string _mappingFilePath;
     private readonly string _downloadDirectory;
+    private readonly HttpClient _httpClient;
+    private readonly SubsonicSettings _subsonicSettings;
+    private readonly ILogger<LocalLibraryService> _logger;
     private Dictionary<string, LocalSongMapping>? _mappings;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    
+    // Debounce pour éviter de déclencher trop de scans
+    private DateTime _lastScanTrigger = DateTime.MinValue;
+    private readonly TimeSpan _scanDebounceInterval = TimeSpan.FromSeconds(30);
 
-    public LocalLibraryService(IConfiguration configuration)
+    public LocalLibraryService(
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        IOptions<SubsonicSettings> subsonicSettings,
+        ILogger<LocalLibraryService> logger)
     {
         _downloadDirectory = configuration["Library:DownloadPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "downloads");
         _mappingFilePath = Path.Combine(_downloadDirectory, ".mappings.json");
+        _httpClient = httpClientFactory.CreateClient();
+        _subsonicSettings = subsonicSettings.Value;
+        _logger = logger;
         
         if (!Directory.Exists(_downloadDirectory))
         {
@@ -143,6 +170,80 @@ public class LocalLibraryService : ILocalLibraryService
     }
 
     public string GetDownloadDirectory() => _downloadDirectory;
+
+    public async Task<bool> TriggerLibraryScanAsync()
+    {
+        // Debounce: éviter de déclencher trop de scans successifs
+        var now = DateTime.UtcNow;
+        if (now - _lastScanTrigger < _scanDebounceInterval)
+        {
+            _logger.LogDebug("Scan debounced - last scan was {Elapsed}s ago", 
+                (now - _lastScanTrigger).TotalSeconds);
+            return true;
+        }
+        
+        _lastScanTrigger = now;
+        
+        try
+        {
+            // Appel à l'API Subsonic pour déclencher un scan
+            // Note: Les credentials doivent être passés en paramètres (u, p ou t+s)
+            var url = $"{_subsonicSettings.Url}/rest/startScan?f=json";
+            
+            _logger.LogInformation("Triggering Subsonic library scan...");
+            
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                _logger.LogInformation("Subsonic scan triggered successfully: {Response}", content);
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning("Failed to trigger Subsonic scan: {StatusCode}", response.StatusCode);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error triggering Subsonic library scan");
+            return false;
+        }
+    }
+
+    public async Task<ScanStatus?> GetScanStatusAsync()
+    {
+        try
+        {
+            var url = $"{_subsonicSettings.Url}/rest/getScanStatus?f=json";
+            
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                var doc = JsonDocument.Parse(content);
+                
+                if (doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) &&
+                    subsonicResponse.TryGetProperty("scanStatus", out var scanStatus))
+                {
+                    return new ScanStatus
+                    {
+                        Scanning = scanStatus.TryGetProperty("scanning", out var scanning) && scanning.GetBoolean(),
+                        Count = scanStatus.TryGetProperty("count", out var count) ? count.GetInt32() : null
+                    };
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting Subsonic scan status");
+        }
+        
+        return null;
+    }
 }
 
 /// <summary>

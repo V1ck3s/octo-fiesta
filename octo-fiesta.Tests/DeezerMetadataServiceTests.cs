@@ -181,6 +181,97 @@ public class DeezerMetadataServiceTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task SearchSongsAsync_WithEmptyResponse_ReturnsEmptyList()
+    {
+        // Arrange
+        SetupHttpResponse(JsonSerializer.Serialize(new { data = Array.Empty<object>() }));
+
+        // Act
+        var result = await _service.SearchSongsAsync("nonexistent", 20);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task SearchSongsAsync_WithHttpError_ReturnsEmptyList()
+    {
+        // Arrange
+        SetupHttpResponse("Error", HttpStatusCode.InternalServerError);
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetAlbumAsync_WithDeezerProvider_ReturnsAlbumWithTracks()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            id = 456789,
+            title = "Test Album",
+            nb_tracks = 2,
+            release_date = "2023-05-20",
+            cover_medium = "https://example.com/album.jpg",
+            artist = new { id = 123, name = "Test Artist" },
+            tracks = new
+            {
+                data = new[]
+                {
+                    new
+                    {
+                        id = 111,
+                        title = "Track 1",
+                        duration = 180,
+                        track_position = 1,
+                        artist = new { id = 123, name = "Test Artist" },
+                        album = new { id = 456789, title = "Test Album", cover_medium = "https://example.com/album.jpg" }
+                    },
+                    new
+                    {
+                        id = 222,
+                        title = "Track 2",
+                        duration = 200,
+                        track_position = 2,
+                        artist = new { id = 123, name = "Test Artist" },
+                        album = new { id = 456789, title = "Test Album", cover_medium = "https://example.com/album.jpg" }
+                    }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.GetAlbumAsync("deezer", "456789");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("ext-deezer-456789", result.Id);
+        Assert.Equal("Test Album", result.Title);
+        Assert.Equal("Test Artist", result.Artist);
+        Assert.Equal(2, result.Songs.Count);
+        Assert.Equal("Track 1", result.Songs[0].Title);
+        Assert.Equal("Track 2", result.Songs[1].Title);
+    }
+
+    [Fact]
+    public async Task GetAlbumAsync_WithNonDeezerProvider_ReturnsNull()
+    {
+        // Act
+        var result = await _service.GetAlbumAsync("spotify", "123456");
+
+        // Assert
+        Assert.Null(result);
+    }
+
     private void SetupHttpResponse(string content, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         _httpMessageHandlerMock

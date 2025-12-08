@@ -18,65 +18,89 @@ public class DeezerMetadataService : IMusicMetadataService
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
     {
-        var url = $"{BaseUrl}/search/track?q={Uri.EscapeDataString(query)}&limit={limit}";
-        var response = await _httpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonDocument.Parse(json);
-        
-        var songs = new List<Song>();
-        if (result.RootElement.TryGetProperty("data", out var data))
+        try
         {
-            foreach (var track in data.EnumerateArray())
+            var url = $"{BaseUrl}/search/track?q={Uri.EscapeDataString(query)}&limit={limit}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return new List<Song>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonDocument.Parse(json);
+            
+            var songs = new List<Song>();
+            if (result.RootElement.TryGetProperty("data", out var data))
             {
-                songs.Add(ParseDeezerTrack(track));
+                foreach (var track in data.EnumerateArray())
+                {
+                    songs.Add(ParseDeezerTrack(track));
+                }
             }
+            
+            return songs;
         }
-        
-        return songs;
+        catch
+        {
+            return new List<Song>();
+        }
     }
 
     public async Task<List<Album>> SearchAlbumsAsync(string query, int limit = 20)
     {
-        var url = $"{BaseUrl}/search/album?q={Uri.EscapeDataString(query)}&limit={limit}";
-        var response = await _httpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonDocument.Parse(json);
-        
-        var albums = new List<Album>();
-        if (result.RootElement.TryGetProperty("data", out var data))
+        try
         {
-            foreach (var album in data.EnumerateArray())
+            var url = $"{BaseUrl}/search/album?q={Uri.EscapeDataString(query)}&limit={limit}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return new List<Album>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonDocument.Parse(json);
+            
+            var albums = new List<Album>();
+            if (result.RootElement.TryGetProperty("data", out var data))
             {
-                albums.Add(ParseDeezerAlbum(album));
+                foreach (var album in data.EnumerateArray())
+                {
+                    albums.Add(ParseDeezerAlbum(album));
+                }
             }
+            
+            return albums;
         }
-        
-        return albums;
+        catch
+        {
+            return new List<Album>();
+        }
     }
 
     public async Task<List<Artist>> SearchArtistsAsync(string query, int limit = 20)
     {
-        var url = $"{BaseUrl}/search/artist?q={Uri.EscapeDataString(query)}&limit={limit}";
-        var response = await _httpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonDocument.Parse(json);
-        
-        var artists = new List<Artist>();
-        if (result.RootElement.TryGetProperty("data", out var data))
+        try
         {
-            foreach (var artist in data.EnumerateArray())
+            var url = $"{BaseUrl}/search/artist?q={Uri.EscapeDataString(query)}&limit={limit}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return new List<Artist>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonDocument.Parse(json);
+            
+            var artists = new List<Artist>();
+            if (result.RootElement.TryGetProperty("data", out var data))
             {
-                artists.Add(ParseDeezerArtist(artist));
+                foreach (var artist in data.EnumerateArray())
+                {
+                    artists.Add(ParseDeezerArtist(artist));
+                }
             }
+            
+            return artists;
         }
-        
-        return artists;
+        catch
+        {
+            return new List<Artist>();
+        }
     }
 
     public async Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20)

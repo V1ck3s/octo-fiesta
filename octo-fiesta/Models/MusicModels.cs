@@ -112,3 +112,12 @@ public class DownloadInfo
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
+
+/// <summary>
+/// Statut du scan de bibliothèque Subsonic
+/// </summary>
+public class ScanStatus
+{
+    public bool Scanning { get; set; }
+    public int? Count { get; set; }
+}

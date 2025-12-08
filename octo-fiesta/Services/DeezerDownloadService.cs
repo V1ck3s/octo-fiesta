@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Org.BouncyCastle.Crypto.Engines;
+using Org.BouncyCastle.Crypto.Modes;
+using Org.BouncyCastle.Crypto.Parameters;
 using octo_fiesta.Models;
 
 namespace octo_fiesta.Services;
@@ -134,6 +137,9 @@ public class DeezerDownloadService : IDownloadService
                 
                 song.LocalPath = localPath;
                 await _localLibraryService.RegisterDownloadedSongAsync(song, localPath);
+                
+                // Déclencher un rescan de la bibliothèque Subsonic (avec debounce)
+                _ = _localLibraryService.TriggerLibraryScanAsync();
                 
                 _logger.LogInformation("Download completed: {Path}", localPath);
                 return localPath;
@@ -459,38 +465,20 @@ public class DeezerDownloadService : IDownloadService
 
     private byte[] DecryptBlowfishCbc(byte[] data, byte[] key, byte[] iv)
     {
-        // Note: .NET ne supporte pas nativement Blowfish
-        // On utilise BouncyCastle ou une implémentation custom
-        // Pour l'instant, on utilise un appel à OpenSSL via Process (comme le JS)
+        // Use BouncyCastle for native Blowfish CBC decryption
+        var engine = new BlowfishEngine();
+        var cipher = new CbcBlockCipher(engine);
+        cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
         
-        using var process = new System.Diagnostics.Process();
-        process.StartInfo.FileName = "openssl";
-        process.StartInfo.Arguments = $"enc -d -bf-cbc -K {Convert.ToHexString(key).ToLower()} -iv {Convert.ToHexString(iv).ToLower()} -nopad -provider legacy -provider default";
-        process.StartInfo.RedirectStandardInput = true;
-        process.StartInfo.RedirectStandardOutput = true;
-        process.StartInfo.RedirectStandardError = true;
-        process.StartInfo.UseShellExecute = false;
-        process.StartInfo.CreateNoWindow = true;
-
-        process.Start();
+        var output = new byte[data.Length];
+        var blockSize = cipher.GetBlockSize(); // 8 bytes for Blowfish
         
-        using var stdin = process.StandardInput.BaseStream;
-        stdin.Write(data, 0, data.Length);
-        stdin.Close();
-
-        using var stdout = process.StandardOutput.BaseStream;
-        using var ms = new MemoryStream();
-        stdout.CopyTo(ms);
-        
-        process.WaitForExit();
-        
-        if (process.ExitCode != 0)
+        for (int offset = 0; offset < data.Length; offset += blockSize)
         {
-            var error = process.StandardError.ReadToEnd();
-            throw new Exception($"OpenSSL decryption failed: {error}");
+            cipher.ProcessBlock(data, offset, output, offset);
         }
-
-        return ms.ToArray();
+        
+        return output;
     }
 
     #endregion
