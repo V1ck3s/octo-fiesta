@@ -426,22 +426,17 @@ public class SubsonicController : ControllerBase
                 .Concat(externalResult.Artists.Select(a => ConvertArtistToSubsonicJson(a)))
                 .ToList();
 
-            var response = new
+            return CreateSubsonicJsonResponse(new
             {
-                subsonicResponse = new
+                status = "ok",
+                version = "1.16.1",
+                searchResult3 = new
                 {
-                    status = "ok",
-                    version = "1.16.1",
-                    searchResult3 = new
-                    {
-                        song = mergedSongs,
-                        album = mergedAlbums,
-                        artist = mergedArtists
-                    }
+                    song = mergedSongs,
+                    album = mergedAlbums,
+                    artist = mergedArtists
                 }
-            };
-            
-            return Ok(response);
+            });
         }
         else
         {
@@ -604,11 +599,23 @@ public class SubsonicController : ControllerBase
         );
     }
 
+    /// <summary>
+    /// Crée une réponse JSON Subsonic avec la clé "subsonic-response" (avec tiret)
+    /// </summary>
+    private IActionResult CreateSubsonicJsonResponse(object responseContent)
+    {
+        var response = new Dictionary<string, object>
+        {
+            ["subsonic-response"] = responseContent
+        };
+        return new JsonResult(response);
+    }
+
     private IActionResult CreateSubsonicResponse(string format, string elementName, object data)
     {
         if (format == "json")
         {
-            return Ok(new { subsonicResponse = new { status = "ok", version = "1.16.1" } });
+            return CreateSubsonicJsonResponse(new { status = "ok", version = "1.16.1" });
         }
         
         var ns = XNamespace.Get("http://subsonic.org/restapi");
@@ -626,14 +633,11 @@ public class SubsonicController : ControllerBase
     {
         if (format == "json")
         {
-            return Ok(new 
+            return CreateSubsonicJsonResponse(new 
             { 
-                subsonicResponse = new 
-                { 
-                    status = "failed", 
-                    version = "1.16.1",
-                    error = new { code, message }
-                } 
+                status = "failed", 
+                version = "1.16.1",
+                error = new { code, message }
             });
         }
         
@@ -655,14 +659,11 @@ public class SubsonicController : ControllerBase
     {
         if (format == "json")
         {
-            return Ok(new 
+            return CreateSubsonicJsonResponse(new 
             { 
-                subsonicResponse = new 
-                { 
-                    status = "ok", 
-                    version = "1.16.1",
-                    song = ConvertSongToSubsonicJson(song)
-                } 
+                status = "ok", 
+                version = "1.16.1",
+                song = ConvertSongToSubsonicJson(song)
             });
         }
         
@@ -681,24 +682,21 @@ public class SubsonicController : ControllerBase
     {
         if (format == "json")
         {
-            return Ok(new 
+            return CreateSubsonicJsonResponse(new 
             { 
-                subsonicResponse = new 
-                { 
-                    status = "ok", 
-                    version = "1.16.1",
-                    album = new
-                    {
-                        id = album.Id,
-                        name = album.Title,
-                        artist = album.Artist,
-                        artistId = album.ArtistId,
-                        songCount = album.SongCount ?? 0,
-                        year = album.Year ?? 0,
-                        coverArt = album.Id,
-                        song = album.Songs.Select(s => ConvertSongToSubsonicJson(s)).ToList()
-                    }
-                } 
+                status = "ok", 
+                version = "1.16.1",
+                album = new
+                {
+                    id = album.Id,
+                    name = album.Title,
+                    artist = album.Artist,
+                    artistId = album.ArtistId,
+                    songCount = album.SongCount ?? 0,
+                    year = album.Year ?? 0,
+                    coverArt = album.Id,
+                    song = album.Songs.Select(s => ConvertSongToSubsonicJson(s)).ToList()
+                }
             });
         }
         
