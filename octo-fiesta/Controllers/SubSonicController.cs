@@ -221,7 +221,130 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint getAlbum personnalisé
+    /// Endpoint getArtist personnalisé - fusionne les albums locaux et Deezer
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getArtist")]
+    [Route("rest/getArtist.view")]
+    public async Task<IActionResult> GetArtist()
+    {
+        var parameters = await ExtractAllParameters();
+        var id = parameters.GetValueOrDefault("id", "");
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return CreateSubsonicError(format, 10, "Missing id parameter");
+        }
+
+        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+
+        if (isExternal)
+        {
+            // Artiste externe - récupérer depuis Deezer avec ses albums
+            var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
+            if (artist == null)
+            {
+                return CreateSubsonicError(format, 70, "Artist not found");
+            }
+
+            var albums = await _metadataService.GetArtistAlbumsAsync(provider!, externalId!);
+            return CreateSubsonicArtistResponse(format, artist, albums);
+        }
+
+        // Artiste local - récupérer depuis Navidrome puis enrichir avec Deezer
+        var navidromeResult = await RelayToSubsonicSafe("rest/getArtist", parameters);
+        
+        if (!navidromeResult.Success || navidromeResult.Body == null)
+        {
+            return CreateSubsonicError(format, 70, "Artist not found");
+        }
+
+        // Parser la réponse Navidrome pour extraire le nom de l'artiste et les albums locaux
+        var navidromeContent = Encoding.UTF8.GetString(navidromeResult.Body);
+        string artistName = "";
+        var localAlbums = new List<object>();
+        object? artistData = null;
+
+        if (format == "json" || navidromeResult.ContentType?.Contains("json") == true)
+        {
+            var jsonDoc = JsonDocument.Parse(navidromeContent);
+            if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
+                response.TryGetProperty("artist", out var artistElement))
+            {
+                artistName = artistElement.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "";
+                
+                // Convertir les données de l'artiste
+                artistData = ConvertSubsonicJsonElement(artistElement, true);
+                
+                // Extraire les albums locaux
+                if (artistElement.TryGetProperty("album", out var albums))
+                {
+                    foreach (var album in albums.EnumerateArray())
+                    {
+                        localAlbums.Add(ConvertSubsonicJsonElement(album, true));
+                    }
+                }
+            }
+        }
+
+        if (string.IsNullOrEmpty(artistName) || artistData == null)
+        {
+            // Retourner la réponse Navidrome telle quelle si on ne peut pas parser
+            return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
+        }
+
+        // Chercher l'artiste sur Deezer pour obtenir ses albums
+        var deezerArtists = await _metadataService.SearchArtistsAsync(artistName, 1);
+        var deezerAlbums = new List<Album>();
+        
+        if (deezerArtists.Count > 0)
+        {
+            var deezerArtist = deezerArtists[0];
+            // Vérifier que c'est bien le même artiste (nom similaire)
+            if (deezerArtist.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
+            {
+                deezerAlbums = await _metadataService.GetArtistAlbumsAsync("deezer", deezerArtist.ExternalId!);
+            }
+        }
+
+        // Fusionner: albums locaux en premier, puis albums Deezer non présents localement
+        var localAlbumNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var album in localAlbums)
+        {
+            if (album is Dictionary<string, object> dict && dict.TryGetValue("name", out var nameObj))
+            {
+                localAlbumNames.Add(nameObj?.ToString() ?? "");
+            }
+        }
+
+        var mergedAlbums = localAlbums.ToList();
+        foreach (var deezerAlbum in deezerAlbums)
+        {
+            // Ne pas ajouter si un album avec le même nom existe déjà localement
+            if (!localAlbumNames.Contains(deezerAlbum.Title))
+            {
+                mergedAlbums.Add(ConvertAlbumToSubsonicJson(deezerAlbum));
+            }
+        }
+
+        // Construire la réponse avec les albums fusionnés
+        if (artistData is Dictionary<string, object> artistDict)
+        {
+            artistDict["album"] = mergedAlbums;
+            artistDict["albumCount"] = mergedAlbums.Count;
+        }
+
+        return CreateSubsonicJsonResponse(new
+        {
+            status = "ok",
+            version = "1.16.1",
+            artist = artistData
+        });
+    }
+
+    /// <summary>
+    /// Endpoint getAlbum personnalisé - enrichit avec les chansons Deezer si nécessaire
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getAlbum")]
@@ -569,6 +692,8 @@ public class SubsonicController : ControllerBase
         return new
         {
             id = song.Id,
+            parent = song.AlbumId ?? "",
+            isDir = false,
             title = song.Title,
             album = song.Album,
             artist = song.Artist,
@@ -578,6 +703,10 @@ public class SubsonicController : ControllerBase
             track = song.Track ?? 0,
             year = song.Year ?? 0,
             coverArt = song.Id, // Utilisé pour getCoverArt
+            suffix = "mp3",
+            contentType = "audio/mpeg",
+            type = "music",
+            isVideo = false,
             isExternal = !song.IsLocal
         };
     }
@@ -729,6 +858,9 @@ public class SubsonicController : ControllerBase
 
     private IActionResult CreateSubsonicAlbumResponse(string format, Album album)
     {
+        // Calculate total duration from songs
+        var totalDuration = album.Songs.Sum(s => s.Duration ?? 0);
+        
         if (format == "json")
         {
             return CreateSubsonicJsonResponse(new 
@@ -741,9 +873,12 @@ public class SubsonicController : ControllerBase
                     name = album.Title,
                     artist = album.Artist,
                     artistId = album.ArtistId,
-                    songCount = album.SongCount ?? 0,
-                    year = album.Year ?? 0,
                     coverArt = album.Id,
+                    songCount = album.Songs.Count > 0 ? album.Songs.Count : (album.SongCount ?? 0),
+                    duration = totalDuration,
+                    year = album.Year ?? 0,
+                    genre = album.Genre ?? "",
+                    isCompilation = false,
                     song = album.Songs.Select(s => ConvertSongToSubsonicJson(s)).ToList()
                 }
             });
@@ -762,6 +897,43 @@ public class SubsonicController : ControllerBase
                     new XAttribute("year", album.Year ?? 0),
                     new XAttribute("coverArt", album.Id),
                     album.Songs.Select(s => ConvertSongToSubsonicXml(s, ns))
+                )
+            )
+        );
+        return Content(doc.ToString(), "application/xml");
+    }
+
+    private IActionResult CreateSubsonicArtistResponse(string format, Artist artist, List<Album> albums)
+    {
+        if (format == "json")
+        {
+            return CreateSubsonicJsonResponse(new 
+            { 
+                status = "ok", 
+                version = "1.16.1",
+                artist = new
+                {
+                    id = artist.Id,
+                    name = artist.Name,
+                    coverArt = artist.Id,
+                    albumCount = albums.Count,
+                    artistImageUrl = artist.ImageUrl,
+                    album = albums.Select(a => ConvertAlbumToSubsonicJson(a)).ToList()
+                }
+            });
+        }
+        
+        var ns = XNamespace.Get("http://subsonic.org/restapi");
+        var doc = new XDocument(
+            new XElement(ns + "subsonic-response",
+                new XAttribute("status", "ok"),
+                new XAttribute("version", "1.16.1"),
+                new XElement(ns + "artist",
+                    new XAttribute("id", artist.Id),
+                    new XAttribute("name", artist.Name),
+                    new XAttribute("coverArt", artist.Id),
+                    new XAttribute("albumCount", albums.Count),
+                    albums.Select(a => ConvertAlbumToSubsonicXml(a, ns))
                 )
             )
         );
