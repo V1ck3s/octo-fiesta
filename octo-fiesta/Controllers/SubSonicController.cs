@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using octo_fiesta.Models;
@@ -351,9 +352,91 @@ public class SubsonicController : ControllerBase
         SearchResult externalResult,
         string format)
     {
-        // Créer la réponse fusionnée au format Subsonic
+        // Parser les résultats Subsonic si disponibles
+        var localSongs = new List<object>();
+        var localAlbums = new List<object>();
+        var localArtists = new List<object>();
+
+        if (subsonicResult.Success && subsonicResult.Body != null)
+        {
+            try
+            {
+                var subsonicContent = Encoding.UTF8.GetString(subsonicResult.Body);
+                
+                if (format == "json" || subsonicResult.ContentType?.Contains("json") == true)
+                {
+                    // Parser JSON Subsonic
+                    var jsonDoc = JsonDocument.Parse(subsonicContent);
+                    if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
+                        response.TryGetProperty("searchResult3", out var searchResult))
+                    {
+                        if (searchResult.TryGetProperty("song", out var songs))
+                        {
+                            foreach (var song in songs.EnumerateArray())
+                            {
+                                localSongs.Add(ConvertSubsonicJsonElement(song, true));
+                            }
+                        }
+                        if (searchResult.TryGetProperty("album", out var albums))
+                        {
+                            foreach (var album in albums.EnumerateArray())
+                            {
+                                localAlbums.Add(ConvertSubsonicJsonElement(album, true));
+                            }
+                        }
+                        if (searchResult.TryGetProperty("artist", out var artists))
+                        {
+                            foreach (var artist in artists.EnumerateArray())
+                            {
+                                localArtists.Add(ConvertSubsonicJsonElement(artist, true));
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Parser XML Subsonic
+                    var xmlDoc = XDocument.Parse(subsonicContent);
+                    var ns = xmlDoc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                    var searchResult = xmlDoc.Descendants(ns + "searchResult3").FirstOrDefault();
+                    
+                    if (searchResult != null)
+                    {
+                        foreach (var song in searchResult.Elements(ns + "song"))
+                        {
+                            localSongs.Add(ConvertSubsonicXmlElement(song, "song"));
+                        }
+                        foreach (var album in searchResult.Elements(ns + "album"))
+                        {
+                            localAlbums.Add(ConvertSubsonicXmlElement(album, "album"));
+                        }
+                        foreach (var artist in searchResult.Elements(ns + "artist"))
+                        {
+                            localArtists.Add(ConvertSubsonicXmlElement(artist, "artist"));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log l'erreur mais continue avec les résultats externes
+                Console.WriteLine($"Error parsing Subsonic response: {ex.Message}");
+            }
+        }
+
+        // Fusionner: résultats locaux en premier, puis externes
         if (format == "json")
         {
+            var mergedSongs = localSongs
+                .Concat(externalResult.Songs.Select(s => ConvertSongToSubsonicJson(s)))
+                .ToList();
+            var mergedAlbums = localAlbums
+                .Concat(externalResult.Albums.Select(a => ConvertAlbumToSubsonicJson(a)))
+                .ToList();
+            var mergedArtists = localArtists
+                .Concat(externalResult.Artists.Select(a => ConvertArtistToSubsonicJson(a)))
+                .ToList();
+
             var response = new
             {
                 subsonicResponse = new
@@ -362,14 +445,12 @@ public class SubsonicController : ControllerBase
                     version = "1.16.1",
                     searchResult3 = new
                     {
-                        song = externalResult.Songs.Select(s => ConvertSongToSubsonicJson(s)).ToList(),
-                        album = externalResult.Albums.Select(a => ConvertAlbumToSubsonicJson(a)).ToList(),
-                        artist = externalResult.Artists.Select(a => ConvertArtistToSubsonicJson(a)).ToList()
+                        song = mergedSongs,
+                        album = mergedAlbums,
+                        artist = mergedArtists
                     }
                 }
             };
-
-            // TODO: Fusionner avec les résultats Subsonic si disponibles
             
             return Ok(response);
         }
@@ -377,20 +458,77 @@ public class SubsonicController : ControllerBase
         {
             // Format XML
             var ns = XNamespace.Get("http://subsonic.org/restapi");
+            
+            var searchResult3 = new XElement(ns + "searchResult3");
+            
+            // Ajouter les artistes locaux puis externes
+            foreach (var artist in localArtists.Cast<XElement>())
+            {
+                artist.Name = ns + "artist";
+                searchResult3.Add(artist);
+            }
+            foreach (var artist in externalResult.Artists)
+            {
+                searchResult3.Add(ConvertArtistToSubsonicXml(artist, ns));
+            }
+            
+            // Ajouter les albums locaux puis externes
+            foreach (var album in localAlbums.Cast<XElement>())
+            {
+                album.Name = ns + "album";
+                searchResult3.Add(album);
+            }
+            foreach (var album in externalResult.Albums)
+            {
+                searchResult3.Add(ConvertAlbumToSubsonicXml(album, ns));
+            }
+            
+            // Ajouter les chansons locales puis externes
+            foreach (var song in localSongs.Cast<XElement>())
+            {
+                song.Name = ns + "song";
+                searchResult3.Add(song);
+            }
+            foreach (var song in externalResult.Songs)
+            {
+                searchResult3.Add(ConvertSongToSubsonicXml(song, ns));
+            }
+
             var doc = new XDocument(
                 new XElement(ns + "subsonic-response",
                     new XAttribute("status", "ok"),
                     new XAttribute("version", "1.16.1"),
-                    new XElement(ns + "searchResult3",
-                        externalResult.Artists.Select(a => ConvertArtistToSubsonicXml(a, ns)),
-                        externalResult.Albums.Select(a => ConvertAlbumToSubsonicXml(a, ns)),
-                        externalResult.Songs.Select(s => ConvertSongToSubsonicXml(s, ns))
-                    )
+                    searchResult3
                 )
             );
 
             return Content(doc.ToString(), "application/xml");
         }
+    }
+
+    private object ConvertSubsonicJsonElement(JsonElement element, bool isLocal)
+    {
+        var dict = new Dictionary<string, object>();
+        foreach (var prop in element.EnumerateObject())
+        {
+            dict[prop.Name] = prop.Value.ValueKind switch
+            {
+                JsonValueKind.String => prop.Value.GetString() ?? "",
+                JsonValueKind.Number => prop.Value.TryGetInt32(out var i) ? i : prop.Value.GetDouble(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => prop.Value.ToString()
+            };
+        }
+        dict["isExternal"] = !isLocal;
+        return dict;
+    }
+
+    private XElement ConvertSubsonicXmlElement(XElement element, string type)
+    {
+        var newElement = new XElement(element);
+        newElement.SetAttributeValue("isExternal", "false");
+        return newElement;
     }
 
     private object ConvertSongToSubsonicJson(Song song)
