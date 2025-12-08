@@ -278,12 +278,40 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        // Cover externe - récupérer l'URL depuis les métadonnées
+        // Cover externe - essayer track, album, puis artist
+        string? coverUrl = null;
+        
+        // Essayer en tant que track
         var song = await _metadataService.GetSongAsync(provider!, externalId!);
         if (song?.CoverArtUrl != null)
         {
+            coverUrl = song.CoverArtUrl;
+        }
+        
+        // Si pas trouvé, essayer en tant qu'album
+        if (coverUrl == null)
+        {
+            var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
+            if (album?.CoverArtUrl != null)
+            {
+                coverUrl = album.CoverArtUrl;
+            }
+        }
+        
+        // Si pas trouvé, essayer en tant qu'artiste
+        if (coverUrl == null)
+        {
+            var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
+            if (artist?.ImageUrl != null)
+            {
+                coverUrl = artist.ImageUrl;
+            }
+        }
+        
+        if (coverUrl != null)
+        {
             // Proxy l'image
-            var response = await _httpClient.GetAsync(song.CoverArtUrl);
+            var response = await _httpClient.GetAsync(coverUrl);
             if (response.IsSuccessStatusCode)
             {
                 var imageBytes = await response.Content.ReadAsByteArrayAsync();
