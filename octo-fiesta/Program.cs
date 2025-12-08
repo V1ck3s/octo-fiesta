@@ -17,7 +17,7 @@ builder.Services.Configure<SubsonicSettings>(
 // Services métier
 builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
 builder.Services.AddScoped<IMusicMetadataService, DeezerMetadataService>();
-builder.Services.AddScoped<IDownloadService, DeezspotDownloadService>();
+builder.Services.AddScoped<IDownloadService, DeezerDownloadService>();
 
 builder.Services.AddCors(options =>
 {
