@@ -1,4 +1,5 @@
 using octo_fiesta.Models;
+using octo_fiesta.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,8 +10,14 @@ builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Configuration
 builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
+
+// Services métier
+builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
+builder.Services.AddScoped<IMusicMetadataService, DeezerMetadataService>();
+builder.Services.AddScoped<IDownloadService, DeezspotDownloadService>();
 
 builder.Services.AddCors(options =>
 {
