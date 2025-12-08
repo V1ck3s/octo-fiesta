@@ -88,17 +88,6 @@ public class SubsonicController : ControllerBase
         return (body, contentType);
     }
 
-    [HttpGet, HttpPost]
-    [Route("ping")]
-    public async Task<IActionResult> Ping()
-    {
-        var parameters = await ExtractAllParameters();
-        var xml = await RelayToSubsonic("ping", parameters);
-        var doc = XDocument.Parse((string)xml.Body);
-        var status = doc.Root?.Attribute("status")?.Value;
-        return Ok(new { status });
-    }
-
     /// <summary>
     /// Endpoint search3 personnalisé - fusionne les résultats locaux et externes
     /// </summary>
@@ -755,15 +744,18 @@ public class SubsonicController : ControllerBase
     public async Task<IActionResult> GenericEndpoint(string endpoint)
     {
         var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+        
         try
         {
             var result = await RelayToSubsonic(endpoint, parameters);
-            var contentType = result.ContentType ?? $"application/{parameters.GetValueOrDefault("f", "xml")}";
+            var contentType = result.ContentType ?? $"application/{format}";
             return File((byte[])result.Body, contentType);
         }
         catch (HttpRequestException ex)
         {
-            return BadRequest(new { error = $"Error while calling Subsonic: {ex.Message}" });
+            // Return Subsonic-compatible error response
+            return CreateSubsonicError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }
     }
 }
