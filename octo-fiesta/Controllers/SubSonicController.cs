@@ -100,15 +100,28 @@ public class SubsonicController : ControllerBase
         var query = parameters.GetValueOrDefault("query", "");
         var format = parameters.GetValueOrDefault("f", "xml");
         
-        if (string.IsNullOrWhiteSpace(query))
+        // Nettoyer la query (enlever les guillemets vides)
+        var cleanQuery = query.Trim().Trim('"');
+        
+        // Si la query est vide, relayer directement vers Subsonic (browse all songs)
+        if (string.IsNullOrWhiteSpace(cleanQuery))
         {
-            return CreateSubsonicResponse(format, "searchResult3", new { });
+            try
+            {
+                var result = await RelayToSubsonic("rest/search3", parameters);
+                var contentType = result.ContentType ?? $"application/{format}";
+                return File((byte[])result.Body, contentType);
+            }
+            catch
+            {
+                return CreateSubsonicResponse(format, "searchResult3", new { });
+            }
         }
 
         // Lancer les deux recherches en parallèle
         var subsonicTask = RelayToSubsonicSafe("rest/search3", parameters);
         var externalTask = _metadataService.SearchAllAsync(
-            query,
+            cleanQuery,
             int.TryParse(parameters.GetValueOrDefault("songCount", "20"), out var sc) ? sc : 20,
             int.TryParse(parameters.GetValueOrDefault("albumCount", "20"), out var ac) ? ac : 20,
             int.TryParse(parameters.GetValueOrDefault("artistCount", "20"), out var arc) ? arc : 20
