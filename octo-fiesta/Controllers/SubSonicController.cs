@@ -536,17 +536,25 @@ public class SubsonicController : ControllerBase
         var dict = new Dictionary<string, object>();
         foreach (var prop in element.EnumerateObject())
         {
-            dict[prop.Name] = prop.Value.ValueKind switch
-            {
-                JsonValueKind.String => prop.Value.GetString() ?? "",
-                JsonValueKind.Number => prop.Value.TryGetInt32(out var i) ? i : prop.Value.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => prop.Value.ToString()
-            };
+            dict[prop.Name] = ConvertJsonValue(prop.Value);
         }
         dict["isExternal"] = !isLocal;
         return dict;
+    }
+
+    private object ConvertJsonValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? "",
+            JsonValueKind.Number => value.TryGetInt32(out var i) ? i : value.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Array => value.EnumerateArray().Select(ConvertJsonValue).ToList(),
+            JsonValueKind.Object => value.EnumerateObject().ToDictionary(p => p.Name, p => ConvertJsonValue(p.Value)),
+            JsonValueKind.Null => null!,
+            _ => value.ToString()
+        };
     }
 
     private XElement ConvertSubsonicXmlElement(XElement element, string type)
