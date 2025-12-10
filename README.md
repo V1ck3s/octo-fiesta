@@ -126,12 +126,24 @@ dotnet test
 
 ## CORS Configuration
 
-The application is configured with permissive CORS settings to allow requests from any origin. Modify the CORS policy in `Program.cs` for production use:
+The application is configured with permissive CORS settings to allow requests from any origin. This is useful for development but should be restricted for production use.
+
+Current configuration in `Program.cs`:
 
 ```csharp
 policy.AllowAnyOrigin()
     .AllowAnyMethod()
-    .AllowAnyHeader();
+    .AllowAnyHeader()
+    .WithExposedHeaders("X-Content-Duration", "X-Total-Count", "X-Nd-Authorization");
+```
+
+For production, consider restricting origins:
+
+```csharp
+policy.WithOrigins("https://your-frontend-domain.com")
+    .AllowAnyMethod()
+    .AllowAnyHeader()
+    .WithExposedHeaders("X-Content-Duration", "X-Total-Count", "X-Nd-Authorization");
 ```
 
 ## License
