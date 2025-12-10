@@ -32,19 +32,26 @@ dotnet restore
 
 ## Configuration
 
-Configure the Subsonic server URL in `appsettings.json`:
+Add the Subsonic server configuration to `appsettings.json`:
 
 ```json
 {
   "Subsonic": {
     "Url": "http://your-subsonic-server:4533"
-  }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
 }
 ```
 
-Alternatively, set the environment variable:
+Or use an environment variable (recommended for production):
 ```bash
-export SUBSONIC_URL="http://your-subsonic-server:4533"
+export Subsonic__Url="http://your-subsonic-server:4533"
 ```
 
 ## Usage
@@ -97,7 +104,7 @@ curl "http://localhost:5274/getMusicFolders?u=username&p=password&c=client&v=1.1
 ```
 octo-fiesta/
 ├── Controllers/
-│   └── SubsonicController.cs  # Main API controller
+│   └── SubSonicController.cs  # Main API controller
 ├── Models/
 │   └── SubsonicSettings.cs    # Configuration model
 ├── Program.cs                  # Application entry point
