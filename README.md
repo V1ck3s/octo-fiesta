@@ -1,10 +1,12 @@
 # Octo-Fiesta
 
-A lightweight ASP.NET Core proxy/relay service for Subsonic API servers. This application acts as an intermediary between clients and Subsonic-compatible music streaming servers, forwarding API requests and responses.
+A lightweight ASP.NET Core bridge service that extends Subsonic API servers with streaming and downloading capabilities for music not available locally. This application acts as an intermediary between Subsonic-compatible clients and music servers, maintaining full API compatibility while adding new features for accessing external music sources.
 
 ## Features
 
-- 🔄 Full Subsonic API relay support
+- 🎵 **Stream and download music not available locally** - Access external music sources through the Subsonic API
+- 🔄 Full Subsonic API compatibility - Works seamlessly with existing Subsonic clients
+- 🌉 Bridge architecture - Maintains API compatibility while extending functionality
 - 🌐 CORS enabled for cross-origin requests
 - 📝 Swagger/OpenAPI documentation (in development mode)
 - 🔌 HTTP and HTTPS support
@@ -77,15 +79,27 @@ dotnet run --configuration Release
 
 ### API Endpoints
 
-The proxy forwards all Subsonic API endpoints. Common examples:
+The application uses a **wildcard endpoint pattern** to forward all Subsonic API calls, with specific endpoints overloaded for enhanced functionality:
 
-- **Ping**: `GET/POST /ping` - Test server connectivity
-- **Get Music Folders**: `GET/POST /getMusicFolders`
-- **Get Artists**: `GET/POST /getArtists`
-- **Get Album**: `GET/POST /getAlbum?id={albumId}`
-- **Stream**: `GET/POST /stream?id={trackId}`
+#### Overloaded Endpoints
 
-All parameters (query or JSON body) are forwarded to the configured Subsonic server.
+- **`/ping`** - Test server connectivity with custom response parsing
+  - Parses XML response and returns status
+  - Supports both GET and POST methods
+
+#### Wildcard Endpoint
+
+- **`/{**endpoint}`** - Generic handler for all other Subsonic API endpoints
+  - Forwards all parameters (query and JSON body) to the configured Subsonic server
+  - Returns raw response with appropriate content type
+  - Supports streaming (`/stream`) and download operations
+  - Handles all standard Subsonic API calls:
+    - `/getMusicFolders` - Get music folders
+    - `/getArtists` - Get artists
+    - `/getAlbum?id={albumId}` - Get album details
+    - `/stream?id={trackId}` - Stream music tracks
+    - `/download?id={trackId}` - Download music files
+    - And all other Subsonic API endpoints
 
 ### Example Requests
 
