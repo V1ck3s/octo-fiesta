@@ -367,20 +367,15 @@ public class DeezerDownloadService : IDownloadService
             _ => ".mp3"
         };
 
-        // Générer le nom de fichier
-        var safeTitle = SanitizeFileName(song.Title);
-        var safeArtist = SanitizeFileName(song.Artist);
-        var fileName = $"{safeArtist} - {safeTitle}{extension}";
-        var outputPath = Path.Combine(_downloadPath, fileName);
-
-        // Éviter les conflits
-        var counter = 1;
-        while (File.Exists(outputPath))
-        {
-            fileName = $"{safeArtist} - {safeTitle} ({counter}){extension}";
-            outputPath = Path.Combine(_downloadPath, fileName);
-            counter++;
-        }
+        // Build organized folder structure: Artist/Album/Track
+        var outputPath = PathHelper.BuildTrackPath(_downloadPath, song.Artist, song.Album, song.Title, song.Track, extension);
+        
+        // Create directories if they don't exist
+        var albumFolder = Path.GetDirectoryName(outputPath)!;
+        EnsureDirectoryExists(albumFolder);
+        
+        // Resolve unique path if file already exists
+        outputPath = PathHelper.ResolveUniquePath(outputPath);
 
         // Télécharger le fichier chiffré
         var response = await RetryWithBackoffAsync(async () =>
@@ -543,8 +538,72 @@ public class DeezerDownloadService : IDownloadService
         }
     }
 
-    private string SanitizeFileName(string fileName)
+    /// <summary>
+    /// Ensures a directory exists, creating it and all parent directories if necessary.
+    /// Handles errors gracefully.
+    /// </summary>
+    private void EnsureDirectoryExists(string path)
     {
+        try
+        {
+            if (!Directory.Exists(path))
+            {
+                Directory.CreateDirectory(path);
+                _logger.LogDebug("Created directory: {Path}", path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create directory: {Path}", path);
+            throw;
+        }
+    }
+
+    #endregion
+
+    private class DownloadResult
+    {
+        public string DownloadUrl { get; set; } = string.Empty;
+        public string Format { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Artist { get; set; } = string.Empty;
+    }
+}
+
+/// <summary>
+/// Helper class for path building and sanitization.
+/// Extracted for testability.
+/// </summary>
+public static class PathHelper
+{
+    /// <summary>
+    /// Builds the output path for a downloaded track following the Artist/Album/Track structure.
+    /// </summary>
+    public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension)
+    {
+        var safeArtist = SanitizeFolderName(artist);
+        var safeAlbum = SanitizeFolderName(album);
+        var safeTitle = SanitizeFileName(title);
+        
+        var artistFolder = Path.Combine(downloadPath, safeArtist);
+        var albumFolder = Path.Combine(artistFolder, safeAlbum);
+        
+        var trackPrefix = trackNumber.HasValue ? $"{trackNumber:D2} - " : "";
+        var fileName = $"{trackPrefix}{safeTitle}{extension}";
+        
+        return Path.Combine(albumFolder, fileName);
+    }
+
+    /// <summary>
+    /// Sanitizes a file name by removing invalid characters.
+    /// </summary>
+    public static string SanitizeFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return "Unknown";
+        }
+        
         var invalidChars = Path.GetInvalidFileNameChars();
         var sanitized = new string(fileName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
@@ -558,13 +617,65 @@ public class DeezerDownloadService : IDownloadService
         return sanitized.Trim();
     }
 
-    #endregion
-
-    private class DownloadResult
+    /// <summary>
+    /// Sanitizes a folder name by removing invalid path characters.
+    /// Similar to SanitizeFileName but also handles additional folder-specific constraints.
+    /// </summary>
+    public static string SanitizeFolderName(string folderName)
     {
-        public string DownloadUrl { get; set; } = string.Empty;
-        public string Format { get; set; } = string.Empty;
-        public string Title { get; set; } = string.Empty;
-        public string Artist { get; set; } = string.Empty;
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return "Unknown";
+        }
+        
+        var invalidChars = Path.GetInvalidFileNameChars()
+            .Concat(Path.GetInvalidPathChars())
+            .Distinct()
+            .ToArray();
+            
+        var sanitized = new string(folderName
+            .Select(c => invalidChars.Contains(c) ? '_' : c)
+            .ToArray());
+        
+        // Remove leading/trailing dots and spaces (Windows folder restrictions)
+        sanitized = sanitized.Trim().TrimEnd('.');
+        
+        if (sanitized.Length > 100)
+        {
+            sanitized = sanitized.Substring(0, 100).TrimEnd('.');
+        }
+        
+        // Ensure we have a valid name
+        if (string.IsNullOrWhiteSpace(sanitized))
+        {
+            return "Unknown";
+        }
+        
+        return sanitized;
+    }
+
+    /// <summary>
+    /// Resolves a unique file path by appending a counter if the file already exists.
+    /// </summary>
+    public static string ResolveUniquePath(string basePath)
+    {
+        if (!File.Exists(basePath))
+        {
+            return basePath;
+        }
+        
+        var directory = Path.GetDirectoryName(basePath)!;
+        var extension = Path.GetExtension(basePath);
+        var fileNameWithoutExt = Path.GetFileNameWithoutExtension(basePath);
+        
+        var counter = 1;
+        string uniquePath;
+        do
+        {
+            uniquePath = Path.Combine(directory, $"{fileNameWithoutExt} ({counter}){extension}");
+            counter++;
+        } while (File.Exists(uniquePath));
+        
+        return uniquePath;
     }
 }
