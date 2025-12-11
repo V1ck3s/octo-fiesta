@@ -203,6 +203,7 @@ public class LocalLibraryServiceTests : IDisposable
     [InlineData("ext-deezer-123", true, "deezer", "123")]
     [InlineData("ext-spotify-abc123", true, "spotify", "abc123")]
     [InlineData("ext-tidal-999-888", true, "tidal", "999-888")]
+    [InlineData("ext-deezer-song-123456", true, "deezer", "123456")]  // New format - extracts numeric ID
     [InlineData("123456", false, null, null)]
     [InlineData("", false, null, null)]
     [InlineData("ext-", false, null, null)]
@@ -215,6 +216,29 @@ public class LocalLibraryServiceTests : IDisposable
         // Assert
         Assert.Equal(expectedIsExternal, isExternal);
         Assert.Equal(expectedProvider, provider);
+        Assert.Equal(expectedExternalId, externalId);
+    }
+
+    [Theory]
+    [InlineData("ext-deezer-song-123456", true, "deezer", "song", "123456")]
+    [InlineData("ext-deezer-album-789012", true, "deezer", "album", "789012")]
+    [InlineData("ext-deezer-artist-259", true, "deezer", "artist", "259")]
+    [InlineData("ext-spotify-song-abc123", true, "spotify", "song", "abc123")]
+    [InlineData("ext-deezer-123", true, "deezer", "song", "123")]  // Legacy format defaults to song
+    [InlineData("ext-tidal-999", true, "tidal", "song", "999")]    // Legacy format defaults to song
+    [InlineData("123456", false, null, null, null)]
+    [InlineData("", false, null, null, null)]
+    [InlineData("ext-", false, null, null, null)]
+    [InlineData("ext-deezer", false, null, null, null)]
+    public void ParseExternalId_VariousInputs_ReturnsExpected(string id, bool expectedIsExternal, string? expectedProvider, string? expectedType, string? expectedExternalId)
+    {
+        // Act
+        var (isExternal, provider, type, externalId) = _service.ParseExternalId(id);
+
+        // Assert
+        Assert.Equal(expectedIsExternal, isExternal);
+        Assert.Equal(expectedProvider, provider);
+        Assert.Equal(expectedType, type);
         Assert.Equal(expectedExternalId, externalId);
     }
 }

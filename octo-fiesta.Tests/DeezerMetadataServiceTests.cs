@@ -52,7 +52,7 @@ public class DeezerMetadataServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Single(result);
-        Assert.Equal("ext-deezer-123456", result[0].Id);
+        Assert.Equal("ext-deezer-song-123456", result[0].Id);
         Assert.Equal("Test Song", result[0].Title);
         Assert.Equal("Test Artist", result[0].Artist);
         Assert.Equal("Test Album", result[0].Album);
@@ -89,7 +89,7 @@ public class DeezerMetadataServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Single(result);
-        Assert.Equal("ext-deezer-456789", result[0].Id);
+        Assert.Equal("ext-deezer-album-456789", result[0].Id);
         Assert.Equal("Test Album", result[0].Title);
         Assert.Equal("Test Artist", result[0].Artist);
         Assert.Equal(12, result[0].SongCount);
@@ -123,7 +123,7 @@ public class DeezerMetadataServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Single(result);
-        Assert.Equal("ext-deezer-789012", result[0].Id);
+        Assert.Equal("ext-deezer-artist-789012", result[0].Id);
         Assert.Equal("Test Artist", result[0].Name);
         Assert.Equal(5, result[0].AlbumCount);
         Assert.False(result[0].IsLocal);
@@ -167,7 +167,7 @@ public class DeezerMetadataServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("ext-deezer-123456", result.Id);
+        Assert.Equal("ext-deezer-song-123456", result.Id);
         Assert.Equal("Test Song", result.Title);
     }
 
@@ -254,7 +254,7 @@ public class DeezerMetadataServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("ext-deezer-456789", result.Id);
+        Assert.Equal("ext-deezer-album-456789", result.Id);
         Assert.Equal("Test Album", result.Title);
         Assert.Equal("Test Artist", result.Artist);
         Assert.Equal(2, result.Songs.Count);

@@ -31,6 +31,13 @@ public interface ILocalLibraryService
     (bool isExternal, string? provider, string? externalId) ParseSongId(string songId);
     
     /// <summary>
+    /// Parse un ID externe pour extraire le provider, le type et l'ID
+    /// Format: ext-{provider}-{type}-{id} (ex: ext-deezer-artist-259, ext-deezer-album-96126, ext-deezer-song-12345)
+    /// Also supports legacy format: ext-{provider}-{id} (assumes song type)
+    /// </summary>
+    (bool isExternal, string? provider, string? type, string? externalId) ParseExternalId(string id);
+    
+    /// <summary>
     /// Déclenche un scan de la bibliothèque Subsonic
     /// </summary>
     Task<bool> TriggerLibraryScanAsync();
@@ -129,16 +136,42 @@ public class LocalLibraryService : ILocalLibraryService
 
     public (bool isExternal, string? provider, string? externalId) ParseSongId(string songId)
     {
-        if (songId.StartsWith("ext-"))
+        var (isExternal, provider, type, externalId) = ParseExternalId(songId);
+        return (isExternal, provider, externalId);
+    }
+
+    public (bool isExternal, string? provider, string? type, string? externalId) ParseExternalId(string id)
+    {
+        if (!id.StartsWith("ext-"))
         {
-            var parts = songId.Split('-', 3);
-            if (parts.Length == 3)
-            {
-                return (true, parts[1], parts[2]);
-            }
+            return (false, null, null, null);
         }
         
-        return (false, null, null);
+        var parts = id.Split('-');
+        
+        // Known types for the new format
+        var knownTypes = new HashSet<string> { "song", "album", "artist" };
+        
+        // New format: ext-{provider}-{type}-{id} (e.g., ext-deezer-artist-259)
+        // Only use new format if parts[2] is a known type
+        if (parts.Length >= 4 && knownTypes.Contains(parts[2]))
+        {
+            var provider = parts[1];
+            var type = parts[2];
+            var externalId = string.Join("-", parts.Skip(3)); // Handle IDs with dashes
+            return (true, provider, type, externalId);
+        }
+        
+        // Legacy format: ext-{provider}-{id} (assumes "song" type for backward compatibility)
+        // This handles both 3-part IDs and 4+ part IDs where parts[2] is NOT a known type
+        if (parts.Length >= 3)
+        {
+            var provider = parts[1];
+            var externalId = string.Join("-", parts.Skip(2)); // Everything after provider is the ID
+            return (true, provider, "song", externalId);
+        }
+        
+        return (false, null, null, null);
     }
 
     private async Task<Dictionary<string, LocalSongMapping>> LoadMappingsAsync()

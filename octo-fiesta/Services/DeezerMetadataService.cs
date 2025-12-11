@@ -221,19 +221,19 @@ public class DeezerMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-deezer-{externalId}",
+            Id = $"ext-deezer-song-{externalId}",
             Title = track.GetProperty("title").GetString() ?? "",
             Artist = track.TryGetProperty("artist", out var artist) 
                 ? artist.GetProperty("name").GetString() ?? "" 
                 : "",
             ArtistId = track.TryGetProperty("artist", out var artistForId) 
-                ? $"ext-deezer-{artistForId.GetProperty("id").GetInt64()}" 
+                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
                 : null,
             Album = track.TryGetProperty("album", out var album) 
                 ? album.GetProperty("title").GetString() ?? "" 
                 : "",
             AlbumId = track.TryGetProperty("album", out var albumForId) 
-                ? $"ext-deezer-{albumForId.GetProperty("id").GetInt64()}" 
+                ? $"ext-deezer-album-{albumForId.GetProperty("id").GetInt64()}" 
                 : null,
             Duration = track.TryGetProperty("duration", out var duration) 
                 ? duration.GetInt32() 
@@ -255,13 +255,13 @@ public class DeezerMetadataService : IMusicMetadataService
         
         return new Album
         {
-            Id = $"ext-deezer-{externalId}",
+            Id = $"ext-deezer-album-{externalId}",
             Title = album.GetProperty("title").GetString() ?? "",
             Artist = album.TryGetProperty("artist", out var artist) 
                 ? artist.GetProperty("name").GetString() ?? "" 
                 : "",
             ArtistId = album.TryGetProperty("artist", out var artistForId) 
-                ? $"ext-deezer-{artistForId.GetProperty("id").GetInt64()}" 
+                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
                 : null,
             Year = album.TryGetProperty("release_date", out var releaseDate) 
                 ? int.TryParse(releaseDate.GetString()?.Split('-')[0], out var year) ? year : null
@@ -289,7 +289,7 @@ public class DeezerMetadataService : IMusicMetadataService
         
         return new Artist
         {
-            Id = $"ext-deezer-{externalId}",
+            Id = $"ext-deezer-artist-{externalId}",
             Name = artist.GetProperty("name").GetString() ?? "",
             ImageUrl = artist.TryGetProperty("picture_medium", out var picture)
                 ? picture.GetString()

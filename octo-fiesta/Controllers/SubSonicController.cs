@@ -474,7 +474,8 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Proxies external covers. Tries album first since same ID could match a different track on Deezer.
+    /// Proxies external covers. Uses type from ID to determine which API to call.
+    /// Format: ext-{provider}-{type}-{id} (e.g., ext-deezer-artist-259, ext-deezer-album-96126)
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getCoverArt")]
@@ -489,7 +490,7 @@ public class SubsonicController : ControllerBase
             return NotFound();
         }
 
-        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+        var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
 
         if (!isExternal)
         {
@@ -507,28 +508,43 @@ public class SubsonicController : ControllerBase
 
         string? coverUrl = null;
         
-        var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
-        if (album?.CoverArtUrl != null)
+        // Use type to determine which API to call first
+        switch (type)
         {
-            coverUrl = album.CoverArtUrl;
-        }
-        
-        if (coverUrl == null)
-        {
-            var song = await _metadataService.GetSongAsync(provider!, externalId!);
-            if (song?.CoverArtUrl != null)
-            {
-                coverUrl = song.CoverArtUrl;
-            }
-        }
-        
-        if (coverUrl == null)
-        {
-            var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
-            if (artist?.ImageUrl != null)
-            {
-                coverUrl = artist.ImageUrl;
-            }
+            case "artist":
+                var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
+                if (artist?.ImageUrl != null)
+                {
+                    coverUrl = artist.ImageUrl;
+                }
+                break;
+                
+            case "album":
+                var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
+                if (album?.CoverArtUrl != null)
+                {
+                    coverUrl = album.CoverArtUrl;
+                }
+                break;
+                
+            case "song":
+            default:
+                // For songs, try to get from song first, then album
+                var song = await _metadataService.GetSongAsync(provider!, externalId!);
+                if (song?.CoverArtUrl != null)
+                {
+                    coverUrl = song.CoverArtUrl;
+                }
+                else
+                {
+                    // Fallback: try album with same ID (legacy behavior)
+                    var albumFallback = await _metadataService.GetAlbumAsync(provider!, externalId!);
+                    if (albumFallback?.CoverArtUrl != null)
+                    {
+                        coverUrl = albumFallback.CoverArtUrl;
+                    }
+                }
+                break;
         }
         
         if (coverUrl != null)
