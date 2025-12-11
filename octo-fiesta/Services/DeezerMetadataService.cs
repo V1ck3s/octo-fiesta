@@ -157,9 +157,12 @@ public class DeezerMetadataService : IMusicMetadataService
         if (albumElement.TryGetProperty("tracks", out var tracks) && 
             tracks.TryGetProperty("data", out var tracksData))
         {
+            int trackIndex = 1;
             foreach (var track in tracksData.EnumerateArray())
             {
-                album.Songs.Add(ParseDeezerTrack(track));
+                // Pass the index as fallback for track_position (Deezer doesn't include it in album tracks)
+                album.Songs.Add(ParseDeezerTrack(track, trackIndex));
+                trackIndex++;
             }
         }
         
@@ -207,9 +210,14 @@ public class DeezerMetadataService : IMusicMetadataService
         return albums;
     }
 
-    private Song ParseDeezerTrack(JsonElement track)
+    private Song ParseDeezerTrack(JsonElement track, int? fallbackTrackNumber = null)
     {
         var externalId = track.GetProperty("id").GetInt64().ToString();
+        
+        // Try to get track_position from API, fallback to provided index
+        int? trackNumber = track.TryGetProperty("track_position", out var trackPos) 
+            ? trackPos.GetInt32() 
+            : fallbackTrackNumber;
         
         return new Song
         {
@@ -230,9 +238,7 @@ public class DeezerMetadataService : IMusicMetadataService
             Duration = track.TryGetProperty("duration", out var duration) 
                 ? duration.GetInt32() 
                 : null,
-            Track = track.TryGetProperty("track_position", out var trackPos) 
-                ? trackPos.GetInt32() 
-                : null,
+            Track = trackNumber,
             CoverArtUrl = track.TryGetProperty("album", out var albumForCover) && 
                           albumForCover.TryGetProperty("cover_medium", out var cover)
                 ? cover.GetString()

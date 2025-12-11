@@ -832,7 +832,8 @@ public class SubsonicController : ControllerBase
             track = song.Track ?? 0,
             year = song.Year ?? 0,
             coverArt = song.Id, // Utilisé pour getCoverArt
-            suffix = "mp3",
+            suffix = song.IsLocal ? "mp3" : "Remote",
+            bitRate = song.IsLocal ? (int?)null : 0, // 0 for remote tracks
             contentType = "audio/mpeg",
             type = "music",
             isVideo = false,
