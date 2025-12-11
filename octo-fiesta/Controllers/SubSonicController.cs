@@ -89,7 +89,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint search3 personnalisé - fusionne les résultats locaux et externes
+    /// Merges local and external search results.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/search3")]
@@ -100,10 +100,8 @@ public class SubsonicController : ControllerBase
         var query = parameters.GetValueOrDefault("query", "");
         var format = parameters.GetValueOrDefault("f", "xml");
         
-        // Nettoyer la query (enlever les guillemets vides)
         var cleanQuery = query.Trim().Trim('"');
         
-        // Si la query est vide, relayer directement vers Subsonic (browse all songs)
         if (string.IsNullOrWhiteSpace(cleanQuery))
         {
             try
@@ -118,7 +116,6 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        // Lancer les deux recherches en parallèle
         var subsonicTask = RelayToSubsonicSafe("rest/search3", parameters);
         var externalTask = _metadataService.SearchAllAsync(
             cleanQuery,
@@ -132,12 +129,11 @@ public class SubsonicController : ControllerBase
         var subsonicResult = await subsonicTask;
         var externalResult = await externalTask;
 
-        // Fusionner les résultats
         return MergeSearchResults(subsonicResult, externalResult, format);
     }
 
     /// <summary>
-    /// Endpoint stream personnalisé - télécharge à la volée si nécessaire
+    /// Downloads on-the-fly if needed.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/stream")]
@@ -156,21 +152,17 @@ public class SubsonicController : ControllerBase
 
         if (!isExternal)
         {
-            // Chanson locale - relayer vers Subsonic
             return await RelayStreamToSubsonic(parameters);
         }
 
-        // Chanson externe - vérifier si déjà téléchargée
         var localPath = await _localLibraryService.GetLocalPathForExternalSongAsync(provider!, externalId!);
 
         if (localPath != null && System.IO.File.Exists(localPath))
         {
-            // Fichier déjà disponible localement
             var stream = System.IO.File.OpenRead(localPath);
             return File(stream, GetContentType(localPath), enableRangeProcessing: true);
         }
 
-        // Télécharger et streamer à la volée
         try
         {
             var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, HttpContext.RequestAborted);
@@ -183,7 +175,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint getSong personnalisé - retourne les infos d'une chanson externe si nécessaire
+    /// Returns external song info if needed.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getSong")]
@@ -203,13 +195,11 @@ public class SubsonicController : ControllerBase
 
         if (!isExternal)
         {
-            // Chanson locale - relayer vers Subsonic
             var result = await RelayToSubsonic("rest/getSong", parameters);
             var contentType = result.ContentType ?? $"application/{format}";
             return File((byte[])result.Body, contentType);
         }
 
-        // Chanson externe - récupérer depuis le service de métadonnées
         var song = await _metadataService.GetSongAsync(provider!, externalId!);
 
         if (song == null)
@@ -221,7 +211,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint getArtist personnalisé - fusionne les albums locaux et Deezer
+    /// Merges local and Deezer albums.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getArtist")]
@@ -241,7 +231,6 @@ public class SubsonicController : ControllerBase
 
         if (isExternal)
         {
-            // Artiste externe - récupérer depuis Deezer avec ses albums
             var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
             if (artist == null)
             {
@@ -252,7 +241,6 @@ public class SubsonicController : ControllerBase
             return CreateSubsonicArtistResponse(format, artist, albums);
         }
 
-        // Artiste local - récupérer depuis Navidrome puis enrichir avec Deezer
         var navidromeResult = await RelayToSubsonicSafe("rest/getArtist", parameters);
         
         if (!navidromeResult.Success || navidromeResult.Body == null)
@@ -260,7 +248,6 @@ public class SubsonicController : ControllerBase
             return CreateSubsonicError(format, 70, "Artist not found");
         }
 
-        // Parser la réponse Navidrome pour extraire le nom de l'artiste et les albums locaux
         var navidromeContent = Encoding.UTF8.GetString(navidromeResult.Body);
         string artistName = "";
         var localAlbums = new List<object>();
@@ -273,11 +260,8 @@ public class SubsonicController : ControllerBase
                 response.TryGetProperty("artist", out var artistElement))
             {
                 artistName = artistElement.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "";
-                
-                // Convertir les données de l'artiste
                 artistData = ConvertSubsonicJsonElement(artistElement, true);
                 
-                // Extraire les albums locaux
                 if (artistElement.TryGetProperty("album", out var albums))
                 {
                     foreach (var album in albums.EnumerateArray())
@@ -290,25 +274,21 @@ public class SubsonicController : ControllerBase
 
         if (string.IsNullOrEmpty(artistName) || artistData == null)
         {
-            // Retourner la réponse Navidrome telle quelle si on ne peut pas parser
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
 
-        // Chercher l'artiste sur Deezer pour obtenir ses albums
         var deezerArtists = await _metadataService.SearchArtistsAsync(artistName, 1);
         var deezerAlbums = new List<Album>();
         
         if (deezerArtists.Count > 0)
         {
             var deezerArtist = deezerArtists[0];
-            // Vérifier que c'est bien le même artiste (nom similaire)
             if (deezerArtist.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
             {
                 deezerAlbums = await _metadataService.GetArtistAlbumsAsync("deezer", deezerArtist.ExternalId!);
             }
         }
 
-        // Fusionner: albums locaux en premier, puis albums Deezer non présents localement
         var localAlbumNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var album in localAlbums)
         {
@@ -321,14 +301,12 @@ public class SubsonicController : ControllerBase
         var mergedAlbums = localAlbums.ToList();
         foreach (var deezerAlbum in deezerAlbums)
         {
-            // Ne pas ajouter si un album avec le même nom existe déjà localement
             if (!localAlbumNames.Contains(deezerAlbum.Title))
             {
                 mergedAlbums.Add(ConvertAlbumToSubsonicJson(deezerAlbum));
             }
         }
 
-        // Construire la réponse avec les albums fusionnés
         if (artistData is Dictionary<string, object> artistDict)
         {
             artistDict["album"] = mergedAlbums;
@@ -344,7 +322,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint getAlbum personnalisé - enrichit avec les chansons Deezer si nécessaire
+    /// Enriches local albums with Deezer songs.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getAlbum")]
@@ -364,7 +342,6 @@ public class SubsonicController : ControllerBase
 
         if (isExternal)
         {
-            // Album externe - récupérer depuis le service de métadonnées
             var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
 
             if (album == null)
@@ -375,7 +352,6 @@ public class SubsonicController : ControllerBase
             return CreateSubsonicAlbumResponse(format, album);
         }
 
-        // Album local - récupérer depuis Navidrome puis enrichir avec Deezer
         var navidromeResult = await RelayToSubsonicSafe("rest/getAlbum", parameters);
         
         if (!navidromeResult.Success || navidromeResult.Body == null)
@@ -383,7 +359,6 @@ public class SubsonicController : ControllerBase
             return CreateSubsonicError(format, 70, "Album not found");
         }
 
-        // Parser la réponse Navidrome pour extraire les infos de l'album et les chansons locales
         var navidromeContent = Encoding.UTF8.GetString(navidromeResult.Body);
         string albumName = "";
         string artistName = "";
@@ -398,11 +373,8 @@ public class SubsonicController : ControllerBase
             {
                 albumName = albumElement.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "";
                 artistName = albumElement.TryGetProperty("artist", out var artist) ? artist.GetString() ?? "" : "";
-                
-                // Convertir les données de l'album
                 albumData = ConvertSubsonicJsonElement(albumElement, true);
                 
-                // Extraire les chansons locales
                 if (albumElement.TryGetProperty("song", out var songs))
                 {
                     foreach (var song in songs.EnumerateArray())
@@ -415,29 +387,26 @@ public class SubsonicController : ControllerBase
 
         if (string.IsNullOrEmpty(albumName) || string.IsNullOrEmpty(artistName) || albumData == null)
         {
-            // Retourner la réponse Navidrome telle quelle si on ne peut pas parser
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
 
-        // Chercher l'album sur Deezer pour obtenir toutes les chansons
         var searchQuery = $"{artistName} {albumName}";
         var deezerAlbums = await _metadataService.SearchAlbumsAsync(searchQuery, 5);
         Album? deezerAlbum = null;
         
-        // Trouver l'album correspondant sur Deezer (même artiste et nom similaire)
+        // Find matching album on Deezer (exact match first)
         foreach (var candidate in deezerAlbums)
         {
             if (candidate.Artist != null && 
                 candidate.Artist.Equals(artistName, StringComparison.OrdinalIgnoreCase) &&
                 candidate.Title.Equals(albumName, StringComparison.OrdinalIgnoreCase))
             {
-                // Récupérer l'album complet avec toutes les chansons
                 deezerAlbum = await _metadataService.GetAlbumAsync("deezer", candidate.ExternalId!);
                 break;
             }
         }
 
-        // Si pas trouvé avec correspondance exacte, essayer une correspondance plus souple
+        // Fallback to fuzzy match
         if (deezerAlbum == null)
         {
             foreach (var candidate in deezerAlbums)
@@ -453,10 +422,8 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        // Si on a trouvé l'album Deezer, fusionner les chansons
         if (deezerAlbum != null && deezerAlbum.Songs.Count > 0)
         {
-            // Créer un set des titres de chansons locales pour déduplication
             var localSongTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var song in localSongs)
             {
@@ -466,7 +433,6 @@ public class SubsonicController : ControllerBase
                 }
             }
 
-            // Ajouter les chansons Deezer qui ne sont pas déjà locales
             var mergedSongs = localSongs.ToList();
             foreach (var deezerSong in deezerAlbum.Songs)
             {
@@ -476,20 +442,17 @@ public class SubsonicController : ControllerBase
                 }
             }
 
-            // Trier par numéro de piste
             mergedSongs = mergedSongs
                 .OrderBy(s => s is Dictionary<string, object> dict && dict.TryGetValue("track", out var track) 
                     ? Convert.ToInt32(track) 
                     : 0)
                 .ToList();
 
-            // Mettre à jour les données de l'album avec les chansons fusionnées
             if (albumData is Dictionary<string, object> albumDict)
             {
                 albumDict["song"] = mergedSongs;
                 albumDict["songCount"] = mergedSongs.Count;
                 
-                // Recalculer la durée totale
                 var totalDuration = 0;
                 foreach (var song in mergedSongs)
                 {
@@ -511,7 +474,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Endpoint getCoverArt personnalisé - proxy les covers externes
+    /// Proxies external covers. Tries album first since same ID could match a different track on Deezer.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getCoverArt")]
@@ -530,7 +493,6 @@ public class SubsonicController : ControllerBase
 
         if (!isExternal)
         {
-            // Cover local - relayer vers Subsonic
             try
             {
                 var result = await RelayToSubsonic("rest/getCoverArt", parameters);
@@ -543,27 +505,23 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        // Cover externe - essayer track, album, puis artist
         string? coverUrl = null;
         
-        // Essayer en tant que track
-        var song = await _metadataService.GetSongAsync(provider!, externalId!);
-        if (song?.CoverArtUrl != null)
+        var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
+        if (album?.CoverArtUrl != null)
         {
-            coverUrl = song.CoverArtUrl;
+            coverUrl = album.CoverArtUrl;
         }
         
-        // Si pas trouvé, essayer en tant qu'album
         if (coverUrl == null)
         {
-            var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
-            if (album?.CoverArtUrl != null)
+            var song = await _metadataService.GetSongAsync(provider!, externalId!);
+            if (song?.CoverArtUrl != null)
             {
-                coverUrl = album.CoverArtUrl;
+                coverUrl = song.CoverArtUrl;
             }
         }
         
-        // Si pas trouvé, essayer en tant qu'artiste
         if (coverUrl == null)
         {
             var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
@@ -575,7 +533,6 @@ public class SubsonicController : ControllerBase
         
         if (coverUrl != null)
         {
-            // Proxy l'image
             var response = await _httpClient.GetAsync(coverUrl);
             if (response.IsSuccessStatusCode)
             {
@@ -634,7 +591,6 @@ public class SubsonicController : ControllerBase
         SearchResult externalResult,
         string format)
     {
-        // Parser les résultats Subsonic si disponibles
         var localSongs = new List<object>();
         var localAlbums = new List<object>();
         var localArtists = new List<object>();
@@ -647,7 +603,6 @@ public class SubsonicController : ControllerBase
                 
                 if (format == "json" || subsonicResult.ContentType?.Contains("json") == true)
                 {
-                    // Parser JSON Subsonic
                     var jsonDoc = JsonDocument.Parse(subsonicContent);
                     if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
                         response.TryGetProperty("searchResult3", out var searchResult))
@@ -677,7 +632,6 @@ public class SubsonicController : ControllerBase
                 }
                 else
                 {
-                    // Parser XML Subsonic
                     var xmlDoc = XDocument.Parse(subsonicContent);
                     var ns = xmlDoc.Root?.GetDefaultNamespace() ?? XNamespace.None;
                     var searchResult = xmlDoc.Descendants(ns + "searchResult3").FirstOrDefault();
@@ -701,12 +655,10 @@ public class SubsonicController : ControllerBase
             }
             catch (Exception ex)
             {
-                // Log l'erreur mais continue avec les résultats externes
                 Console.WriteLine($"Error parsing Subsonic response: {ex.Message}");
             }
         }
 
-        // Fusionner: résultats locaux en premier, puis externes
         if (format == "json")
         {
             var mergedSongs = localSongs
@@ -733,12 +685,10 @@ public class SubsonicController : ControllerBase
         }
         else
         {
-            // Format XML
             var ns = XNamespace.Get("http://subsonic.org/restapi");
             
             var searchResult3 = new XElement(ns + "searchResult3");
             
-            // Ajouter les artistes locaux puis externes
             foreach (var artist in localArtists.Cast<XElement>())
             {
                 artist.Name = ns + "artist";
@@ -749,7 +699,6 @@ public class SubsonicController : ControllerBase
                 searchResult3.Add(ConvertArtistToSubsonicXml(artist, ns));
             }
             
-            // Ajouter les albums locaux puis externes
             foreach (var album in localAlbums.Cast<XElement>())
             {
                 album.Name = ns + "album";
@@ -760,7 +709,6 @@ public class SubsonicController : ControllerBase
                 searchResult3.Add(ConvertAlbumToSubsonicXml(album, ns));
             }
             
-            // Ajouter les chansons locales puis externes
             foreach (var song in localSongs.Cast<XElement>())
             {
                 song.Name = ns + "song";
@@ -831,9 +779,9 @@ public class SubsonicController : ControllerBase
             duration = song.Duration ?? 0,
             track = song.Track ?? 0,
             year = song.Year ?? 0,
-            coverArt = song.Id, // Utilisé pour getCoverArt
+            coverArt = song.Id,
             suffix = song.IsLocal ? "mp3" : "Remote",
-            bitRate = song.IsLocal ? (int?)null : 0, // 0 for remote tracks
+            bitRate = song.IsLocal ? (int?)null : 0,
             contentType = "audio/mpeg",
             type = "music",
             isVideo = false,
@@ -908,7 +856,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Crée une réponse JSON Subsonic avec la clé "subsonic-response" (avec tiret)
+    /// Creates a JSON Subsonic response with "subsonic-response" key (with hyphen).
     /// </summary>
     private IActionResult CreateSubsonicJsonResponse(object responseContent)
     {
