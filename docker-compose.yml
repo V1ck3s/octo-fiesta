@@ -1,0 +1,19 @@
+services:
+  octo-fiesta:
+    build: .
+    container_name: octo-fiesta
+    restart: unless-stopped
+    ports:
+      - "5274:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # Navidrome/Subsonic server URL
+      - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
+      # Download path inside container
+      - Library__DownloadPath=/app/downloads
+      # Deezer ARL token (required)
+      - Deezer__Arl=${DEEZER_ARL}
+      # Fallback ARL token (optional)
+      - Deezer__ArlFallback=${DEEZER_ARL_FALLBACK:-}
+    volumes:
+      - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
