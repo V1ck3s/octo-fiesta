@@ -11,7 +11,7 @@ using IOFile = System.IO.File;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Configuration pour le téléchargeur Deezer
+/// Configuration for the Deezer downloader
 /// </summary>
 public class DeezerDownloaderSettings
 {
@@ -21,8 +21,8 @@ public class DeezerDownloaderSettings
 }
 
 /// <summary>
-/// Port C# du DeezerDownloader JavaScript
-/// Gère l'authentification Deezer, le téléchargement et le déchiffrement des pistes
+/// C# port of the DeezerDownloader JavaScript
+/// Handles Deezer authentication, track downloading and decryption
 /// </summary>
 public class DeezerDownloadService : IDownloadService
 {
@@ -84,7 +84,7 @@ public class DeezerDownloadService : IDownloadService
 
         var songId = $"ext-{externalProvider}-{externalId}";
         
-        // Vérifier si déjà téléchargé
+        // Check if already downloaded
         var existingPath = await _localLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
         if (existingPath != null && IOFile.Exists(existingPath))
         {
@@ -92,7 +92,7 @@ public class DeezerDownloadService : IDownloadService
             return existingPath;
         }
 
-        // Vérifier si téléchargement en cours
+        // Check if download in progress
         if (_activeDownloads.TryGetValue(songId, out var activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
         {
             _logger.LogInformation("Download already in progress for {SongId}", songId);
@@ -112,7 +112,7 @@ public class DeezerDownloadService : IDownloadService
         await _downloadLock.WaitAsync(cancellationToken);
         try
         {
-            // Récupérer les métadonnées
+            // Get metadata
             var song = await _metadataService.GetSongAsync(externalProvider, externalId);
             if (song == null)
             {
@@ -140,7 +140,7 @@ public class DeezerDownloadService : IDownloadService
                 song.LocalPath = localPath;
                 await _localLibraryService.RegisterDownloadedSongAsync(song, localPath);
                 
-                // Déclencher un rescan de la bibliothèque Subsonic (avec debounce)
+                // Trigger a Subsonic library rescan (with debounce)
                 _ = _localLibraryService.TriggerLibraryScanAsync();
                 
                 _logger.LogInformation("Download completed: {Path}", localPath);
@@ -362,7 +362,7 @@ public class DeezerDownloadService : IDownloadService
         _logger.LogInformation("Track token obtained for: {Title} - {Artist}", downloadInfo.Title, downloadInfo.Artist);
         _logger.LogInformation("Using format: {Format}", downloadInfo.Format);
 
-        // Déterminer l'extension basée sur le format
+        // Determine extension based on format
         var extension = downloadInfo.Format?.ToUpper() switch
         {
             "FLAC" => ".flac",
@@ -379,7 +379,7 @@ public class DeezerDownloadService : IDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
 
-        // Télécharger le fichier chiffré
+        // Download the encrypted file
         var response = await RetryWithBackoffAsync(async () =>
         {
             var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
@@ -391,23 +391,23 @@ public class DeezerDownloadService : IDownloadService
 
         response.EnsureSuccessStatusCode();
 
-        // Télécharger et déchiffrer
+        // Download and decrypt
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var outputFile = IOFile.Create(outputPath);
         
         await DecryptAndWriteStreamAsync(responseStream, outputFile, trackId, cancellationToken);
         
-        // Fermer le fichier avant d'écrire les métadonnées
+        // Close file before writing metadata
         await outputFile.DisposeAsync();
         
-        // Écrire les métadonnées et la cover art
+        // Write metadata and cover art
         await WriteMetadataAsync(outputPath, song, cancellationToken);
 
         return outputPath;
     }
 
     /// <summary>
-    /// Écrit les métadonnées ID3/Vorbis et la cover art dans le fichier audio
+    /// Writes ID3/Vorbis metadata and cover art to the audio file
     /// </summary>
     private async Task WriteMetadataAsync(string filePath, Song song, CancellationToken cancellationToken)
     {
@@ -417,12 +417,12 @@ public class DeezerDownloadService : IDownloadService
             
             using var tagFile = TagLib.File.Create(filePath);
             
-            // Métadonnées de base
+            // Basic metadata
             tagFile.Tag.Title = song.Title;
             tagFile.Tag.Performers = new[] { song.Artist };
             tagFile.Tag.Album = song.Album;
             
-            // Album artist (peut différer de l'artiste du track pour les compilations)
+            // Album artist (may differ from track artist for compilations)
             if (!string.IsNullOrEmpty(song.AlbumArtist))
             {
                 tagFile.Tag.AlbumArtists = new[] { song.AlbumArtist };
@@ -432,25 +432,25 @@ public class DeezerDownloadService : IDownloadService
                 tagFile.Tag.AlbumArtists = new[] { song.Artist };
             }
             
-            // Numéro de piste
+            // Track number
             if (song.Track.HasValue)
             {
                 tagFile.Tag.Track = (uint)song.Track.Value;
             }
             
-            // Nombre total de pistes
+            // Total track count
             if (song.TotalTracks.HasValue)
             {
                 tagFile.Tag.TrackCount = (uint)song.TotalTracks.Value;
             }
             
-            // Numéro de disque
+            // Disc number
             if (song.DiscNumber.HasValue)
             {
                 tagFile.Tag.Disc = (uint)song.DiscNumber.Value;
             }
             
-            // Année
+            // Year
             if (song.Year.HasValue)
             {
                 tagFile.Tag.Year = (uint)song.Year.Value;
@@ -468,15 +468,15 @@ public class DeezerDownloadService : IDownloadService
                 tagFile.Tag.BeatsPerMinute = (uint)song.Bpm.Value;
             }
             
-            // ISRC (stocké dans le commentaire si pas de champ dédié, ou via MusicBrainz ID)
-            // TagLib ne supporte pas directement l'ISRC, mais on peut l'ajouter au commentaire
+            // ISRC (stored in comment if no dedicated field, or via MusicBrainz ID)
+            // TagLib doesn't directly support ISRC, but we can add it to comments
             var comments = new List<string>();
             if (!string.IsNullOrEmpty(song.Isrc))
             {
                 comments.Add($"ISRC: {song.Isrc}");
             }
             
-            // Contributeurs dans le commentaire
+            // Contributors in comments
             if (song.Contributors.Count > 0)
             {
                 tagFile.Tag.Composers = song.Contributors.ToArray();
@@ -488,13 +488,13 @@ public class DeezerDownloadService : IDownloadService
                 tagFile.Tag.Copyright = song.Copyright;
             }
             
-            // Commentaire avec infos supplémentaires
+            // Comment with additional info
             if (comments.Count > 0)
             {
                 tagFile.Tag.Comment = string.Join(" | ", comments);
             }
             
-            // Télécharger et intégrer la cover art
+            // Download and embed cover art
             var coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
             if (!string.IsNullOrEmpty(coverUrl))
             {
@@ -521,19 +521,19 @@ public class DeezerDownloadService : IDownloadService
                 }
             }
             
-            // Sauvegarder les modifications
+            // Save changes
             tagFile.Save();
             _logger.LogInformation("Metadata written successfully to: {Path}", filePath);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to write metadata to: {Path}", filePath);
-            // Ne pas propager l'erreur - le fichier est téléchargé, juste sans métadonnées
+            // Don't propagate the error - the file is downloaded, just without metadata
         }
     }
 
     /// <summary>
-    /// Télécharge la cover art depuis une URL
+    /// Downloads cover art from a URL
     /// </summary>
     private async Task<byte[]?> DownloadCoverArtAsync(string url, CancellationToken cancellationToken)
     {
@@ -587,7 +587,7 @@ public class DeezerDownloadService : IDownloadService
 
             var chunk = buffer.AsSpan(0, bytesRead).ToArray();
 
-            // Chaque 3ème chunk (index % 3 == 0) est chiffré
+            // Every 3rd chunk (index % 3 == 0) is encrypted
             if (chunkIndex % 3 == 0 && bytesRead == 2048)
             {
                 chunk = DecryptBlowfishCbc(chunk, bfKey, iv);

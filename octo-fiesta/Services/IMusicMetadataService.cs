@@ -3,51 +3,51 @@ using octo_fiesta.Models;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Interface pour le service de recherche de métadonnées musicales externes
+/// Interface for external music metadata search service
 /// (Deezer API, Spotify API, MusicBrainz, etc.)
 /// </summary>
 public interface IMusicMetadataService
 {
     /// <summary>
-    /// Recherche des chansons sur les providers externes
+    /// Searches for songs on external providers
     /// </summary>
-    /// <param name="query">Terme de recherche</param>
-    /// <param name="limit">Nombre maximum de résultats</param>
-    /// <returns>Liste des chansons trouvées</returns>
+    /// <param name="query">Search term</param>
+    /// <param name="limit">Maximum number of results</param>
+    /// <returns>List of found songs</returns>
     Task<List<Song>> SearchSongsAsync(string query, int limit = 20);
     
     /// <summary>
-    /// Recherche des albums sur les providers externes
+    /// Searches for albums on external providers
     /// </summary>
     Task<List<Album>> SearchAlbumsAsync(string query, int limit = 20);
     
     /// <summary>
-    /// Recherche des artistes sur les providers externes
+    /// Searches for artists on external providers
     /// </summary>
     Task<List<Artist>> SearchArtistsAsync(string query, int limit = 20);
     
     /// <summary>
-    /// Recherche combinée (chansons, albums, artistes)
+    /// Combined search (songs, albums, artists)
     /// </summary>
     Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20);
     
     /// <summary>
-    /// Récupère les détails d'une chanson externe
+    /// Gets details of an external song
     /// </summary>
     Task<Song?> GetSongAsync(string externalProvider, string externalId);
     
     /// <summary>
-    /// Récupère les détails d'un album externe avec ses chansons
+    /// Gets details of an external album with its songs
     /// </summary>
     Task<Album?> GetAlbumAsync(string externalProvider, string externalId);
     
     /// <summary>
-    /// Récupère les détails d'un artiste externe
+    /// Gets details of an external artist
     /// </summary>
     Task<Artist?> GetArtistAsync(string externalProvider, string externalId);
     
     /// <summary>
-    /// Récupère les albums d'un artiste
+    /// Gets an artist's albums
     /// </summary>
     Task<List<Album>> GetArtistAlbumsAsync(string externalProvider, string externalId);
 }

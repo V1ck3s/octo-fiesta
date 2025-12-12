@@ -1,13 +1,13 @@
 namespace octo_fiesta.Models;
 
 /// <summary>
-/// Représente une chanson (locale ou externe)
+/// Represents a song (local or external)
 /// </summary>
 public class Song
 {
     /// <summary>
-    /// ID unique. Pour les chansons externes, préfixé avec "ext-" + provider + "-" + id externe
-    /// Exemple: "ext-deezer-123456" ou "local-789"
+    /// Unique ID. For external songs, prefixed with "ext-" + provider + "-" + external id
+    /// Example: "ext-deezer-123456" or "local-789"
     /// </summary>
     public string Id { get; set; } = string.Empty;
     
@@ -16,7 +16,7 @@ public class Song
     public string? ArtistId { get; set; }
     public string Album { get; set; } = string.Empty;
     public string? AlbumId { get; set; }
-    public int? Duration { get; set; } // En secondes
+    public int? Duration { get; set; } // In seconds
     public int? Track { get; set; }
     public int? DiscNumber { get; set; }
     public int? TotalTracks { get; set; }
@@ -25,12 +25,12 @@ public class Song
     public string? CoverArtUrl { get; set; }
     
     /// <summary>
-    /// URL de la cover en haute résolution (pour embedding)
+    /// High-resolution cover art URL (for embedding)
     /// </summary>
     public string? CoverArtUrlLarge { get; set; }
     
     /// <summary>
-    /// BPM (beats per minute) si disponible
+    /// BPM (beats per minute) if available
     /// </summary>
     public int? Bpm { get; set; }
     
@@ -40,22 +40,22 @@ public class Song
     public string? Isrc { get; set; }
     
     /// <summary>
-    /// Date de sortie complète (format: YYYY-MM-DD)
+    /// Full release date (format: YYYY-MM-DD)
     /// </summary>
     public string? ReleaseDate { get; set; }
     
     /// <summary>
-    /// Nom de l'album artiste (peut différer de l'artiste du track)
+    /// Album artist name (may differ from track artist)
     /// </summary>
     public string? AlbumArtist { get; set; }
     
     /// <summary>
-    /// Compositeur(s)
+    /// Composer(s)
     /// </summary>
     public string? Composer { get; set; }
     
     /// <summary>
-    /// Label de l'album
+    /// Album label
     /// </summary>
     public string? Label { get; set; }
     
@@ -65,33 +65,33 @@ public class Song
     public string? Copyright { get; set; }
     
     /// <summary>
-    /// Artistes contributeurs (featurings, etc.)
+    /// Contributing artists (features, etc.)
     /// </summary>
     public List<string> Contributors { get; set; } = new();
     
     /// <summary>
-    /// Indique si la chanson est disponible localement ou doit être téléchargée
+    /// Indicates whether the song is available locally or needs to be downloaded
     /// </summary>
     public bool IsLocal { get; set; }
     
     /// <summary>
-    /// Provider externe (deezer, spotify, etc.) - null si local
+    /// External provider (deezer, spotify, etc.) - null if local
     /// </summary>
     public string? ExternalProvider { get; set; }
     
     /// <summary>
-    /// ID sur le provider externe (pour le téléchargement)
+    /// ID on the external provider (for downloading)
     /// </summary>
     public string? ExternalId { get; set; }
     
     /// <summary>
-    /// Chemin du fichier local (si disponible)
+    /// Local file path (if available)
     /// </summary>
     public string? LocalPath { get; set; }
 }
 
 /// <summary>
-/// Représente un artiste
+/// Represents an artist
 /// </summary>
 public class Artist
 {
@@ -105,7 +105,7 @@ public class Artist
 }
 
 /// <summary>
-/// Représente un album
+/// Represents an album
 /// </summary>
 public class Album
 {
@@ -124,7 +124,7 @@ public class Album
 }
 
 /// <summary>
-/// Résultat de recherche combinant résultats locaux et externes
+/// Search result combining local and external results
 /// </summary>
 public class SearchResult
 {
@@ -134,7 +134,7 @@ public class SearchResult
 }
 
 /// <summary>
-/// État du téléchargement d'une chanson
+/// Download status of a song
 /// </summary>
 public enum DownloadStatus
 {
@@ -145,7 +145,7 @@ public enum DownloadStatus
 }
 
 /// <summary>
-/// Information sur un téléchargement en cours ou terminé
+/// Information about an ongoing or completed download
 /// </summary>
 public class DownloadInfo
 {
@@ -153,7 +153,7 @@ public class DownloadInfo
     public string ExternalId { get; set; } = string.Empty;
     public string ExternalProvider { get; set; } = string.Empty;
     public DownloadStatus Status { get; set; }
-    public double Progress { get; set; } // 0.0 à 1.0
+    public double Progress { get; set; } // 0.0 to 1.0
     public string? LocalPath { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime StartedAt { get; set; }
@@ -161,7 +161,7 @@ public class DownloadInfo
 }
 
 /// <summary>
-/// Statut du scan de bibliothèque Subsonic
+/// Subsonic library scan status
 /// </summary>
 public class ScanStatus
 {

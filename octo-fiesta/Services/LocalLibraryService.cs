@@ -6,51 +6,51 @@ using octo_fiesta.Models;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Interface pour la gestion de la bibliothèque locale de musiques
+/// Interface for local music library management
 /// </summary>
 public interface ILocalLibraryService
 {
     /// <summary>
-    /// Vérifie si une chanson externe existe déjà localement
+    /// Checks if an external song already exists locally
     /// </summary>
     Task<string?> GetLocalPathForExternalSongAsync(string externalProvider, string externalId);
     
     /// <summary>
-    /// Enregistre une chanson téléchargée dans la bibliothèque locale
+    /// Registers a downloaded song in the local library
     /// </summary>
     Task RegisterDownloadedSongAsync(Song song, string localPath);
     
     /// <summary>
-    /// Récupère le mapping entre ID externe et ID local
+    /// Gets the mapping between external ID and local ID
     /// </summary>
     Task<string?> GetLocalIdForExternalSongAsync(string externalProvider, string externalId);
     
     /// <summary>
-    /// Parse un ID de chanson pour déterminer s'il est externe ou local
+    /// Parses a song ID to determine if it is external or local
     /// </summary>
     (bool isExternal, string? provider, string? externalId) ParseSongId(string songId);
     
     /// <summary>
-    /// Parse un ID externe pour extraire le provider, le type et l'ID
-    /// Format: ext-{provider}-{type}-{id} (ex: ext-deezer-artist-259, ext-deezer-album-96126, ext-deezer-song-12345)
+    /// Parses an external ID to extract the provider, type and ID
+    /// Format: ext-{provider}-{type}-{id} (e.g., ext-deezer-artist-259, ext-deezer-album-96126, ext-deezer-song-12345)
     /// Also supports legacy format: ext-{provider}-{id} (assumes song type)
     /// </summary>
     (bool isExternal, string? provider, string? type, string? externalId) ParseExternalId(string id);
     
     /// <summary>
-    /// Déclenche un scan de la bibliothèque Subsonic
+    /// Triggers a Subsonic library scan
     /// </summary>
     Task<bool> TriggerLibraryScanAsync();
     
     /// <summary>
-    /// Récupère le statut actuel du scan
+    /// Gets the current scan status
     /// </summary>
     Task<ScanStatus?> GetScanStatusAsync();
 }
 
 /// <summary>
-/// Implémentation du service de bibliothèque locale
-/// Utilise un fichier JSON simple pour stocker les mappings (peut être remplacé par une BDD)
+/// Local library service implementation
+/// Uses a simple JSON file to store mappings (can be replaced with a database)
 /// </summary>
 public class LocalLibraryService : ILocalLibraryService
 {
@@ -62,7 +62,7 @@ public class LocalLibraryService : ILocalLibraryService
     private Dictionary<string, LocalSongMapping>? _mappings;
     private readonly SemaphoreSlim _lock = new(1, 1);
     
-    // Debounce pour éviter de déclencher trop de scans
+    // Debounce to avoid triggering too many scans
     private DateTime _lastScanTrigger = DateTime.MinValue;
     private readonly TimeSpan _scanDebounceInterval = TimeSpan.FromSeconds(30);
 
@@ -128,8 +128,8 @@ public class LocalLibraryService : ILocalLibraryService
 
     public async Task<string?> GetLocalIdForExternalSongAsync(string externalProvider, string externalId)
     {
-        // Pour l'instant, on retourne null car on n'a pas encore d'intégration
-        // avec le serveur Subsonic pour récupérer l'ID local après scan
+        // For now, return null as we don't yet have integration
+        // with the Subsonic server to retrieve local ID after scan
         await Task.CompletedTask;
         return null;
     }
@@ -206,7 +206,7 @@ public class LocalLibraryService : ILocalLibraryService
 
     public async Task<bool> TriggerLibraryScanAsync()
     {
-        // Debounce: éviter de déclencher trop de scans successifs
+        // Debounce: avoid triggering too many successive scans
         var now = DateTime.UtcNow;
         if (now - _lastScanTrigger < _scanDebounceInterval)
         {
@@ -219,8 +219,8 @@ public class LocalLibraryService : ILocalLibraryService
         
         try
         {
-            // Appel à l'API Subsonic pour déclencher un scan
-            // Note: Les credentials doivent être passés en paramètres (u, p ou t+s)
+            // Call Subsonic API to trigger a scan
+            // Note: Credentials must be passed as parameters (u, p or t+s)
             var url = $"{_subsonicSettings.Url}/rest/startScan?f=json";
             
             _logger.LogInformation("Triggering Subsonic library scan...");
@@ -280,7 +280,7 @@ public class LocalLibraryService : ILocalLibraryService
 }
 
 /// <summary>
-/// Représente le mapping entre une chanson externe et son fichier local
+/// Represents the mapping between an external song and its local file
 /// </summary>
 public class LocalSongMapping
 {

@@ -14,7 +14,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
 
-// Services métier
+// Business services
 builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
 builder.Services.AddScoped<IMusicMetadataService, DeezerMetadataService>();
 builder.Services.AddScoped<IDownloadService, DeezerDownloadService>();

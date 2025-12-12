@@ -3,35 +3,35 @@ using octo_fiesta.Models;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Interface pour le service de téléchargement de musique (Deezspot ou autre)
+/// Interface for the music download service (Deezspot or other)
 /// </summary>
 public interface IDownloadService
 {
     /// <summary>
-    /// Télécharge une chanson depuis un provider externe
+    /// Downloads a song from an external provider
     /// </summary>
-    /// <param name="externalProvider">Le provider (deezer, spotify)</param>
-    /// <param name="externalId">L'ID sur le provider externe</param>
-    /// <param name="cancellationToken">Token d'annulation</param>
-    /// <returns>Le chemin du fichier téléchargé</returns>
+    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalId">The ID on the external provider</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>The path to the downloaded file</returns>
     Task<string> DownloadSongAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Télécharge une chanson et stream le résultat au fur et à mesure
+    /// Downloads a song and streams the result progressively
     /// </summary>
-    /// <param name="externalProvider">Le provider (deezer, spotify)</param>
-    /// <param name="externalId">L'ID sur le provider externe</param>
-    /// <param name="cancellationToken">Token d'annulation</param>
-    /// <returns>Un stream du fichier audio</returns>
+    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalId">The ID on the external provider</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>A stream of the audio file</returns>
     Task<Stream> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Vérifie si une chanson est en cours de téléchargement
+    /// Checks if a song is currently being downloaded
     /// </summary>
     DownloadInfo? GetDownloadStatus(string songId);
     
     /// <summary>
-    /// Vérifie si le service est correctement configuré et fonctionnel
+    /// Checks if the service is properly configured and functional
     /// </summary>
     Task<bool> IsAvailableAsync();
 }

@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Implémentation du service de métadonnées utilisant l'API Deezer (gratuite, pas besoin de clé)
+/// Metadata service implementation using the Deezer API (free, no key required)
 /// </summary>
 public class DeezerMetadataService : IMusicMetadataService
 {
@@ -105,7 +105,7 @@ public class DeezerMetadataService : IMusicMetadataService
 
     public async Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20)
     {
-        // Exécuter les recherches en parallèle
+        // Execute searches in parallel
         var songsTask = SearchSongsAsync(query, songLimit);
         var albumsTask = SearchAlbumsAsync(query, albumLimit);
         var artistsTask = SearchArtistsAsync(query, artistLimit);
@@ -134,11 +134,11 @@ public class DeezerMetadataService : IMusicMetadataService
         
         if (track.TryGetProperty("error", out _)) return null;
         
-        // Pour un track individuel, on récupère les métadonnées complètes
+        // For an individual track, get full metadata
         var song = ParseDeezerTrackFull(track);
         
-        // Récupérer les infos supplémentaires depuis l'album (genre, nombre total de tracks, label, copyright)
-        if (track.TryGetProperty("album", out var albumRef) && 
+        // Get additional info from album (genre, total track count, label, copyright)
+        if (track.TryGetProperty("album", out var albumRef) &&
             albumRef.TryGetProperty("id", out var albumIdEl))
         {
             var albumId = albumIdEl.GetInt64().ToString();
@@ -160,7 +160,7 @@ public class DeezerMetadataService : IMusicMetadataService
                         song.Genre = genreName.GetString();
                     }
                     
-                    // Nombre total de tracks
+                    // Total track count
                     if (albumData.TryGetProperty("nb_tracks", out var nbTracks))
                     {
                         song.TotalTracks = nbTracks.GetInt32();
@@ -172,7 +172,7 @@ public class DeezerMetadataService : IMusicMetadataService
                         song.Label = label.GetString();
                     }
                     
-                    // Cover art XL si pas déjà définie
+                    // Cover art XL if not already set
                     if (string.IsNullOrEmpty(song.CoverArtUrlLarge))
                     {
                         if (albumData.TryGetProperty("cover_xl", out var coverXl))
@@ -188,7 +188,7 @@ public class DeezerMetadataService : IMusicMetadataService
             }
             catch
             {
-                // Si on ne peut pas récupérer l'album, on continue avec les infos du track
+                // If we can't get the album, continue with track info only
             }
         }
         
@@ -211,8 +211,8 @@ public class DeezerMetadataService : IMusicMetadataService
         
         var album = ParseDeezerAlbum(albumElement);
         
-        // Récupérer les chansons de l'album
-        if (albumElement.TryGetProperty("tracks", out var tracks) && 
+        // Get album songs
+        if (albumElement.TryGetProperty("tracks", out var tracks) &&
             tracks.TryGetProperty("data", out var tracksData))
         {
             int trackIndex = 1;
@@ -308,8 +308,8 @@ public class DeezerMetadataService : IMusicMetadataService
     }
 
     /// <summary>
-    /// Parse un track Deezer avec toutes les métadonnées disponibles
-    /// Utilisé pour GetSongAsync qui retourne des données complètes
+    /// Parses a Deezer track with all available metadata
+    /// Used for GetSongAsync which returns complete data
     /// </summary>
     private Song ParseDeezerTrackFull(JsonElement track)
     {
@@ -371,7 +371,7 @@ public class DeezerMetadataService : IMusicMetadataService
             }
         }
         
-        // Album artist (premier artiste de l'album, ou artiste principal du track)
+        // Album artist (first artist from album, or main track artist)
         string? albumArtist = null;
         if (track.TryGetProperty("album", out var albumForArtist) && 
             albumForArtist.TryGetProperty("artist", out var albumArtistEl))
@@ -381,7 +381,7 @@ public class DeezerMetadataService : IMusicMetadataService
                 : null;
         }
         
-        // Cover art URLs (différentes tailles)
+        // Cover art URLs (different sizes)
         string? coverMedium = null;
         string? coverLarge = null;
         if (track.TryGetProperty("album", out var albumForCover))
