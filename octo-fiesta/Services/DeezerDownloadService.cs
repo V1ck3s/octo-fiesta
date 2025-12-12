@@ -5,6 +5,8 @@ using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using octo_fiesta.Models;
+using TagLib;
+using IOFile = System.IO.File;
 
 namespace octo_fiesta.Services;
 
@@ -84,7 +86,7 @@ public class DeezerDownloadService : IDownloadService
         
         // Vérifier si déjà téléchargé
         var existingPath = await _localLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
-        if (existingPath != null && File.Exists(existingPath))
+        if (existingPath != null && IOFile.Exists(existingPath))
         {
             _logger.LogInformation("Song already downloaded: {Path}", existingPath);
             return existingPath;
@@ -161,7 +163,7 @@ public class DeezerDownloadService : IDownloadService
     public async Task<Stream> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
     {
         var localPath = await DownloadSongAsync(externalProvider, externalId, cancellationToken);
-        return File.OpenRead(localPath);
+        return IOFile.OpenRead(localPath);
     }
 
     public DownloadInfo? GetDownloadStatus(string songId)
@@ -391,11 +393,161 @@ public class DeezerDownloadService : IDownloadService
 
         // Télécharger et déchiffrer
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var outputFile = File.Create(outputPath);
+        await using var outputFile = IOFile.Create(outputPath);
         
         await DecryptAndWriteStreamAsync(responseStream, outputFile, trackId, cancellationToken);
+        
+        // Fermer le fichier avant d'écrire les métadonnées
+        await outputFile.DisposeAsync();
+        
+        // Écrire les métadonnées et la cover art
+        await WriteMetadataAsync(outputPath, song, cancellationToken);
 
         return outputPath;
+    }
+
+    /// <summary>
+    /// Écrit les métadonnées ID3/Vorbis et la cover art dans le fichier audio
+    /// </summary>
+    private async Task WriteMetadataAsync(string filePath, Song song, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Writing metadata to: {Path}", filePath);
+            
+            using var tagFile = TagLib.File.Create(filePath);
+            
+            // Métadonnées de base
+            tagFile.Tag.Title = song.Title;
+            tagFile.Tag.Performers = new[] { song.Artist };
+            tagFile.Tag.Album = song.Album;
+            
+            // Album artist (peut différer de l'artiste du track pour les compilations)
+            if (!string.IsNullOrEmpty(song.AlbumArtist))
+            {
+                tagFile.Tag.AlbumArtists = new[] { song.AlbumArtist };
+            }
+            else
+            {
+                tagFile.Tag.AlbumArtists = new[] { song.Artist };
+            }
+            
+            // Numéro de piste
+            if (song.Track.HasValue)
+            {
+                tagFile.Tag.Track = (uint)song.Track.Value;
+            }
+            
+            // Nombre total de pistes
+            if (song.TotalTracks.HasValue)
+            {
+                tagFile.Tag.TrackCount = (uint)song.TotalTracks.Value;
+            }
+            
+            // Numéro de disque
+            if (song.DiscNumber.HasValue)
+            {
+                tagFile.Tag.Disc = (uint)song.DiscNumber.Value;
+            }
+            
+            // Année
+            if (song.Year.HasValue)
+            {
+                tagFile.Tag.Year = (uint)song.Year.Value;
+            }
+            
+            // Genre
+            if (!string.IsNullOrEmpty(song.Genre))
+            {
+                tagFile.Tag.Genres = new[] { song.Genre };
+            }
+            
+            // BPM
+            if (song.Bpm.HasValue)
+            {
+                tagFile.Tag.BeatsPerMinute = (uint)song.Bpm.Value;
+            }
+            
+            // ISRC (stocké dans le commentaire si pas de champ dédié, ou via MusicBrainz ID)
+            // TagLib ne supporte pas directement l'ISRC, mais on peut l'ajouter au commentaire
+            var comments = new List<string>();
+            if (!string.IsNullOrEmpty(song.Isrc))
+            {
+                comments.Add($"ISRC: {song.Isrc}");
+            }
+            
+            // Contributeurs dans le commentaire
+            if (song.Contributors.Count > 0)
+            {
+                tagFile.Tag.Composers = song.Contributors.ToArray();
+            }
+            
+            // Copyright
+            if (!string.IsNullOrEmpty(song.Copyright))
+            {
+                tagFile.Tag.Copyright = song.Copyright;
+            }
+            
+            // Commentaire avec infos supplémentaires
+            if (comments.Count > 0)
+            {
+                tagFile.Tag.Comment = string.Join(" | ", comments);
+            }
+            
+            // Télécharger et intégrer la cover art
+            var coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
+            if (!string.IsNullOrEmpty(coverUrl))
+            {
+                try
+                {
+                    var coverData = await DownloadCoverArtAsync(coverUrl, cancellationToken);
+                    if (coverData != null && coverData.Length > 0)
+                    {
+                        var mimeType = coverUrl.Contains(".png") ? "image/png" : "image/jpeg";
+                        var picture = new TagLib.Picture
+                        {
+                            Type = TagLib.PictureType.FrontCover,
+                            MimeType = mimeType,
+                            Description = "Cover",
+                            Data = new TagLib.ByteVector(coverData)
+                        };
+                        tagFile.Tag.Pictures = new TagLib.IPicture[] { picture };
+                        _logger.LogInformation("Cover art embedded: {Size} bytes", coverData.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to download cover art from {Url}", coverUrl);
+                }
+            }
+            
+            // Sauvegarder les modifications
+            tagFile.Save();
+            _logger.LogInformation("Metadata written successfully to: {Path}", filePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write metadata to: {Path}", filePath);
+            // Ne pas propager l'erreur - le fichier est téléchargé, juste sans métadonnées
+        }
+    }
+
+    /// <summary>
+    /// Télécharge la cover art depuis une URL
+    /// </summary>
+    private async Task<byte[]?> DownloadCoverArtAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download cover art from {Url}", url);
+            return null;
+        }
     }
 
     #endregion
@@ -659,7 +811,7 @@ public static class PathHelper
     /// </summary>
     public static string ResolveUniquePath(string basePath)
     {
-        if (!File.Exists(basePath))
+        if (!IOFile.Exists(basePath))
         {
             return basePath;
         }
@@ -674,7 +826,7 @@ public static class PathHelper
         {
             uniquePath = Path.Combine(directory, $"{fileNameWithoutExt} ({counter}){extension}");
             counter++;
-        } while (File.Exists(uniquePath));
+        } while (IOFile.Exists(uniquePath));
         
         return uniquePath;
     }

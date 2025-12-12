@@ -18,9 +18,56 @@ public class Song
     public string? AlbumId { get; set; }
     public int? Duration { get; set; } // En secondes
     public int? Track { get; set; }
+    public int? DiscNumber { get; set; }
+    public int? TotalTracks { get; set; }
     public int? Year { get; set; }
     public string? Genre { get; set; }
     public string? CoverArtUrl { get; set; }
+    
+    /// <summary>
+    /// URL de la cover en haute résolution (pour embedding)
+    /// </summary>
+    public string? CoverArtUrlLarge { get; set; }
+    
+    /// <summary>
+    /// BPM (beats per minute) si disponible
+    /// </summary>
+    public int? Bpm { get; set; }
+    
+    /// <summary>
+    /// ISRC (International Standard Recording Code)
+    /// </summary>
+    public string? Isrc { get; set; }
+    
+    /// <summary>
+    /// Date de sortie complète (format: YYYY-MM-DD)
+    /// </summary>
+    public string? ReleaseDate { get; set; }
+    
+    /// <summary>
+    /// Nom de l'album artiste (peut différer de l'artiste du track)
+    /// </summary>
+    public string? AlbumArtist { get; set; }
+    
+    /// <summary>
+    /// Compositeur(s)
+    /// </summary>
+    public string? Composer { get; set; }
+    
+    /// <summary>
+    /// Label de l'album
+    /// </summary>
+    public string? Label { get; set; }
+    
+    /// <summary>
+    /// Copyright
+    /// </summary>
+    public string? Copyright { get; set; }
+    
+    /// <summary>
+    /// Artistes contributeurs (featurings, etc.)
+    /// </summary>
+    public List<string> Contributors { get; set; } = new();
     
     /// <summary>
     /// Indique si la chanson est disponible localement ou doit être téléchargée
