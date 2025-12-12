@@ -1,0 +1,223 @@
+# Octo-Fiesta
+
+A Subsonic API proxy server that transparently integrates Deezer as a music source. When a song is not available in your local Navidrome library, it is automatically fetched from Deezer, downloaded, and served to your Subsonic-compatible client.
+
+## Features
+
+- **Transparent Proxy**: Acts as a middleware between Subsonic clients (like Aonsoku, Sublime Music, etc.) and your Navidrome server
+- **Deezer Integration**: Seamlessly searches and streams music from Deezer when not available locally
+- **Automatic Downloads**: Songs are downloaded on-the-fly and cached for future use
+- **Full Metadata Embedding**: Downloaded files include complete ID3 tags (title, artist, album, track number, year, genre, BPM, ISRC, etc.) and embedded cover art
+- **Organized Library**: Downloads are saved in a clean `Artist/Album/Track.mp3` folder structure
+- **Artist Deduplication**: Merges local and Deezer artists to avoid duplicates in search results
+- **Album Enrichment**: Local albums are enriched with missing tracks from Deezer
+- **Cover Art Proxy**: Serves cover art for external content transparently
+
+## Architecture
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Subsonic       │────▶│   Octo-Fiesta    │────▶│   Navidrome     │
+│  Client         │◀────│   (Proxy)        │◀────│   Server        │
+│  (Aonsoku)      │     │                  │     │                 │
+└─────────────────┘     └────────┬─────────┘     └─────────────────┘
+                                 │
+                                 ▼
+                        ┌─────────────────┐
+                        │   Deezer API    │
+                        │   (Metadata +   │
+                        │    Downloads)   │
+                        └─────────────────┘
+```
+
+## Requirements
+
+- [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- A running [Navidrome](https://www.navidrome.org/) server
+- A Deezer ARL token (for downloading)
+
+## Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-username/octo-fiesta.git
+   cd octo-fiesta
+   ```
+
+2. **Restore dependencies**
+   ```bash
+   dotnet restore
+   ```
+
+3. **Configure the application**
+   
+   Edit `octo-fiesta/appsettings.json`:
+   ```json
+   {
+     "Subsonic": {
+       "Url": "http://your-navidrome-server:4533"
+     },
+     "Library": {
+       "DownloadPath": "./downloads"
+     },
+     "Deezer": {
+       "Arl": "your-deezer-arl-token",
+       "ArlFallback": ""
+     }
+   }
+   ```
+
+4. **Run the server**
+   ```bash
+   cd octo-fiesta
+   dotnet run
+   ```
+   
+   The proxy will start on `http://localhost:5274` by default.
+
+5. **Configure your Subsonic client**
+   
+   Point your Subsonic client to `http://localhost:5274` instead of your Navidrome server directly.
+
+## Configuration
+
+### Subsonic Settings
+
+| Setting | Description |
+|---------|-------------|
+| `Subsonic:Url` | URL of your Navidrome/Subsonic server |
+
+### Library Settings
+
+| Setting | Description |
+|---------|-------------|
+| `Library:DownloadPath` | Directory where downloaded songs are stored |
+
+### Deezer Settings
+
+| Setting | Description |
+|---------|-------------|
+| `Deezer:Arl` | Your Deezer ARL token (required for downloads) |
+| `Deezer:ArlFallback` | Backup ARL token if primary fails |
+
+### Getting a Deezer ARL Token
+
+1. Log in to [Deezer](https://www.deezer.com) in your browser
+2. Open Developer Tools (F12)
+3. Go to Application > Cookies > `https://www.deezer.com`
+4. Find the `arl` cookie and copy its value
+
+> **Note**: ARL tokens expire periodically and need to be refreshed.
+
+## API Endpoints
+
+The proxy implements the Subsonic API and adds transparent Deezer integration to:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /rest/search3` | Merged search results from Navidrome + Deezer |
+| `GET /rest/stream` | Streams audio, downloading from Deezer if needed |
+| `GET /rest/getSong` | Returns song details (local or Deezer) |
+| `GET /rest/getAlbum` | Returns album with tracks from both sources |
+| `GET /rest/getArtist` | Returns artist with albums from both sources |
+| `GET /rest/getCoverArt` | Proxies cover art for external content |
+
+All other Subsonic API endpoints are passed through to Navidrome unchanged.
+
+## External ID Format
+
+External (Deezer) content uses typed IDs:
+
+| Type | Format | Example |
+|------|--------|---------|
+| Song | `ext-deezer-song-{id}` | `ext-deezer-song-123456` |
+| Album | `ext-deezer-album-{id}` | `ext-deezer-album-789012` |
+| Artist | `ext-deezer-artist-{id}` | `ext-deezer-artist-259` |
+
+Legacy format `ext-deezer-{id}` is also supported (assumes song type).
+
+## Download Folder Structure
+
+Downloaded music is organized as:
+```
+downloads/
+├── Artist Name/
+│   ├── Album Title/
+│   │   ├── 01 - Track One.mp3
+│   │   ├── 02 - Track Two.mp3
+│   │   └── ...
+│   └── Another Album/
+│       └── ...
+└── Another Artist/
+    └── ...
+```
+
+## Metadata Embedding
+
+Downloaded files include:
+- **Basic**: Title, Artist, Album, Album Artist
+- **Track Info**: Track Number, Total Tracks, Disc Number
+- **Dates**: Year, Release Date
+- **Audio**: BPM, Duration
+- **Identifiers**: ISRC (in comments)
+- **Credits**: Contributors/Composers
+- **Visual**: Embedded cover art (high resolution)
+- **Rights**: Copyright, Label
+
+## Development
+
+### Build
+```bash
+dotnet build
+```
+
+### Run Tests
+```bash
+dotnet test
+```
+
+### Project Structure
+
+```
+octo-fiesta/
+├── Controllers/
+│   └── SubsonicController.cs    # Main API controller
+├── Models/
+│   ├── MusicModels.cs           # Song, Album, Artist, etc.
+│   └── SubsonicSettings.cs      # Configuration model
+├── Services/
+│   ├── DeezerDownloadService.cs # Deezer download & decryption
+│   ├── DeezerMetadataService.cs # Deezer API integration
+│   ├── IDownloadService.cs      # Download interface
+│   ├── IMusicMetadataService.cs # Metadata interface
+│   └── LocalLibraryService.cs   # Local file management
+├── Program.cs                   # Application entry point
+└── appsettings.json             # Configuration
+
+octo-fiesta.Tests/
+├── DeezerDownloadServiceTests.cs
+├── DeezerMetadataServiceTests.cs
+└── LocalLibraryServiceTests.cs
+```
+
+### Dependencies
+
+- **BouncyCastle.Cryptography** - Blowfish decryption for Deezer streams
+- **TagLibSharp** - ID3 tag and cover art embedding
+- **Swashbuckle.AspNetCore** - Swagger/OpenAPI documentation
+
+## Limitations
+
+- **Playlist Search**: Subsonic clients like Aonsoku filter playlists client-side from a cached `getPlaylists` call. Deezer playlists appear in global search (`search3`) but not in the Playlists tab filter.
+- **Region Restrictions**: Some Deezer tracks may be unavailable depending on your region.
+- **ARL Expiration**: Deezer ARL tokens expire and need periodic refresh.
+
+## License
+
+MIT
+
+## Acknowledgments
+
+- [Navidrome](https://www.navidrome.org/) - The excellent self-hosted music server
+- [Deezer](https://www.deezer.com/) - Music streaming service
+- [Subsonic API](http://www.subsonic.org/pages/api.jsp) - The API specification
