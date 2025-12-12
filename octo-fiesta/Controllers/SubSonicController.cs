@@ -808,29 +808,39 @@ public class SubsonicController : ControllerBase
         return newElement;
     }
 
-    private object ConvertSongToSubsonicJson(Song song)
+    private Dictionary<string, object> ConvertSongToSubsonicJson(Song song)
     {
-        return new
+        var result = new Dictionary<string, object>
         {
-            id = song.Id,
-            parent = song.AlbumId ?? "",
-            isDir = false,
-            title = song.Title,
-            album = song.Album,
-            artist = song.Artist,
-            albumId = song.AlbumId,
-            artistId = song.ArtistId,
-            duration = song.Duration ?? 0,
-            track = song.Track ?? 0,
-            year = song.Year ?? 0,
-            coverArt = song.Id,
-            suffix = song.IsLocal ? "mp3" : "Remote",
-            bitRate = song.IsLocal ? (int?)null : 0,
-            contentType = "audio/mpeg",
-            type = "music",
-            isVideo = false,
-            isExternal = !song.IsLocal
+            ["id"] = song.Id,
+            ["parent"] = song.AlbumId ?? "",
+            ["isDir"] = false,
+            ["title"] = song.Title,
+            ["album"] = song.Album ?? "",
+            ["artist"] = song.Artist ?? "",
+            ["albumId"] = song.AlbumId ?? "",
+            ["artistId"] = song.ArtistId ?? "",
+            ["duration"] = song.Duration ?? 0,
+            ["track"] = song.Track ?? 0,
+            ["year"] = song.Year ?? 0,
+            ["coverArt"] = song.Id,
+            ["suffix"] = song.IsLocal ? "mp3" : "Remote",
+            ["contentType"] = "audio/mpeg",
+            ["type"] = "music",
+            ["isVideo"] = false,
+            ["isExternal"] = !song.IsLocal
         };
+        
+        if (song.IsLocal)
+        {
+            result["bitRate"] = 128; // Default for local files
+        }
+        else
+        {
+            result["bitRate"] = 0;
+        }
+        
+        return result;
     }
 
     private object ConvertAlbumToSubsonicJson(Album album)
