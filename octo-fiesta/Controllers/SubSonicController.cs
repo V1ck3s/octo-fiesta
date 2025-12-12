@@ -683,9 +683,26 @@ public class SubsonicController : ControllerBase
             var mergedAlbums = localAlbums
                 .Concat(externalResult.Albums.Select(a => ConvertAlbumToSubsonicJson(a)))
                 .ToList();
-            var mergedArtists = localArtists
-                .Concat(externalResult.Artists.Select(a => ConvertArtistToSubsonicJson(a)))
-                .ToList();
+            
+            // Deduplicate artists by name - prefer local artists over external ones
+            var localArtistNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var artist in localArtists)
+            {
+                if (artist is Dictionary<string, object> dict && dict.TryGetValue("name", out var nameObj))
+                {
+                    localArtistNames.Add(nameObj?.ToString() ?? "");
+                }
+            }
+            
+            var mergedArtists = localArtists.ToList();
+            foreach (var externalArtist in externalResult.Artists)
+            {
+                // Only add external artist if no local artist with same name exists
+                if (!localArtistNames.Contains(externalArtist.Name))
+                {
+                    mergedArtists.Add(ConvertArtistToSubsonicJson(externalArtist));
+                }
+            }
 
             return CreateSubsonicJsonResponse(new
             {
@@ -705,14 +722,25 @@ public class SubsonicController : ControllerBase
             
             var searchResult3 = new XElement(ns + "searchResult3");
             
+            // Deduplicate artists by name - prefer local artists over external ones
+            var localArtistNamesXml = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var artist in localArtists.Cast<XElement>())
             {
+                var name = artist.Attribute("name")?.Value;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    localArtistNamesXml.Add(name);
+                }
                 artist.Name = ns + "artist";
                 searchResult3.Add(artist);
             }
             foreach (var artist in externalResult.Artists)
             {
-                searchResult3.Add(ConvertArtistToSubsonicXml(artist, ns));
+                // Only add external artist if no local artist with same name exists
+                if (!localArtistNamesXml.Contains(artist.Name))
+                {
+                    searchResult3.Add(ConvertArtistToSubsonicXml(artist, ns));
+                }
             }
             
             foreach (var album in localAlbums.Cast<XElement>())
