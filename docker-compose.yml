@@ -1,6 +1,6 @@
 services:
   octo-fiesta:
-    build: .
+    image: ghcr.io/v1ck3s/octo-fiesta
     container_name: octo-fiesta
     restart: unless-stopped
     ports:
