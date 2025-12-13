@@ -15,9 +15,10 @@ builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
 
 // Business services
+// Registered as Singleton to share state (mappings cache, scan debounce, download tracking, rate limiting)
 builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
-builder.Services.AddScoped<IMusicMetadataService, DeezerMetadataService>();
-builder.Services.AddScoped<IDownloadService, DeezerDownloadService>();
+builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
+builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
 
 builder.Services.AddCors(options =>
 {

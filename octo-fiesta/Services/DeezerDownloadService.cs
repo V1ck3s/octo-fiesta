@@ -48,6 +48,9 @@ public class DeezerDownloadService : IDownloadService
     private readonly int _minRequestIntervalMs = 200;
     
     private const string DeezerApiBase = "https://api.deezer.com";
+    
+    // Deezer's standard Blowfish CBC encryption key for track decryption
+    // This is a well-known constant used by the Deezer API, not a user-specific secret
     private const string BfSecret = "g4el58wc0zvf9na1";
 
     public DeezerDownloadService(
@@ -96,17 +99,17 @@ public class DeezerDownloadService : IDownloadService
         if (_activeDownloads.TryGetValue(songId, out var activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
         {
             _logger.LogInformation("Download already in progress for {SongId}", songId);
-            while (activeDownload.Status == DownloadStatus.InProgress)
+            while (_activeDownloads.TryGetValue(songId, out activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
             {
                 await Task.Delay(500, cancellationToken);
             }
             
-            if (activeDownload.Status == DownloadStatus.Completed && activeDownload.LocalPath != null)
+            if (activeDownload?.Status == DownloadStatus.Completed && activeDownload.LocalPath != null)
             {
                 return activeDownload.LocalPath;
             }
             
-            throw new Exception(activeDownload.ErrorMessage ?? "Download failed");
+            throw new Exception(activeDownload?.ErrorMessage ?? "Download failed");
         }
 
         await _downloadLock.WaitAsync(cancellationToken);
@@ -141,7 +144,18 @@ public class DeezerDownloadService : IDownloadService
                 await _localLibraryService.RegisterDownloadedSongAsync(song, localPath);
                 
                 // Trigger a Subsonic library rescan (with debounce)
-                _ = _localLibraryService.TriggerLibraryScanAsync();
+                // Fire-and-forget with error handling to prevent unobserved task exceptions
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _localLibraryService.TriggerLibraryScanAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to trigger library scan after download");
+                    }
+                });
                 
                 _logger.LogInformation("Download completed: {Path}", localPath);
                 return localPath;
@@ -206,7 +220,7 @@ public class DeezerDownloadService : IDownloadService
 
         await RetryWithBackoffAsync(async () =>
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, 
+            using var request = new HttpRequestMessage(HttpMethod.Post, 
                 "https://www.deezer.com/ajax/gw-light.php?method=deezer.getUserData&input=3&api_version=1.0&api_token=null");
             
             request.Headers.Add("Cookie", $"arl={arl}");
@@ -230,7 +244,8 @@ public class DeezerDownloadService : IDownloadService
                     _licenseToken = licenseToken.GetString();
                 }
                 
-                _logger.LogInformation("Deezer token refreshed: {Token}...", _apiToken?.Substring(0, Math.Min(16, _apiToken?.Length ?? 0)));
+                _logger.LogInformation("Deezer token refreshed: {Token}...", 
+                    _apiToken?[..Math.Min(16, _apiToken?.Length ?? 0)]);
                 return true;
             }
 
@@ -291,51 +306,54 @@ public class DeezerDownloadService : IDownloadService
                     Encoding.UTF8, 
                     "application/json");
 
-                var mediaResponse = await _httpClient.SendAsync(mediaHttpRequest, cancellationToken);
-                mediaResponse.EnsureSuccessStatusCode();
-
-                var mediaJson = await mediaResponse.Content.ReadAsStringAsync(cancellationToken);
-                var mediaDoc = JsonDocument.Parse(mediaJson);
-
-                if (!mediaDoc.RootElement.TryGetProperty("data", out var data) || 
-                    data.GetArrayLength() == 0)
+                using (mediaHttpRequest)
                 {
-                    throw new Exception("No download URL available");
-                }
+                    var mediaResponse = await _httpClient.SendAsync(mediaHttpRequest, cancellationToken);
+                    mediaResponse.EnsureSuccessStatusCode();
 
-                var firstData = data[0];
-                if (!firstData.TryGetProperty("media", out var media) || 
-                    media.GetArrayLength() == 0)
-                {
-                    throw new Exception("No media sources available - track may be unavailable in your region");
-                }
+                    var mediaJson = await mediaResponse.Content.ReadAsStringAsync(cancellationToken);
+                    var mediaDoc = JsonDocument.Parse(mediaJson);
 
-                string? downloadUrl = null;
-                string? format = null;
-
-                foreach (var mediaItem in media.EnumerateArray())
-                {
-                    if (mediaItem.TryGetProperty("sources", out var sources) && 
-                        sources.GetArrayLength() > 0)
+                    if (!mediaDoc.RootElement.TryGetProperty("data", out var data) || 
+                        data.GetArrayLength() == 0)
                     {
-                        downloadUrl = sources[0].GetProperty("url").GetString();
-                        format = mediaItem.GetProperty("format").GetString();
-                        break;
+                        throw new Exception("No download URL available");
                     }
-                }
 
-                if (string.IsNullOrEmpty(downloadUrl))
-                {
-                    throw new Exception("No download URL found in media sources - track may be region locked");
-                }
+                    var firstData = data[0];
+                    if (!firstData.TryGetProperty("media", out var media) || 
+                        media.GetArrayLength() == 0)
+                    {
+                        throw new Exception("No media sources available - track may be unavailable in your region");
+                    }
 
-                return new DownloadResult
-                {
-                    DownloadUrl = downloadUrl,
-                    Format = format ?? "MP3_128",
-                    Title = title,
-                    Artist = artist
-                };
+                    string? downloadUrl = null;
+                    string? format = null;
+
+                    foreach (var mediaItem in media.EnumerateArray())
+                    {
+                        if (mediaItem.TryGetProperty("sources", out var sources) && 
+                            sources.GetArrayLength() > 0)
+                        {
+                            downloadUrl = sources[0].GetProperty("url").GetString();
+                            format = mediaItem.GetProperty("format").GetString();
+                            break;
+                        }
+                    }
+
+                    if (string.IsNullOrEmpty(downloadUrl))
+                    {
+                        throw new Exception("No download URL found in media sources - track may be region locked");
+                    }
+
+                    return new DownloadResult
+                    {
+                        DownloadUrl = downloadUrl,
+                        Format = format ?? "MP3_128",
+                        Title = title,
+                        Artist = artist
+                    };
+                }
             });
         };
 
@@ -382,7 +400,7 @@ public class DeezerDownloadService : IDownloadService
         // Download the encrypted file
         var response = await RetryWithBackoffAsync(async () =>
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
             request.Headers.Add("User-Agent", "Mozilla/5.0");
             request.Headers.Add("Accept", "*/*");
             
@@ -423,14 +441,7 @@ public class DeezerDownloadService : IDownloadService
             tagFile.Tag.Album = song.Album;
             
             // Album artist (may differ from track artist for compilations)
-            if (!string.IsNullOrEmpty(song.AlbumArtist))
-            {
-                tagFile.Tag.AlbumArtists = new[] { song.AlbumArtist };
-            }
-            else
-            {
-                tagFile.Tag.AlbumArtists = new[] { song.Artist };
-            }
+            tagFile.Tag.AlbumArtists = new[] { !string.IsNullOrEmpty(song.AlbumArtist) ? song.AlbumArtist : song.Artist };
             
             // Track number
             if (song.Track.HasValue)
@@ -763,7 +774,7 @@ public static class PathHelper
         
         if (sanitized.Length > 100)
         {
-            sanitized = sanitized.Substring(0, 100);
+            sanitized = sanitized[..100];
         }
         
         return sanitized.Trim();
@@ -794,7 +805,7 @@ public static class PathHelper
         
         if (sanitized.Length > 100)
         {
-            sanitized = sanitized.Substring(0, 100).TrimEnd('.');
+            sanitized = sanitized[..100].TrimEnd('.');
         }
         
         // Ensure we have a valid name

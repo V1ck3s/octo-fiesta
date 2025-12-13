@@ -17,19 +17,22 @@ public class SubsonicController : ControllerBase
     private readonly IMusicMetadataService _metadataService;
     private readonly ILocalLibraryService _localLibraryService;
     private readonly IDownloadService _downloadService;
+    private readonly ILogger<SubsonicController> _logger;
     
     public SubsonicController(
         IHttpClientFactory httpClientFactory, 
         IOptions<SubsonicSettings> subsonicSettings,
         IMusicMetadataService metadataService,
         ILocalLibraryService localLibraryService,
-        IDownloadService downloadService)
+        IDownloadService downloadService,
+        ILogger<SubsonicController> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _subsonicSettings = subsonicSettings.Value;
         _metadataService = metadataService;
         _localLibraryService = localLibraryService;
         _downloadService = downloadService;
+        _logger = logger;
 
         if (string.IsNullOrWhiteSpace(_subsonicSettings.Url))
         {
@@ -583,7 +586,7 @@ public class SubsonicController : ControllerBase
             var query = string.Join("&", parameters.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
             var url = $"{_subsonicSettings.Url}/rest/stream?{query}";
             
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
             var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, HttpContext.RequestAborted);
             
             if (!response.IsSuccessStatusCode)
@@ -671,7 +674,7 @@ public class SubsonicController : ControllerBase
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error parsing Subsonic response: {ex.Message}");
+                _logger.LogWarning(ex, "Error parsing Subsonic response");
             }
         }
 
@@ -831,14 +834,7 @@ public class SubsonicController : ControllerBase
             ["isExternal"] = !song.IsLocal
         };
         
-        if (song.IsLocal)
-        {
-            result["bitRate"] = 128; // Default for local files
-        }
-        else
-        {
-            result["bitRate"] = 0;
-        }
+        result["bitRate"] = song.IsLocal ? 128 : 0; // Default bitrate for local files
         
         return result;
     }
