@@ -15,5 +15,7 @@ services:
       - Deezer__Arl=${DEEZER_ARL}
       # Fallback ARL token (optional)
       - Deezer__ArlFallback=${DEEZER_ARL_FALLBACK:-}
+      # Preferred audio quality: FLAC, MP3_320, MP3_128 (optional, defaults to highest available)
+      - Deezer__Quality=${DEEZER_QUALITY:-}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

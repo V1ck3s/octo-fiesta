@@ -18,6 +18,11 @@ public class DeezerDownloaderSettings
     public string? Arl { get; set; }
     public string? ArlFallback { get; set; }
     public string DownloadPath { get; set; } = "./downloads";
+    /// <summary>
+    /// Preferred audio quality: FLAC, MP3_320, MP3_128
+    /// If not specified or unavailable, the highest available quality will be used.
+    /// </summary>
+    public string? Quality { get; set; }
 }
 
 /// <summary>
@@ -35,6 +40,7 @@ public class DeezerDownloadService : IDownloadService
     private readonly string _downloadPath;
     private readonly string? _arl;
     private readonly string? _arlFallback;
+    private readonly string? _preferredQuality;
     
     private string? _apiToken;
     private string? _licenseToken;
@@ -69,6 +75,7 @@ public class DeezerDownloadService : IDownloadService
         _downloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
         _arl = configuration["Deezer:Arl"];
         _arlFallback = configuration["Deezer:ArlFallback"];
+        _preferredQuality = configuration["Deezer:Quality"];
         
         if (!Directory.Exists(_downloadPath))
         {
@@ -280,6 +287,9 @@ public class DeezerDownloadService : IDownloadService
                     : "";
 
                 // Get download URL via media API
+                // Build format list based on preferred quality
+                var formatsList = BuildFormatsList(_preferredQuality);
+                
                 var mediaRequest = new
                 {
                     license_token = _licenseToken,
@@ -288,12 +298,7 @@ public class DeezerDownloadService : IDownloadService
                         new
                         {
                             type = "FULL",
-                            formats = new[]
-                            {
-                                new { cipher = "BF_CBC_STRIPE", format = "MP3_128" },
-                                new { cipher = "BF_CBC_STRIPE", format = "MP3_320" },
-                                new { cipher = "BF_CBC_STRIPE", format = "FLAC" }
-                            }
+                            formats = formatsList
                         }
                     },
                     track_tokens = new[] { trackToken }
@@ -326,29 +331,61 @@ public class DeezerDownloadService : IDownloadService
                         throw new Exception("No media sources available - track may be unavailable in your region");
                     }
 
-                    string? downloadUrl = null;
-                    string? format = null;
-
+                    // Build a dictionary of available formats
+                    var availableFormats = new Dictionary<string, string>();
                     foreach (var mediaItem in media.EnumerateArray())
                     {
-                        if (mediaItem.TryGetProperty("sources", out var sources) && 
+                        if (mediaItem.TryGetProperty("format", out var formatEl) &&
+                            mediaItem.TryGetProperty("sources", out var sources) && 
                             sources.GetArrayLength() > 0)
                         {
-                            downloadUrl = sources[0].GetProperty("url").GetString();
-                            format = mediaItem.GetProperty("format").GetString();
+                            var fmt = formatEl.GetString();
+                            var url = sources[0].GetProperty("url").GetString();
+                            if (!string.IsNullOrEmpty(fmt) && !string.IsNullOrEmpty(url))
+                            {
+                                availableFormats[fmt] = url;
+                            }
+                        }
+                    }
+
+                    if (availableFormats.Count == 0)
+                    {
+                        throw new Exception("No download URL found in media sources - track may be region locked");
+                    }
+
+                    // Log available formats for debugging
+                    _logger.LogInformation("Available formats from Deezer: {Formats}", string.Join(", ", availableFormats.Keys));
+
+                    // Quality priority order (highest to lowest)
+                    // Since we already filtered the requested formats based on preference,
+                    // we just need to pick the best one available
+                    var qualityPriority = new[] { "FLAC", "MP3_320", "MP3_128" };
+                    
+                    string? selectedFormat = null;
+                    string? downloadUrl = null;
+
+                    // Select the best available quality from what Deezer returned
+                    foreach (var quality in qualityPriority)
+                    {
+                        if (availableFormats.TryGetValue(quality, out var url))
+                        {
+                            selectedFormat = quality;
+                            downloadUrl = url;
                             break;
                         }
                     }
 
                     if (string.IsNullOrEmpty(downloadUrl))
                     {
-                        throw new Exception("No download URL found in media sources - track may be region locked");
+                        throw new Exception("No compatible format found in available media sources");
                     }
+
+                    _logger.LogInformation("Selected quality: {Format}", selectedFormat);
 
                     return new DownloadResult
                     {
                         DownloadUrl = downloadUrl,
-                        Format = format ?? "MP3_128",
+                        Format = selectedFormat ?? "MP3_128",
                         Title = title,
                         Artist = artist
                     };
@@ -641,6 +678,44 @@ public class DeezerDownloadService : IDownloadService
     #endregion
 
     #region Utility Methods
+
+    /// <summary>
+    /// Builds the list of formats to request from Deezer based on preferred quality.
+    /// If a specific quality is preferred, only request that quality and lower.
+    /// This prevents Deezer from returning higher quality formats when user wants a specific one.
+    /// </summary>
+    private static object[] BuildFormatsList(string? preferredQuality)
+    {
+        var allFormats = new[]
+        {
+            new { cipher = "BF_CBC_STRIPE", format = "FLAC" },
+            new { cipher = "BF_CBC_STRIPE", format = "MP3_320" },
+            new { cipher = "BF_CBC_STRIPE", format = "MP3_128" }
+        };
+
+        if (string.IsNullOrEmpty(preferredQuality))
+        {
+            // No preference, request all formats (highest quality will be selected)
+            return allFormats;
+        }
+
+        var preferred = preferredQuality.ToUpperInvariant();
+        
+        return preferred switch
+        {
+            "FLAC" => allFormats, // Request all, FLAC will be preferred
+            "MP3_320" => new object[]
+            {
+                new { cipher = "BF_CBC_STRIPE", format = "MP3_320" },
+                new { cipher = "BF_CBC_STRIPE", format = "MP3_128" }
+            },
+            "MP3_128" => new object[]
+            {
+                new { cipher = "BF_CBC_STRIPE", format = "MP3_128" }
+            },
+            _ => allFormats // Unknown preference, request all
+        };
+    }
 
     private async Task<T> RetryWithBackoffAsync<T>(Func<Task<T>> action, int maxRetries = 3, int initialDelayMs = 1000)
     {

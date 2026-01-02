@@ -58,6 +58,10 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
    
    # Deezer ARL token (required)
    DEEZER_ARL=your-deezer-arl-token
+   
+   # Preferred audio quality (optional): FLAC, MP3_320, MP3_128
+   # If not set, the highest available quality for your account will be used
+   DEEZER_QUALITY=
    ```
 
 3. **Start the container**
@@ -93,6 +97,7 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
 |---------|-------------|
 | `Deezer:Arl` | Your Deezer ARL token (required for downloads) |
 | `Deezer:ArlFallback` | Backup ARL token if primary fails |
+| `Deezer:Quality` | Preferred audio quality: `FLAC`, `MP3_320`, `MP3_128`. If not specified, the highest available quality for your account will be used |
 
 ### Getting a Deezer ARL Token
 
