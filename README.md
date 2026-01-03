@@ -275,7 +275,7 @@ octo-fiesta.Tests/
 
 ## License
 
-MIT
+GPL-3.0
 
 ## Acknowledgments
 
