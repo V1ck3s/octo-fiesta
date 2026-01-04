@@ -51,28 +51,61 @@ public class SubsonicController : ControllerBase
             parameters[query.Key] = query.Value.ToString();
         }
 
-        // Get body parameters (JSON)
-        if (Request.ContentLength > 0 && Request.ContentType?.Contains("application/json") == true)
+        // Get body parameters
+        if (Request.ContentLength > 0 || Request.ContentType != null)
         {
-            using var reader = new StreamReader(Request.Body);
-            var body = await reader.ReadToEndAsync();
-            
-            if (!string.IsNullOrEmpty(body))
+            // Handle application/x-www-form-urlencoded (OpenSubsonic formPost extension)
+            if (Request.HasFormContentType)
             {
                 try
                 {
-                    var bodyParams = JsonSerializer.Deserialize<Dictionary<string, object>>(body);
-                    if (bodyParams != null)
+                    var form = await Request.ReadFormAsync();
+                    foreach (var field in form)
                     {
-                        foreach (var param in bodyParams)
+                        parameters[field.Key] = field.Value.ToString();
+                    }
+                }
+                catch
+                {
+                    // Fall back to manual parsing if ReadFormAsync fails
+                    Request.EnableBuffering();
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = await reader.ReadToEndAsync();
+                    Request.Body.Position = 0;
+                    
+                    if (!string.IsNullOrEmpty(body))
+                    {
+                        var formParams = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(body);
+                        foreach (var param in formParams)
                         {
-                            parameters[param.Key] = param.Value?.ToString() ?? "";
+                            parameters[param.Key] = param.Value.ToString();
                         }
                     }
                 }
-                catch (JsonException)
+            }
+            // Handle application/json
+            else if (Request.ContentType?.Contains("application/json") == true)
+            {
+                using var reader = new StreamReader(Request.Body);
+                var body = await reader.ReadToEndAsync();
+                
+                if (!string.IsNullOrEmpty(body))
                 {
-                    
+                    try
+                    {
+                        var bodyParams = JsonSerializer.Deserialize<Dictionary<string, object>>(body);
+                        if (bodyParams != null)
+                        {
+                            foreach (var param in bodyParams)
+                            {
+                                parameters[param.Key] = param.Value?.ToString() ?? "";
+                            }
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        
+                    }
                 }
             }
         }
