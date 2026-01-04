@@ -44,7 +44,6 @@ public class DeezerDownloadService : IDownloadService
     
     private string? _apiToken;
     private string? _licenseToken;
-    private bool _usingFallback;
     
     private readonly Dictionary<string, DownloadInfo> _activeDownloads = new();
     private readonly SemaphoreSlim _downloadLock = new(1, 1);
@@ -402,7 +401,6 @@ public class DeezerDownloadService : IDownloadService
             if (!string.IsNullOrEmpty(_arlFallback))
             {
                 _logger.LogWarning(ex, "Primary ARL failed, trying fallback ARL...");
-                _usingFallback = true;
                 return await tryDownload(_arlFallback);
             }
             throw;

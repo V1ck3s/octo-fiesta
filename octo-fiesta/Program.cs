@@ -20,6 +20,9 @@ builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
 builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
 builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
 
+// Startup validation - runs at application startup to validate configuration
+builder.Services.AddHostedService<StartupValidationService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
