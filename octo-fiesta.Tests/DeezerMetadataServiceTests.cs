@@ -2,6 +2,7 @@ using octo_fiesta.Services;
 using octo_fiesta.Models;
 using Moq;
 using Moq.Protected;
+using Microsoft.Extensions.Options;
 using System.Net;
 using System.Text.Json;
 
@@ -11,7 +12,8 @@ public class DeezerMetadataServiceTests
 {
     private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
     private readonly Mock<HttpMessageHandler> _httpMessageHandlerMock;
-    private readonly DeezerMetadataService _service;
+    private readonly SubsonicSettings _settings;
+    private DeezerMetadataService _service;
 
     public DeezerMetadataServiceTests()
     {
@@ -21,7 +23,14 @@ public class DeezerMetadataServiceTests
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
         
-        _service = new DeezerMetadataService(_httpClientFactoryMock.Object);
+        _settings = new SubsonicSettings { ExplicitFilter = ExplicitFilter.ExplicitOnly };
+        _service = CreateService(_settings);
+    }
+
+    private DeezerMetadataService CreateService(SubsonicSettings settings)
+    {
+        var options = Options.Create(settings);
+        return new DeezerMetadataService(_httpClientFactoryMock.Object, options);
     }
 
     [Fact]
@@ -286,4 +295,285 @@ public class DeezerMetadataServiceTests
                 Content = new StringContent(content)
             });
     }
+
+    #region Explicit Filter Tests
+
+    [Fact]
+    public async Task SearchSongsAsync_ExplicitOnlyFilter_ExcludesCleanVersions()
+    {
+        // Arrange
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.ExplicitOnly });
+        
+        var deezerResponse = new
+        {
+            data = new object[]
+            {
+                new
+                {
+                    id = 1,
+                    title = "Explicit Original",
+                    duration = 180,
+                    explicit_content_lyrics = 1, // Explicit
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 2,
+                    title = "Clean Version",
+                    duration = 180,
+                    explicit_content_lyrics = 3, // Clean/edited - should be excluded
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 3,
+                    title = "Naturally Clean",
+                    duration = 180,
+                    explicit_content_lyrics = 0, // Naturally clean - should be included
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, s => s.Title == "Explicit Original");
+        Assert.Contains(result, s => s.Title == "Naturally Clean");
+        Assert.DoesNotContain(result, s => s.Title == "Clean Version");
+    }
+
+    [Fact]
+    public async Task SearchSongsAsync_CleanOnlyFilter_ExcludesExplicitContent()
+    {
+        // Arrange
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.CleanOnly });
+        
+        var deezerResponse = new
+        {
+            data = new object[]
+            {
+                new
+                {
+                    id = 1,
+                    title = "Explicit Original",
+                    duration = 180,
+                    explicit_content_lyrics = 1, // Explicit - should be excluded
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 2,
+                    title = "Clean Version",
+                    duration = 180,
+                    explicit_content_lyrics = 3, // Clean/edited - should be included
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 3,
+                    title = "Naturally Clean",
+                    duration = 180,
+                    explicit_content_lyrics = 0, // Naturally clean - should be included
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, s => s.Title == "Clean Version");
+        Assert.Contains(result, s => s.Title == "Naturally Clean");
+        Assert.DoesNotContain(result, s => s.Title == "Explicit Original");
+    }
+
+    [Fact]
+    public async Task SearchSongsAsync_AllFilter_IncludesEverything()
+    {
+        // Arrange
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All });
+        
+        var deezerResponse = new
+        {
+            data = new object[]
+            {
+                new
+                {
+                    id = 1,
+                    title = "Explicit Original",
+                    duration = 180,
+                    explicit_content_lyrics = 1,
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 2,
+                    title = "Clean Version",
+                    duration = 180,
+                    explicit_content_lyrics = 3,
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                },
+                new
+                {
+                    id = 3,
+                    title = "Naturally Clean",
+                    duration = 180,
+                    explicit_content_lyrics = 0,
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.Equal(3, result.Count);
+    }
+
+    [Fact]
+    public async Task SearchSongsAsync_ExplicitOnlyFilter_IncludesTracksWithNoExplicitInfo()
+    {
+        // Arrange
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.ExplicitOnly });
+        
+        var deezerResponse = new
+        {
+            data = new object[]
+            {
+                new
+                {
+                    id = 1,
+                    title = "No Explicit Info",
+                    duration = 180,
+                    // No explicit_content_lyrics field
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal("No Explicit Info", result[0].Title);
+    }
+
+    [Fact]
+    public async Task GetAlbumAsync_ExplicitOnlyFilter_FiltersAlbumTracks()
+    {
+        // Arrange
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.ExplicitOnly });
+        
+        var deezerResponse = new
+        {
+            id = 456789,
+            title = "Test Album",
+            nb_tracks = 3,
+            release_date = "2023-05-20",
+            cover_medium = "https://example.com/album.jpg",
+            artist = new { id = 123, name = "Test Artist" },
+            tracks = new
+            {
+                data = new object[]
+                {
+                    new
+                    {
+                        id = 111,
+                        title = "Explicit Track",
+                        duration = 180,
+                        explicit_content_lyrics = 1,
+                        artist = new { id = 123, name = "Test Artist" },
+                        album = new { id = 456789, title = "Test Album", cover_medium = "https://example.com/album.jpg" }
+                    },
+                    new
+                    {
+                        id = 222,
+                        title = "Clean Version Track",
+                        duration = 200,
+                        explicit_content_lyrics = 3, // Should be excluded
+                        artist = new { id = 123, name = "Test Artist" },
+                        album = new { id = 456789, title = "Test Album", cover_medium = "https://example.com/album.jpg" }
+                    },
+                    new
+                    {
+                        id = 333,
+                        title = "Naturally Clean Track",
+                        duration = 220,
+                        explicit_content_lyrics = 0,
+                        artist = new { id = 123, name = "Test Artist" },
+                        album = new { id = 456789, title = "Test Album", cover_medium = "https://example.com/album.jpg" }
+                    }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.GetAlbumAsync("deezer", "456789");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Songs.Count);
+        Assert.Contains(result.Songs, s => s.Title == "Explicit Track");
+        Assert.Contains(result.Songs, s => s.Title == "Naturally Clean Track");
+        Assert.DoesNotContain(result.Songs, s => s.Title == "Clean Version Track");
+    }
+
+    [Fact]
+    public async Task SearchSongsAsync_ParsesExplicitContentLyrics()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            data = new object[]
+            {
+                new
+                {
+                    id = 1,
+                    title = "Test Track",
+                    duration = 180,
+                    explicit_content_lyrics = 1,
+                    artist = new { id = 100, name = "Artist" },
+                    album = new { id = 200, title = "Album", cover_medium = "https://example.com/cover.jpg" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchSongsAsync("test", 20);
+
+        // Assert
+        Assert.Single(result);
+        Assert.Equal(1, result[0].ExplicitContentLyrics);
+    }
+
+    #endregion
 }

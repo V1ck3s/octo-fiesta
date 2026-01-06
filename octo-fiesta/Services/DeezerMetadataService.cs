@@ -1,5 +1,6 @@
 using octo_fiesta.Models;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 namespace octo_fiesta.Services;
 
@@ -9,11 +10,13 @@ namespace octo_fiesta.Services;
 public class DeezerMetadataService : IMusicMetadataService
 {
     private readonly HttpClient _httpClient;
+    private readonly SubsonicSettings _settings;
     private const string BaseUrl = "https://api.deezer.com";
 
-    public DeezerMetadataService(IHttpClientFactory httpClientFactory)
+    public DeezerMetadataService(IHttpClientFactory httpClientFactory, IOptions<SubsonicSettings> settings)
     {
         _httpClient = httpClientFactory.CreateClient();
+        _settings = settings.Value;
     }
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
@@ -33,7 +36,11 @@ public class DeezerMetadataService : IMusicMetadataService
             {
                 foreach (var track in data.EnumerateArray())
                 {
-                    songs.Add(ParseDeezerTrack(track));
+                    var song = ParseDeezerTrack(track);
+                    if (ShouldIncludeSong(song))
+                    {
+                        songs.Add(song);
+                    }
                 }
             }
             
@@ -219,7 +226,11 @@ public class DeezerMetadataService : IMusicMetadataService
             foreach (var track in tracksData.EnumerateArray())
             {
                 // Pass the index as fallback for track_position (Deezer doesn't include it in album tracks)
-                album.Songs.Add(ParseDeezerTrack(track, trackIndex));
+                var song = ParseDeezerTrack(track, trackIndex);
+                if (ShouldIncludeSong(song))
+                {
+                    album.Songs.Add(song);
+                }
                 trackIndex++;
             }
         }
@@ -277,6 +288,11 @@ public class DeezerMetadataService : IMusicMetadataService
             ? trackPos.GetInt32() 
             : fallbackTrackNumber;
         
+        // Explicit content lyrics value
+        int? explicitContentLyrics = track.TryGetProperty("explicit_content_lyrics", out var ecl) 
+            ? ecl.GetInt32() 
+            : null;
+        
         return new Song
         {
             Id = $"ext-deezer-song-{externalId}",
@@ -303,7 +319,8 @@ public class DeezerMetadataService : IMusicMetadataService
                 : null,
             IsLocal = false,
             ExternalProvider = "deezer",
-            ExternalId = externalId
+            ExternalId = externalId,
+            ExplicitContentLyrics = explicitContentLyrics
         };
     }
 
@@ -394,6 +411,11 @@ public class DeezerMetadataService : IMusicMetadataService
                 : (albumForCover.TryGetProperty("cover_big", out var cb) ? cb.GetString() : null);
         }
         
+        // Explicit content lyrics value
+        int? explicitContentLyrics = track.TryGetProperty("explicit_content_lyrics", out var ecl) 
+            ? ecl.GetInt32() 
+            : null;
+        
         return new Song
         {
             Id = $"ext-deezer-song-{externalId}",
@@ -425,7 +447,8 @@ public class DeezerMetadataService : IMusicMetadataService
             CoverArtUrlLarge = coverLarge,
             IsLocal = false,
             ExternalProvider = "deezer",
-            ExternalId = externalId
+            ExternalId = externalId,
+            ExplicitContentLyrics = explicitContentLyrics
         };
     }
 
@@ -480,6 +503,35 @@ public class DeezerMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId
+        };
+    }
+
+    /// <summary>
+    /// Determines whether a song should be included based on the explicit content filter setting
+    /// </summary>
+    /// <param name="song">The song to check</param>
+    /// <returns>True if the song should be included, false otherwise</returns>
+    private bool ShouldIncludeSong(Song song)
+    {
+        // If no explicit content info, include the song
+        if (song.ExplicitContentLyrics == null)
+            return true;
+        
+        return _settings.ExplicitFilter switch
+        {
+            // All: No filtering, include everything
+            ExplicitFilter.All => true,
+            
+            // ExplicitOnly: Exclude clean/edited versions (value 3)
+            // Include: 0 (naturally clean), 1 (explicit), 2 (not applicable), 6/7 (unknown)
+            ExplicitFilter.ExplicitOnly => song.ExplicitContentLyrics != 3,
+            
+            // CleanOnly: Only show clean content
+            // Include: 0 (naturally clean), 3 (clean/edited version)
+            // Exclude: 1 (explicit)
+            ExplicitFilter.CleanOnly => song.ExplicitContentLyrics != 1,
+            
+            _ => true
         };
     }
 }

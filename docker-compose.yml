@@ -9,6 +9,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       # Navidrome/Subsonic server URL
       - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
+      # Explicit content filter: All, ExplicitOnly, CleanOnly (default: ExplicitOnly)
+      - Subsonic__ExplicitFilter=${EXPLICIT_FILTER:-ExplicitOnly}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
       # Deezer ARL token (required)

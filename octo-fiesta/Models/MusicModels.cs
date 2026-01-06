@@ -88,6 +88,12 @@ public class Song
     /// Local file path (if available)
     /// </summary>
     public string? LocalPath { get; set; }
+    
+    /// <summary>
+    /// Deezer explicit content lyrics value
+    /// 0 = Naturally clean, 1 = Explicit, 2 = Not applicable, 3 = Clean/edited version, 6/7 = Unknown
+    /// </summary>
+    public int? ExplicitContentLyrics { get; set; }
 }
 
 /// <summary>
