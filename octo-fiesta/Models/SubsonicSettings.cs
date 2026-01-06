@@ -1,6 +1,23 @@
 namespace octo_fiesta.Models;
 
 /// <summary>
+/// Download mode for tracks
+/// </summary>
+public enum DownloadMode
+{
+    /// <summary>
+    /// Download only the requested track (default behavior)
+    /// </summary>
+    Track,
+    
+    /// <summary>
+    /// When a track is played, download the entire album in background
+    /// The requested track is downloaded first, then remaining tracks are queued
+    /// </summary>
+    Album
+}
+
+/// <summary>
 /// Explicit content filter mode for Deezer tracks
 /// </summary>
 public enum ExplicitFilter
@@ -33,4 +50,11 @@ public class SubsonicSettings
     /// Values: "All", "ExplicitOnly", "CleanOnly"
     /// </summary>
     public ExplicitFilter ExplicitFilter { get; set; } = ExplicitFilter.All;
+    
+    /// <summary>
+    /// Download mode for tracks (default: Track)
+    /// Environment variable: DOWNLOAD_MODE
+    /// Values: "Track" (download only played track), "Album" (download full album when playing a track)
+    /// </summary>
+    public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
 }

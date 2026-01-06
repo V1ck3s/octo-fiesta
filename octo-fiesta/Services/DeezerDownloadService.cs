@@ -5,6 +5,7 @@ using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Modes;
 using Org.BouncyCastle.Crypto.Parameters;
 using octo_fiesta.Models;
+using Microsoft.Extensions.Options;
 using TagLib;
 using IOFile = System.IO.File;
 
@@ -35,6 +36,7 @@ public class DeezerDownloadService : IDownloadService
     private readonly IConfiguration _configuration;
     private readonly ILocalLibraryService _localLibraryService;
     private readonly IMusicMetadataService _metadataService;
+    private readonly SubsonicSettings _subsonicSettings;
     private readonly ILogger<DeezerDownloadService> _logger;
     
     private readonly string _downloadPath;
@@ -63,12 +65,14 @@ public class DeezerDownloadService : IDownloadService
         IConfiguration configuration,
         ILocalLibraryService localLibraryService,
         IMusicMetadataService metadataService,
+        IOptions<SubsonicSettings> subsonicSettings,
         ILogger<DeezerDownloadService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _configuration = configuration;
         _localLibraryService = localLibraryService;
         _metadataService = metadataService;
+        _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
         
         _downloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
@@ -85,6 +89,15 @@ public class DeezerDownloadService : IDownloadService
     #region IDownloadService Implementation
 
     public async Task<string> DownloadSongAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
+    {
+        return await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: true, cancellationToken);
+    }
+
+    /// <summary>
+    /// Internal method for downloading a song with control over album download triggering
+    /// </summary>
+    /// <param name="triggerAlbumDownload">If true and DownloadMode is Album, triggers background download of remaining album tracks</param>
+    private async Task<string> DownloadSongInternalAsync(string externalProvider, string externalId, bool triggerAlbumDownload, CancellationToken cancellationToken = default)
     {
         if (externalProvider != "deezer")
         {
@@ -163,6 +176,18 @@ public class DeezerDownloadService : IDownloadService
                     }
                 });
                 
+                // If download mode is Album and triggering is enabled, start background download of remaining tracks
+                if (triggerAlbumDownload && _subsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
+                {
+                    // Extract album external ID from AlbumId (format: "ext-deezer-album-{id}")
+                    var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
+                    if (!string.IsNullOrEmpty(albumExternalId))
+                    {
+                        _logger.LogInformation("Download mode is Album, triggering background download for album {AlbumId}", albumExternalId);
+                        DownloadRemainingAlbumTracksInBackground(externalProvider, albumExternalId, externalId);
+                    }
+                }
+                
                 _logger.LogInformation("Download completed: {Path}", localPath);
                 return localPath;
             }
@@ -210,6 +235,73 @@ public class DeezerDownloadService : IDownloadService
             _logger.LogWarning(ex, "Deezer service not available");
             return false;
         }
+    }
+
+    public void DownloadRemainingAlbumTracksInBackground(string externalProvider, string albumExternalId, string excludeTrackExternalId)
+    {
+        if (externalProvider != "deezer")
+        {
+            _logger.LogWarning("Provider '{Provider}' is not supported for album download", externalProvider);
+            return;
+        }
+
+        // Fire-and-forget with error handling
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadRemainingAlbumTracksAsync(albumExternalId, excludeTrackExternalId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to download remaining album tracks for album {AlbumId}", albumExternalId);
+            }
+        });
+    }
+
+    private async Task DownloadRemainingAlbumTracksAsync(string albumExternalId, string excludeTrackExternalId)
+    {
+        _logger.LogInformation("Starting background download for album {AlbumId} (excluding track {TrackId})", 
+            albumExternalId, excludeTrackExternalId);
+
+        // Get album with tracks
+        var album = await _metadataService.GetAlbumAsync("deezer", albumExternalId);
+        if (album == null)
+        {
+            _logger.LogWarning("Album {AlbumId} not found, cannot download remaining tracks", albumExternalId);
+            return;
+        }
+
+        var tracksToDownload = album.Songs
+            .Where(s => s.ExternalId != excludeTrackExternalId && !string.IsNullOrEmpty(s.ExternalId))
+            .ToList();
+
+        _logger.LogInformation("Found {Count} additional tracks to download for album '{AlbumTitle}'", 
+            tracksToDownload.Count, album.Title);
+
+        foreach (var track in tracksToDownload)
+        {
+            try
+            {
+                // Check if already downloaded
+                var existingPath = await _localLibraryService.GetLocalPathForExternalSongAsync("deezer", track.ExternalId!);
+                if (existingPath != null && IOFile.Exists(existingPath))
+                {
+                    _logger.LogDebug("Track {TrackId} already downloaded, skipping", track.ExternalId);
+                    continue;
+                }
+
+                _logger.LogInformation("Downloading track '{Title}' from album '{Album}'", track.Title, album.Title);
+                await DownloadSongInternalAsync("deezer", track.ExternalId!, triggerAlbumDownload: false, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to download track {TrackId} '{Title}'", track.ExternalId, track.Title);
+                // Continue with other tracks
+            }
+        }
+
+        _logger.LogInformation("Completed background download for album '{AlbumTitle}'", album.Title);
     }
 
     #endregion
@@ -676,6 +768,20 @@ public class DeezerDownloadService : IDownloadService
     #endregion
 
     #region Utility Methods
+
+    /// <summary>
+    /// Extracts the external album ID from the internal album ID format
+    /// Example: "ext-deezer-album-123456" -> "123456"
+    /// </summary>
+    private static string? ExtractExternalIdFromAlbumId(string albumId)
+    {
+        const string prefix = "ext-deezer-album-";
+        if (albumId.StartsWith(prefix))
+        {
+            return albumId[prefix.Length..];
+        }
+        return null;
+    }
 
     /// <summary>
     /// Builds the list of formats to request from Deezer based on preferred quality.

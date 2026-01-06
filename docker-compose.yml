@@ -11,6 +11,8 @@ services:
       - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
       # Explicit content filter: All, ExplicitOnly, CleanOnly (default: ExplicitOnly)
       - Subsonic__ExplicitFilter=${EXPLICIT_FILTER:-ExplicitOnly}
+      # Download mode: Track (only requested track), Album (full album when playing a track)
+      - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
       # Deezer ARL token (required)

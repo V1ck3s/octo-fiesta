@@ -26,6 +26,14 @@ public interface IDownloadService
     Task<Stream> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
+    /// Downloads remaining tracks from an album in background (excluding the specified track)
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="albumExternalId">The album ID on the external provider</param>
+    /// <param name="excludeTrackExternalId">The track ID to exclude (already downloaded)</param>
+    void DownloadRemainingAlbumTracksInBackground(string externalProvider, string albumExternalId, string excludeTrackExternalId);
+    
+    /// <summary>
     /// Checks if a song is currently being downloaded
     /// </summary>
     DownloadInfo? GetDownloadStatus(string songId);
