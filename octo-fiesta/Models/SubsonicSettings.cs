@@ -40,6 +40,22 @@ public enum ExplicitFilter
     CleanOnly
 }
 
+/// <summary>
+/// Music service provider
+/// </summary>
+public enum MusicService
+{
+    /// <summary>
+    /// Deezer music service
+    /// </summary>
+    Deezer,
+    
+    /// <summary>
+    /// Qobuz music service
+    /// </summary>
+    Qobuz
+}
+
 public class SubsonicSettings
 {
     public string? Url { get; set; }
@@ -48,6 +64,7 @@ public class SubsonicSettings
     /// Explicit content filter mode (default: All)
     /// Environment variable: EXPLICIT_FILTER
     /// Values: "All", "ExplicitOnly", "CleanOnly"
+    /// Note: Only works with Deezer
     /// </summary>
     public ExplicitFilter ExplicitFilter { get; set; } = ExplicitFilter.All;
     
@@ -57,4 +74,11 @@ public class SubsonicSettings
     /// Values: "Track" (download only played track), "Album" (download full album when playing a track)
     /// </summary>
     public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
+    
+    /// <summary>
+    /// Music service to use (default: Deezer)
+    /// Environment variable: MUSIC_SERVICE
+    /// Values: "Deezer", "Qobuz"
+    /// </summary>
+    public MusicService MusicService { get; set; } = MusicService.Deezer;
 }

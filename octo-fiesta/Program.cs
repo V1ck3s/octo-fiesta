@@ -13,12 +13,30 @@ builder.Services.AddSwaggerGen();
 // Configuration
 builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
+builder.Services.Configure<QobuzSettings>(
+    builder.Configuration.GetSection("Qobuz"));
+
+// Get the configured music service
+var musicService = builder.Configuration.GetValue<MusicService>("Subsonic:MusicService");
 
 // Business services
 // Registered as Singleton to share state (mappings cache, scan debounce, download tracking, rate limiting)
 builder.Services.AddSingleton<ILocalLibraryService, LocalLibraryService>();
-builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
-builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
+
+// Register music service based on configuration
+if (musicService == MusicService.Qobuz)
+{
+    // Qobuz services
+    builder.Services.AddSingleton<QobuzBundleService>();
+    builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
+}
+else
+{
+    // Deezer services (default)
+    builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
+}
 
 // Startup validation - runs at application startup to validate configuration
 builder.Services.AddHostedService<StartupValidationService>();
