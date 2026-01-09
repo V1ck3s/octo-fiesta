@@ -5,6 +5,7 @@ using octo_fiesta.Services.Qobuz;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Validation;
 using octo_fiesta.Services.Subsonic;
+using octo_fiesta.Services.Common;
 using octo_fiesta.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -63,6 +64,9 @@ builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
 
 // Register orchestrator as hosted service
 builder.Services.AddHostedService<StartupValidationOrchestrator>();
+
+// Register cache cleanup service (only runs when StorageMode is Cache)
+builder.Services.AddHostedService<CacheCleanupService>();
 
 builder.Services.AddCors(options =>
 {

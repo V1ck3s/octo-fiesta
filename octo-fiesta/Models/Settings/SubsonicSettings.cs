@@ -41,6 +41,23 @@ public enum ExplicitFilter
 }
 
 /// <summary>
+/// Storage mode for downloaded tracks
+/// </summary>
+public enum StorageMode
+{
+    /// <summary>
+    /// Files are permanently stored in the library and registered in the database
+    /// </summary>
+    Permanent,
+    
+    /// <summary>
+    /// Files are stored in a temporary cache and automatically cleaned up
+    /// Not registered in the database, no Navidrome scan triggered
+    /// </summary>
+    Cache
+}
+
+/// <summary>
 /// Music service provider
 /// </summary>
 public enum MusicService
@@ -81,4 +98,19 @@ public class SubsonicSettings
     /// Values: "Deezer", "Qobuz"
     /// </summary>
     public MusicService MusicService { get; set; } = MusicService.Deezer;
+    
+    /// <summary>
+    /// Storage mode for downloaded files (default: Permanent)
+    /// Environment variable: STORAGE_MODE
+    /// Values: "Permanent" (files saved to library), "Cache" (temporary files, auto-cleanup)
+    /// </summary>
+    public StorageMode StorageMode { get; set; } = StorageMode.Permanent;
+    
+    /// <summary>
+    /// Cache duration in hours for Cache storage mode (default: 1)
+    /// Environment variable: CACHE_DURATION_HOURS
+    /// Files older than this duration will be automatically deleted
+    /// Only applies when StorageMode is Cache
+    /// </summary>
+    public int CacheDurationHours { get; set; } = 1;
 }
