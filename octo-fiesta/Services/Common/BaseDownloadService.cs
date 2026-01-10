@@ -47,7 +47,7 @@ public abstract class BaseDownloadService : IDownloadService
         Logger = logger;
         
         DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
-        CachePath = Path.Combine(Path.GetTempPath(), "octo-fiesta-cache");
+        CachePath = PathHelper.GetCachePath();
         
         if (!Directory.Exists(DownloadPath))
         {

@@ -61,7 +61,7 @@ public class CacheCleanupService : BackgroundService
 
     private async Task CleanupOldCachedFilesAsync(CancellationToken cancellationToken)
     {
-        var cachePath = Path.Combine(Path.GetTempPath(), "octo-fiesta-cache");
+        var cachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(cachePath))
         {

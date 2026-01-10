@@ -9,6 +9,17 @@ namespace octo_fiesta.Services.Common;
 public static class PathHelper
 {
     /// <summary>
+    /// Gets the cache directory path for temporary file storage.
+    /// Uses system temp directory combined with octo-fiesta-cache subfolder.
+    /// Respects TMPDIR environment variable on Linux/macOS.
+    /// </summary>
+    /// <returns>Full path to the cache directory.</returns>
+    public static string GetCachePath()
+    {
+        return Path.Combine(Path.GetTempPath(), "octo-fiesta-cache");
+    }
+    
+    /// <summary>
     /// Builds the output path for a downloaded track following the Artist/Album/Track structure.
     /// </summary>
     /// <param name="downloadPath">Base download directory path.</param>
