@@ -290,6 +290,23 @@ public abstract class BaseDownloadService : IDownloadService
                     continue;
                 }
 
+                // Check if download is already in progress or recently completed
+                var songId = $"ext-{ProviderName}-{track.ExternalId}";
+                if (ActiveDownloads.TryGetValue(songId, out var activeDownload))
+                {
+                    if (activeDownload.Status == DownloadStatus.InProgress)
+                    {
+                        Logger.LogDebug("Track {TrackId} download already in progress, skipping", track.ExternalId);
+                        continue;
+                    }
+                    
+                    if (activeDownload.Status == DownloadStatus.Completed)
+                    {
+                        Logger.LogDebug("Track {TrackId} already downloaded in this session, skipping", track.ExternalId);
+                        continue;
+                    }
+                }
+
                 Logger.LogInformation("Downloading track '{Title}' from album '{Album}'", track.Title, album.Title);
                 await DownloadSongInternalAsync(ProviderName, track.ExternalId!, triggerAlbumDownload: false, CancellationToken.None);
             }
