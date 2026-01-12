@@ -139,49 +139,54 @@ public abstract class BaseDownloadService : IDownloadService
         var songId = $"ext-{externalProvider}-{externalId}";
         var isCache = SubsonicSettings.StorageMode == StorageMode.Cache;
         
-        // Check if already downloaded (skip for cache mode as we want to check cache folder)
-        if (!isCache)
-        {
-            var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
-            if (existingPath != null && IOFile.Exists(existingPath))
-            {
-                Logger.LogInformation("Song already downloaded: {Path}", existingPath);
-                return existingPath;
-            }
-        }
-        else
-        {
-            // For cache mode, check if file exists in cache directory
-            var cachedPath = GetCachedFilePath(externalProvider, externalId);
-            if (cachedPath != null && IOFile.Exists(cachedPath))
-            {
-                Logger.LogInformation("Song found in cache: {Path}", cachedPath);
-                // Update file access time for cache cleanup logic
-                IOFile.SetLastAccessTime(cachedPath, DateTime.UtcNow);
-                return cachedPath;
-            }
-        }
-
-        // Check if download in progress
-        if (ActiveDownloads.TryGetValue(songId, out var activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
-        {
-            Logger.LogInformation("Download already in progress for {SongId}", songId);
-            while (ActiveDownloads.TryGetValue(songId, out activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
-            {
-                await Task.Delay(500, cancellationToken);
-            }
-            
-            if (activeDownload?.Status == DownloadStatus.Completed && activeDownload.LocalPath != null)
-            {
-                return activeDownload.LocalPath;
-            }
-            
-            throw new Exception(activeDownload?.ErrorMessage ?? "Download failed");
-        }
-
+        // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
         await DownloadLock.WaitAsync(cancellationToken);
+        
         try
         {
+            // Check if already downloaded (skip for cache mode as we want to check cache folder)
+            if (!isCache)
+            {
+                var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
+                if (existingPath != null && IOFile.Exists(existingPath))
+                {
+                    Logger.LogInformation("Song already downloaded: {Path}", existingPath);
+                    return existingPath;
+                }
+            }
+            else
+            {
+                // For cache mode, check if file exists in cache directory
+                var cachedPath = GetCachedFilePath(externalProvider, externalId);
+                if (cachedPath != null && IOFile.Exists(cachedPath))
+                {
+                    Logger.LogInformation("Song found in cache: {Path}", cachedPath);
+                    // Update file access time for cache cleanup logic
+                    IOFile.SetLastAccessTime(cachedPath, DateTime.UtcNow);
+                    return cachedPath;
+                }
+            }
+
+            // Check if download in progress
+            if (ActiveDownloads.TryGetValue(songId, out var activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
+            {
+                Logger.LogInformation("Download already in progress for {SongId}, waiting...", songId);
+                // Release lock while waiting
+                DownloadLock.Release();
+                
+                while (ActiveDownloads.TryGetValue(songId, out activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
+                {
+                    await Task.Delay(500, cancellationToken);
+                }
+                
+                if (activeDownload?.Status == DownloadStatus.Completed && activeDownload.LocalPath != null)
+                {
+                    return activeDownload.LocalPath;
+                }
+                
+                throw new Exception(activeDownload?.ErrorMessage ?? "Download failed");
+            }
+
             // Get metadata
             // In Album mode, fetch the full album first to ensure AlbumArtist is correctly set
             Song? song = null;
@@ -227,60 +232,60 @@ public abstract class BaseDownloadService : IDownloadService
             };
             ActiveDownloads[songId] = downloadInfo;
 
-            try
+            var localPath = await DownloadTrackAsync(externalId, song, cancellationToken);
+            
+            downloadInfo.Status = DownloadStatus.Completed;
+            downloadInfo.LocalPath = localPath;
+            downloadInfo.CompletedAt = DateTime.UtcNow;
+            
+            song.LocalPath = localPath;
+            
+            // Only register and scan if NOT in cache mode
+            if (!isCache)
             {
-                var localPath = await DownloadTrackAsync(externalId, song, cancellationToken);
+                await LocalLibraryService.RegisterDownloadedSongAsync(song, localPath);
                 
-                downloadInfo.Status = DownloadStatus.Completed;
-                downloadInfo.LocalPath = localPath;
-                downloadInfo.CompletedAt = DateTime.UtcNow;
-                
-                song.LocalPath = localPath;
-                
-                // Only register and scan if NOT in cache mode
-                if (!isCache)
+                // Trigger a Subsonic library rescan (with debounce)
+                _ = Task.Run(async () =>
                 {
-                    await LocalLibraryService.RegisterDownloadedSongAsync(song, localPath);
-                    
-                    // Trigger a Subsonic library rescan (with debounce)
-                    _ = Task.Run(async () =>
+                    try
                     {
-                        try
-                        {
-                            await LocalLibraryService.TriggerLibraryScanAsync();
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning(ex, "Failed to trigger library scan after download");
-                        }
-                    });
-                    
-                    // If download mode is Album and triggering is enabled, start background download of remaining tracks
-                    if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
+                        await LocalLibraryService.TriggerLibraryScanAsync();
+                    }
+                    catch (Exception ex)
                     {
-                        var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
-                        if (!string.IsNullOrEmpty(albumExternalId))
-                        {
-                            Logger.LogInformation("Download mode is Album, triggering background download for album {AlbumId}", albumExternalId);
-                            DownloadRemainingAlbumTracksInBackground(externalProvider, albumExternalId, externalId);
-                        }
+                        Logger.LogWarning(ex, "Failed to trigger library scan after download");
+                    }
+                });
+                
+                // If download mode is Album and triggering is enabled, start background download of remaining tracks
+                if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
+                {
+                    var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
+                    if (!string.IsNullOrEmpty(albumExternalId))
+                    {
+                        Logger.LogInformation("Download mode is Album, triggering background download for album {AlbumId}", albumExternalId);
+                        DownloadRemainingAlbumTracksInBackground(externalProvider, albumExternalId, externalId);
                     }
                 }
-                else
-                {
-                    Logger.LogInformation("Cache mode: skipping library registration and scan");
-                }
-                
-                Logger.LogInformation("Download completed: {Path}", localPath);
-                return localPath;
             }
-            catch (Exception ex)
+            else
+            {
+                Logger.LogInformation("Cache mode: skipping library registration and scan");
+            }
+            
+            Logger.LogInformation("Download completed: {Path}", localPath);
+            return localPath;
+        }
+        catch (Exception ex)
+        {
+            if (ActiveDownloads.TryGetValue(songId, out var downloadInfo))
             {
                 downloadInfo.Status = DownloadStatus.Failed;
                 downloadInfo.ErrorMessage = ex.Message;
-                Logger.LogError(ex, "Download failed for {SongId}", songId);
-                throw;
             }
+            Logger.LogError(ex, "Download failed for {SongId}", songId);
+            throw;
         }
         finally
         {
