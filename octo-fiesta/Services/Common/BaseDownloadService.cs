@@ -183,7 +183,35 @@ public abstract class BaseDownloadService : IDownloadService
         try
         {
             // Get metadata
-            var song = await MetadataService.GetSongAsync(externalProvider, externalId);
+            // In Album mode, fetch the full album first to ensure AlbumArtist is correctly set
+            Song? song = null;
+            
+            if (SubsonicSettings.DownloadMode == DownloadMode.Album)
+            {
+                // First try to get the song to extract album ID
+                var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
+                if (tempSong != null && !string.IsNullOrEmpty(tempSong.AlbumId))
+                {
+                    var albumExternalId = ExtractExternalIdFromAlbumId(tempSong.AlbumId);
+                    if (!string.IsNullOrEmpty(albumExternalId))
+                    {
+                        // Get full album with correct AlbumArtist
+                        var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
+                        if (album != null)
+                        {
+                            // Find the track in the album
+                            song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
+                        }
+                    }
+                }
+            }
+            
+            // Fallback to individual song fetch if not in Album mode or album fetch failed
+            if (song == null)
+            {
+                song = await MetadataService.GetSongAsync(externalProvider, externalId);
+            }
+            
             if (song == null)
             {
                 throw new Exception("Song not found");

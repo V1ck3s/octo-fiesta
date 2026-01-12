@@ -229,8 +229,8 @@ public class DeezerMetadataService : IMusicMetadataService
             int trackIndex = 1;
             foreach (var track in tracksData.EnumerateArray())
             {
-                // Pass the index as fallback for track_position (Deezer doesn't include it in album tracks)
-                var song = ParseDeezerTrack(track, trackIndex);
+                // Pass the album artist to ensure proper folder organization
+                var song = ParseDeezerTrack(track, trackIndex, album.Artist);
                 if (ShouldIncludeSong(song))
                 {
                     album.Songs.Add(song);
@@ -283,7 +283,7 @@ public class DeezerMetadataService : IMusicMetadataService
         return albums;
     }
 
-    private Song ParseDeezerTrack(JsonElement track, int? fallbackTrackNumber = null)
+    private Song ParseDeezerTrack(JsonElement track, int? fallbackTrackNumber = null, string? albumArtist = null)
     {
         var externalId = track.GetProperty("id").GetInt64().ToString();
         
@@ -321,6 +321,7 @@ public class DeezerMetadataService : IMusicMetadataService
                           albumForCover.TryGetProperty("cover_medium", out var cover)
                 ? cover.GetString()
                 : null,
+            AlbumArtist = albumArtist,
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId,
