@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using octo_fiesta.Models.Search;
+using octo_fiesta.Models.Subsonic;
 
 namespace octo_fiesta.Services.Subsonic;
 
@@ -97,22 +98,23 @@ public class SubsonicModelMapper
     }
 
     /// <summary>
-    /// Merges local search results with external search results, deduplicating by name.
+    /// Merges local and external search results (songs, albums, artists, playlists).
     /// </summary>
     public (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResults(
         List<object> localSongs,
         List<object> localAlbums,
         List<object> localArtists,
         SearchResult externalResult,
+        List<ExternalPlaylist> externalPlaylists,
         bool isJson)
     {
         if (isJson)
         {
-            return MergeSearchResultsJson(localSongs, localAlbums, localArtists, externalResult);
+            return MergeSearchResultsJson(localSongs, localAlbums, localArtists, externalResult, externalPlaylists);
         }
         else
         {
-            return MergeSearchResultsXml(localSongs, localAlbums, localArtists, externalResult);
+            return MergeSearchResultsXml(localSongs, localAlbums, localArtists, externalResult, externalPlaylists);
         }
     }
 
@@ -120,14 +122,17 @@ public class SubsonicModelMapper
         List<object> localSongs,
         List<object> localAlbums,
         List<object> localArtists,
-        SearchResult externalResult)
+        SearchResult externalResult,
+        List<ExternalPlaylist> externalPlaylists)
     {
         var mergedSongs = localSongs
             .Concat(externalResult.Songs.Select(s => _responseBuilder.ConvertSongToJson(s)))
             .ToList();
         
+        // Merge albums with playlists (playlists appear as albums with genre "Playlist")
         var mergedAlbums = localAlbums
             .Concat(externalResult.Albums.Select(a => _responseBuilder.ConvertAlbumToJson(a)))
+            .Concat(externalPlaylists.Select(p => ConvertPlaylistToAlbumJson(p)))
             .ToList();
         
         // Deduplicate artists by name - prefer local artists over external ones
@@ -157,7 +162,8 @@ public class SubsonicModelMapper
         List<object> localSongs,
         List<object> localAlbums,
         List<object> localArtists,
-        SearchResult externalResult)
+        SearchResult externalResult,
+        List<ExternalPlaylist> externalPlaylists)
     {
         var ns = XNamespace.Get("http://subsonic.org/restapi");
         
@@ -196,6 +202,11 @@ public class SubsonicModelMapper
         {
             mergedAlbums.Add(_responseBuilder.ConvertAlbumToXml(album, ns));
         }
+        // Add playlists as albums
+        foreach (var playlist in externalPlaylists)
+        {
+            mergedAlbums.Add(ConvertPlaylistToAlbumXml(playlist, ns));
+        }
         
         // Songs
         var mergedSongs = new List<object>();
@@ -210,5 +221,82 @@ public class SubsonicModelMapper
         }
 
         return (mergedSongs, mergedAlbums, mergedArtists);
+    }
+    
+    /// <summary>
+    /// Converts an ExternalPlaylist to a JSON object representing an album.
+    /// Playlists are represented as albums with genre "Playlist" and artist "🎵 {Provider} {Curator}".
+    /// </summary>
+    private Dictionary<string, object> ConvertPlaylistToAlbumJson(ExternalPlaylist playlist)
+    {
+        var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
+        if (!string.IsNullOrEmpty(playlist.CuratorName))
+        {
+            artistName += $" {playlist.CuratorName}";
+        }
+        
+        var artistId = $"curator-{playlist.Provider}-{playlist.CuratorName?.ToLowerInvariant().Replace(" ", "-") ?? "unknown"}";
+        
+        var album = new Dictionary<string, object>
+        {
+            ["id"] = playlist.Id,
+            ["name"] = playlist.Name,
+            ["artist"] = artistName,
+            ["artistId"] = artistId,
+            ["genre"] = "Playlist",
+            ["songCount"] = playlist.TrackCount,
+            ["duration"] = playlist.Duration
+        };
+        
+        if (playlist.CreatedDate.HasValue)
+        {
+            album["year"] = playlist.CreatedDate.Value.Year;
+            album["created"] = playlist.CreatedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+        }
+        
+        if (!string.IsNullOrEmpty(playlist.CoverUrl))
+        {
+            album["coverArt"] = playlist.Id;
+        }
+        
+        return album;
+    }
+    
+    /// <summary>
+    /// Converts an ExternalPlaylist to an XML element representing an album.
+    /// Playlists are represented as albums with genre "Playlist" and artist "🎵 {Provider} {Curator}".
+    /// </summary>
+    private XElement ConvertPlaylistToAlbumXml(ExternalPlaylist playlist, XNamespace ns)
+    {
+        var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
+        if (!string.IsNullOrEmpty(playlist.CuratorName))
+        {
+            artistName += $" {playlist.CuratorName}";
+        }
+        
+        var artistId = $"curator-{playlist.Provider}-{playlist.CuratorName?.ToLowerInvariant().Replace(" ", "-") ?? "unknown"}";
+        
+        var album = new XElement(ns + "album",
+            new XAttribute("id", playlist.Id),
+            new XAttribute("name", playlist.Name),
+            new XAttribute("artist", artistName),
+            new XAttribute("artistId", artistId),
+            new XAttribute("genre", "Playlist"),
+            new XAttribute("songCount", playlist.TrackCount),
+            new XAttribute("duration", playlist.Duration)
+        );
+        
+        if (playlist.CreatedDate.HasValue)
+        {
+            album.Add(new XAttribute("year", playlist.CreatedDate.Value.Year));
+            album.Add(new XAttribute("created", playlist.CreatedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")));
+        }
+        
+        if (!string.IsNullOrEmpty(playlist.CoverUrl))
+        {
+            album.Add(new XAttribute("coverArt", playlist.Id));
+        }
+        
+        return album;
     }
 }

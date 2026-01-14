@@ -9,6 +9,7 @@ using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services;
+using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Subsonic;
 
@@ -26,6 +27,7 @@ public class SubsonicController : ControllerBase
     private readonly SubsonicResponseBuilder _responseBuilder;
     private readonly SubsonicModelMapper _modelMapper;
     private readonly SubsonicProxyService _proxyService;
+    private readonly PlaylistSyncService? _playlistSyncService;
     private readonly ILogger<SubsonicController> _logger;
     
     public SubsonicController(
@@ -37,7 +39,8 @@ public class SubsonicController : ControllerBase
         SubsonicResponseBuilder responseBuilder,
         SubsonicModelMapper modelMapper,
         SubsonicProxyService proxyService,
-        ILogger<SubsonicController> logger)
+        ILogger<SubsonicController> logger,
+        PlaylistSyncService? playlistSyncService = null)
     {
         _subsonicSettings = subsonicSettings.Value;
         _metadataService = metadataService;
@@ -47,6 +50,7 @@ public class SubsonicController : ControllerBase
         _responseBuilder = responseBuilder;
         _modelMapper = modelMapper;
         _proxyService = proxyService;
+        _playlistSyncService = playlistSyncService;
         _logger = logger;
 
         if (string.IsNullOrWhiteSpace(_subsonicSettings.Url))
@@ -96,13 +100,19 @@ public class SubsonicController : ControllerBase
             int.TryParse(parameters.GetValueOrDefault("albumCount", "20"), out var ac) ? ac : 20,
             int.TryParse(parameters.GetValueOrDefault("artistCount", "20"), out var arc) ? arc : 20
         );
+        
+        // Search playlists if enabled
+        Task<List<ExternalPlaylist>> playlistTask = _subsonicSettings.EnableExternalPlaylists
+            ? _metadataService.SearchPlaylistsAsync(cleanQuery, ac) // Use same limit as albums
+            : Task.FromResult(new List<ExternalPlaylist>());
 
-        await Task.WhenAll(subsonicTask, externalTask);
+        await Task.WhenAll(subsonicTask, externalTask, playlistTask);
 
         var subsonicResult = await subsonicTask;
         var externalResult = await externalTask;
+        var playlistResult = await playlistTask;
 
-        return MergeSearchResults(subsonicResult, externalResult, format);
+        return MergeSearchResults(subsonicResult, externalResult, playlistResult, format);
     }
 
     /// <summary>
@@ -339,12 +349,54 @@ public class SubsonicController : ControllerBase
         {
             return _responseBuilder.CreateError(format, 10, "Missing id parameter");
         }
+        
+        // Check if this is an external playlist
+        if (PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            try
+            {
+                var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
+                
+                // Get playlist metadata
+                var playlist = await _metadataService.GetPlaylistAsync(provider, externalId);
+                if (playlist == null)
+                {
+                    return _responseBuilder.CreateError(format, 70, "Playlist not found");
+                }
+                
+                // Get playlist tracks
+                var tracks = await _metadataService.GetPlaylistTracksAsync(provider, externalId);
+                
+                // Add all tracks to playlist cache so when they're played, we know they belong to this playlist
+                if (_playlistSyncService != null)
+                {
+                    foreach (var track in tracks)
+                    {
+                        if (!string.IsNullOrEmpty(track.ExternalId))
+                        {
+                            var trackId = $"ext-{provider}-{track.ExternalId}";
+                            _playlistSyncService.AddTrackToPlaylistCache(trackId, id);
+                        }
+                    }
+                    
+                    _logger.LogDebug("Added {TrackCount} tracks to playlist cache for {PlaylistId}", tracks.Count, id);
+                }
+                
+                // Convert to album response (playlist as album)
+                return _responseBuilder.CreatePlaylistAsAlbumResponse(format, playlist, tracks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting playlist {Id}", id);
+                return _responseBuilder.CreateError(format, 70, "Playlist not found");
+            }
+        }
 
-        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+        var (isExternal, albumProvider, albumExternalId) = _localLibraryService.ParseSongId(id);
 
         if (isExternal)
         {
-            var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
+            var album = await _metadataService.GetAlbumAsync(albumProvider!, albumExternalId!);
 
             if (album == null)
             {
@@ -491,8 +543,39 @@ public class SubsonicController : ControllerBase
         {
             return NotFound();
         }
+        
+        // Check if this is a playlist cover art request
+        if (PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            try
+            {
+                var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
+                var playlist = await _metadataService.GetPlaylistAsync(provider, externalId);
+                
+                if (playlist == null || string.IsNullOrEmpty(playlist.CoverUrl))
+                {
+                    return NotFound();
+                }
+                
+                // Download and return the cover image
+                var imageResponse = await new HttpClient().GetAsync(playlist.CoverUrl);
+                if (!imageResponse.IsSuccessStatusCode)
+                {
+                    return NotFound();
+                }
+                
+                var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
+                var contentType = imageResponse.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
+                return File(imageBytes, contentType);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting playlist cover art for {Id}", id);
+                return NotFound();
+            }
+        }
 
-        var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
+        var (isExternal, coverProvider, type, coverExternalId) = _localLibraryService.ParseExternalId(id);
 
         if (!isExternal)
         {
@@ -514,7 +597,7 @@ public class SubsonicController : ControllerBase
         switch (type)
         {
             case "artist":
-                var artist = await _metadataService.GetArtistAsync(provider!, externalId!);
+                var artist = await _metadataService.GetArtistAsync(coverProvider!, coverExternalId!);
                 if (artist?.ImageUrl != null)
                 {
                     coverUrl = artist.ImageUrl;
@@ -522,7 +605,7 @@ public class SubsonicController : ControllerBase
                 break;
                 
             case "album":
-                var album = await _metadataService.GetAlbumAsync(provider!, externalId!);
+                var album = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                 if (album?.CoverArtUrl != null)
                 {
                     coverUrl = album.CoverArtUrl;
@@ -532,7 +615,7 @@ public class SubsonicController : ControllerBase
             case "song":
             default:
                 // For songs, try to get from song first, then album
-                var song = await _metadataService.GetSongAsync(provider!, externalId!);
+                var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
                 if (song?.CoverArtUrl != null)
                 {
                     coverUrl = song.CoverArtUrl;
@@ -540,7 +623,7 @@ public class SubsonicController : ControllerBase
                 else
                 {
                     // Fallback: try album with same ID (legacy behavior)
-                    var albumFallback = await _metadataService.GetAlbumAsync(provider!, externalId!);
+                    var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                     if (albumFallback?.CoverArtUrl != null)
                     {
                         coverUrl = albumFallback.CoverArtUrl;
@@ -569,6 +652,7 @@ public class SubsonicController : ControllerBase
     private IActionResult MergeSearchResults(
         (byte[]? Body, string? ContentType, bool Success) subsonicResult,
         SearchResult externalResult,
+        List<ExternalPlaylist> playlistResult,
         string format)
     {
         var (localSongs, localAlbums, localArtists) = subsonicResult.Success && subsonicResult.Body != null
@@ -580,7 +664,8 @@ public class SubsonicController : ControllerBase
             localSongs, 
             localAlbums, 
             localArtists, 
-            externalResult, 
+            externalResult,
+            playlistResult,
             isJson);
 
         if (isJson)
@@ -643,6 +728,59 @@ public class SubsonicController : ControllerBase
     }
 
     #endregion
+
+    /// <summary>
+    /// Stars (favorites) an item. For playlists, this triggers a full download.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/star")]
+    [Route("rest/star.view")]
+    public async Task<IActionResult> Star()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+        
+        // Check if this is a playlist
+        var playlistId = parameters.GetValueOrDefault("id", "");
+        
+        if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
+        {
+            if (_playlistSyncService == null)
+            {
+                return _responseBuilder.CreateError(format, 0, "Playlist functionality is not enabled");
+            }
+            
+            _logger.LogInformation("Starring external playlist {PlaylistId}, triggering download", playlistId);
+            
+            // Trigger playlist download in background
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _playlistSyncService.DownloadFullPlaylistAsync(playlistId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to download playlist {PlaylistId}", playlistId);
+                }
+            });
+            
+            // Return success response immediately
+            return _responseBuilder.CreateResponse(format, "starred", new { });
+        }
+        
+        // For non-playlist items, relay to real Subsonic server
+        try
+        {
+            var result = await _proxyService.RelayAsync("rest/star", parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+    }
 
     // Generic endpoint to handle all subsonic API calls
     [HttpGet, HttpPost]

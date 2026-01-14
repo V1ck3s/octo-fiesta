@@ -212,6 +212,12 @@ public class QobuzMetadataService : IMusicMetadataService
                 foreach (var track in tracksData.EnumerateArray())
                 {
                     var song = ParseQobuzTrack(track);
+                    
+                    // Ensure album metadata is set (tracks in album response may not have full album object)
+                    song.Album = album.Title;
+                    song.AlbumId = album.Id;
+                    song.AlbumArtist = album.Artist;
+                    
                     if (ShouldIncludeSong(song))
                     {
                         album.Songs.Add(song);
@@ -303,6 +309,180 @@ public class QobuzMetadataService : IMusicMetadataService
             _logger.LogError(ex, "Failed to get artist albums for {ExternalId}", externalId);
             return new List<Album>();
         }
+    }
+
+    public async Task<List<ExternalPlaylist>> SearchPlaylistsAsync(string query, int limit = 20)
+    {
+        try
+        {
+            var appId = await _bundleService.GetAppIdAsync();
+            var url = $"{BaseUrl}playlist/search?query={Uri.EscapeDataString(query)}&limit={limit}&app_id={appId}";
+            
+            var response = await GetWithAuthAsync(url);
+            if (!response.IsSuccessStatusCode) return new List<ExternalPlaylist>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonDocument.Parse(json);
+            
+            var playlists = new List<ExternalPlaylist>();
+            if (result.RootElement.TryGetProperty("playlists", out var playlistsData) &&
+                playlistsData.TryGetProperty("items", out var items))
+            {
+                foreach (var playlist in items.EnumerateArray())
+                {
+                    playlists.Add(ParseQobuzPlaylist(playlist));
+                }
+            }
+            
+            return playlists;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to search playlists for query: {Query}", query);
+            return new List<ExternalPlaylist>();
+        }
+    }
+    
+    public async Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId)
+    {
+        if (externalProvider != "qobuz") return null;
+        
+        try
+        {
+            var appId = await _bundleService.GetAppIdAsync();
+            var url = $"{BaseUrl}playlist/get?playlist_id={externalId}&app_id={appId}";
+            
+            var response = await GetWithAuthAsync(url);
+            if (!response.IsSuccessStatusCode) return null;
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var playlistElement = JsonDocument.Parse(json).RootElement;
+            
+            if (playlistElement.TryGetProperty("error", out _)) return null;
+            
+            return ParseQobuzPlaylist(playlistElement);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get playlist {ExternalId}", externalId);
+            return null;
+        }
+    }
+    
+    public async Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId)
+    {
+        if (externalProvider != "qobuz") return new List<Song>();
+        
+        try
+        {
+            var appId = await _bundleService.GetAppIdAsync();
+            var url = $"{BaseUrl}playlist/get?playlist_id={externalId}&app_id={appId}&extra=tracks";
+            
+            var response = await GetWithAuthAsync(url);
+            if (!response.IsSuccessStatusCode) return new List<Song>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var playlistElement = JsonDocument.Parse(json).RootElement;
+            
+            if (playlistElement.TryGetProperty("error", out _)) return new List<Song>();
+            
+            var songs = new List<Song>();
+            
+            // Get playlist name for album field
+            var playlistName = playlistElement.TryGetProperty("name", out var nameEl)
+                ? nameEl.GetString() ?? "Unknown Playlist"
+                : "Unknown Playlist";
+            
+            if (playlistElement.TryGetProperty("tracks", out var tracks) &&
+                tracks.TryGetProperty("items", out var tracksData))
+            {
+                int trackIndex = 1;
+                foreach (var track in tracksData.EnumerateArray())
+                {
+                    // For playlists, use the track's own artist (not a single album artist)
+                    var song = ParseQobuzTrack(track);
+                    
+                    // Override album name to be the playlist name
+                    song.Album = playlistName;
+                    song.Track = trackIndex;
+                    
+                    if (ShouldIncludeSong(song))
+                    {
+                        songs.Add(song);
+                    }
+                    trackIndex++;
+                }
+            }
+            
+            return songs;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get playlist tracks for {ExternalId}", externalId);
+            return new List<Song>();
+        }
+    }
+    
+    private ExternalPlaylist ParseQobuzPlaylist(JsonElement playlist)
+    {
+        var externalId = GetIdAsString(playlist.GetProperty("id"));
+        
+        // Get curator/creator name
+        string? curatorName = null;
+        if (playlist.TryGetProperty("owner", out var owner) &&
+            owner.TryGetProperty("name", out var ownerName))
+        {
+            curatorName = ownerName.GetString();
+        }
+        
+        // Get creation date
+        DateTime? createdDate = null;
+        if (playlist.TryGetProperty("created_at", out var createdAtEl))
+        {
+            var timestamp = createdAtEl.GetInt64();
+            createdDate = DateTimeOffset.FromUnixTimeSeconds(timestamp).DateTime;
+        }
+        
+        // Get cover URL from images
+        string? coverUrl = null;
+        if (playlist.TryGetProperty("images300", out var images300))
+        {
+            var imagesArray = images300.EnumerateArray().ToList();
+            if (imagesArray.Count > 0)
+            {
+                coverUrl = imagesArray[0].GetString();
+            }
+        }
+        else if (playlist.TryGetProperty("image_rectangle", out var imageRect))
+        {
+            var imagesArray = imageRect.EnumerateArray().ToList();
+            if (imagesArray.Count > 0)
+            {
+                coverUrl = imagesArray[0].GetString();
+            }
+        }
+        
+        return new ExternalPlaylist
+        {
+            Id = Common.PlaylistIdHelper.CreatePlaylistId("qobuz", externalId),
+            Name = playlist.TryGetProperty("name", out var name)
+                ? name.GetString() ?? ""
+                : "",
+            Description = playlist.TryGetProperty("description", out var desc)
+                ? desc.GetString()
+                : null,
+            CuratorName = curatorName,
+            Provider = "qobuz",
+            ExternalId = externalId,
+            TrackCount = playlist.TryGetProperty("tracks_count", out var tracksCount)
+                ? tracksCount.GetInt32()
+                : 0,
+            Duration = playlist.TryGetProperty("duration", out var duration)
+                ? duration.GetInt32()
+                : 0,
+            CoverUrl = coverUrl,
+            CreatedDate = createdDate
+        };
     }
 
     /// <summary>

@@ -231,6 +231,12 @@ public class DeezerMetadataService : IMusicMetadataService
             {
                 // Pass the album artist to ensure proper folder organization
                 var song = ParseDeezerTrack(track, trackIndex, album.Artist);
+                
+                // Ensure album metadata is set (tracks in album response may not have full album object)
+                song.Album = album.Title;
+                song.AlbumId = album.Id;
+                song.AlbumArtist = album.Artist;
+                
                 if (ShouldIncludeSong(song))
                 {
                     album.Songs.Add(song);
@@ -508,6 +514,163 @@ public class DeezerMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId
+        };
+    }
+
+    public async Task<List<ExternalPlaylist>> SearchPlaylistsAsync(string query, int limit = 20)
+    {
+        try
+        {
+            var url = $"{BaseUrl}/search/playlist?q={Uri.EscapeDataString(query)}&limit={limit}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return new List<ExternalPlaylist>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var result = JsonDocument.Parse(json);
+            
+            var playlists = new List<ExternalPlaylist>();
+            if (result.RootElement.TryGetProperty("data", out var data))
+            {
+                foreach (var playlist in data.EnumerateArray())
+                {
+                    playlists.Add(ParseDeezerPlaylist(playlist));
+                }
+            }
+            
+            return playlists;
+        }
+        catch
+        {
+            return new List<ExternalPlaylist>();
+        }
+    }
+    
+    public async Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId)
+    {
+        if (externalProvider != "deezer") return null;
+        
+        try
+        {
+            var url = $"{BaseUrl}/playlist/{externalId}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return null;
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var playlistElement = JsonDocument.Parse(json).RootElement;
+            
+            if (playlistElement.TryGetProperty("error", out _)) return null;
+            
+            return ParseDeezerPlaylist(playlistElement);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+    
+    public async Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId)
+    {
+        if (externalProvider != "deezer") return new List<Song>();
+        
+        try
+        {
+            var url = $"{BaseUrl}/playlist/{externalId}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return new List<Song>();
+            
+            var json = await response.Content.ReadAsStringAsync();
+            var playlistElement = JsonDocument.Parse(json).RootElement;
+            
+            if (playlistElement.TryGetProperty("error", out _)) return new List<Song>();
+            
+            var songs = new List<Song>();
+            
+            // Get playlist name for album field
+            var playlistName = playlistElement.TryGetProperty("title", out var titleEl)
+                ? titleEl.GetString() ?? "Unknown Playlist"
+                : "Unknown Playlist";
+            
+            if (playlistElement.TryGetProperty("tracks", out var tracks) &&
+                tracks.TryGetProperty("data", out var tracksData))
+            {
+                int trackIndex = 1;
+                foreach (var track in tracksData.EnumerateArray())
+                {
+                    // For playlists, use the track's own artist (not a single album artist)
+                    var song = ParseDeezerTrack(track, trackIndex);
+                    
+                    // Override album name to be the playlist name
+                    song.Album = playlistName;
+                    
+                    if (ShouldIncludeSong(song))
+                    {
+                        songs.Add(song);
+                    }
+                    trackIndex++;
+                }
+            }
+            
+            return songs;
+        }
+        catch
+        {
+            return new List<Song>();
+        }
+    }
+
+    private ExternalPlaylist ParseDeezerPlaylist(JsonElement playlist)
+    {
+        var externalId = playlist.GetProperty("id").GetInt64().ToString();
+        
+        // Get curator/creator name
+        string? curatorName = null;
+        if (playlist.TryGetProperty("user", out var user) &&
+            user.TryGetProperty("name", out var userName))
+        {
+            curatorName = userName.GetString();
+        }
+        else if (playlist.TryGetProperty("creator", out var creator) &&
+                 creator.TryGetProperty("name", out var creatorName))
+        {
+            curatorName = creatorName.GetString();
+        }
+        
+        // Get creation date
+        DateTime? createdDate = null;
+        if (playlist.TryGetProperty("creation_date", out var creationDateEl))
+        {
+            var dateStr = creationDateEl.GetString();
+            if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var date))
+            {
+                createdDate = date;
+            }
+        }
+        
+        return new ExternalPlaylist
+        {
+            Id = Common.PlaylistIdHelper.CreatePlaylistId("deezer", externalId),
+            Name = playlist.GetProperty("title").GetString() ?? "",
+            Description = playlist.TryGetProperty("description", out var desc) 
+                ? desc.GetString() 
+                : null,
+            CuratorName = curatorName,
+            Provider = "deezer",
+            ExternalId = externalId,
+            TrackCount = playlist.TryGetProperty("nb_tracks", out var nbTracks) 
+                ? nbTracks.GetInt32() 
+                : 0,
+            Duration = playlist.TryGetProperty("duration", out var duration) 
+                ? duration.GetInt32() 
+                : 0,
+            CoverUrl = playlist.TryGetProperty("picture_medium", out var picture) 
+                ? picture.GetString() 
+                : (playlist.TryGetProperty("picture_big", out var pictureBig) 
+                    ? pictureBig.GetString() 
+                    : null),
+            CreatedDate = createdDate
         };
     }
 

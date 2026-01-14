@@ -54,4 +54,28 @@ public interface IMusicMetadataService
     /// Gets an artist's albums
     /// </summary>
     Task<List<Album>> GetArtistAlbumsAsync(string externalProvider, string externalId);
+    
+    /// <summary>
+    /// Searches for playlists on external providers
+    /// </summary>
+    /// <param name="query">Search term</param>
+    /// <param name="limit">Maximum number of results</param>
+    /// <returns>List of found playlists</returns>
+    Task<List<ExternalPlaylist>> SearchPlaylistsAsync(string query, int limit = 20);
+    
+    /// <summary>
+    /// Gets details of an external playlist (metadata only, not tracks)
+    /// </summary>
+    /// <param name="externalProvider">Provider name (e.g., "deezer", "qobuz")</param>
+    /// <param name="externalId">Playlist ID from the provider</param>
+    /// <returns>Playlist details or null if not found</returns>
+    Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId);
+    
+    /// <summary>
+    /// Gets all tracks from an external playlist
+    /// </summary>
+    /// <param name="externalProvider">Provider name (e.g., "deezer", "qobuz")</param>
+    /// <param name="externalId">Playlist ID from the provider</param>
+    /// <returns>List of songs in the playlist</returns>
+    Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId);
 }

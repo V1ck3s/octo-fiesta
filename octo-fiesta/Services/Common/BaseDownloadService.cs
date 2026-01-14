@@ -4,6 +4,7 @@ using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Local;
+using octo_fiesta.Services.Subsonic;
 using TagLib;
 using IOFile = System.IO.File;
 
@@ -21,6 +22,7 @@ public abstract class BaseDownloadService : IDownloadService
     protected readonly IMusicMetadataService MetadataService;
     protected readonly SubsonicSettings SubsonicSettings;
     protected readonly ILogger Logger;
+    protected readonly IServiceProvider ServiceProvider;
     
     protected readonly string DownloadPath;
     protected readonly string CachePath;
@@ -38,12 +40,14 @@ public abstract class BaseDownloadService : IDownloadService
         ILocalLibraryService localLibraryService,
         IMusicMetadataService metadataService,
         SubsonicSettings subsonicSettings,
+        IServiceProvider serviceProvider,
         ILogger logger)
     {
         Configuration = configuration;
         LocalLibraryService = localLibraryService;
         MetadataService = metadataService;
         SubsonicSettings = subsonicSettings;
+        ServiceProvider = serviceProvider;
         Logger = logger;
         
         DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
@@ -77,6 +81,30 @@ public abstract class BaseDownloadService : IDownloadService
     {
         ActiveDownloads.TryGetValue(songId, out var info);
         return info;
+    }
+    
+    public async Task<string?> GetLocalPathIfExistsAsync(string externalProvider, string externalId)
+    {
+        if (externalProvider != ProviderName)
+        {
+            return null;
+        }
+        
+        // Check local library
+        var localPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
+        if (localPath != null && IOFile.Exists(localPath))
+        {
+            return localPath;
+        }
+        
+        // Check cache directory
+        var cachedPath = GetCachedFilePath(externalProvider, externalId);
+        if (cachedPath != null && IOFile.Exists(cachedPath))
+        {
+            return cachedPath;
+        }
+        
+        return null;
     }
     
     public abstract Task<bool> IsAvailableAsync();
@@ -239,6 +267,25 @@ public abstract class BaseDownloadService : IDownloadService
             downloadInfo.CompletedAt = DateTime.UtcNow;
             
             song.LocalPath = localPath;
+            
+            // Check if this track belongs to a playlist and update M3U
+            try
+            {
+                var playlistSyncService = ServiceProvider.GetService(typeof(PlaylistSyncService)) as PlaylistSyncService;
+                if (playlistSyncService != null)
+                {
+                    var playlistId = playlistSyncService.GetPlaylistIdForTrack(songId);
+                    if (playlistId != null)
+                    {
+                        Logger.LogInformation("Track {SongId} belongs to playlist {PlaylistId}, adding to M3U", songId, playlistId);
+                        await playlistSyncService.AddTrackToM3UAsync(playlistId, song, localPath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to update playlist M3U for track {SongId}", songId);
+            }
             
             // Only register and scan if NOT in cache mode
             if (!isCache)

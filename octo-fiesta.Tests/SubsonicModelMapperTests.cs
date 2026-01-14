@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Search;
+using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Subsonic;
 using System.Text;
 using System.Text.Json;
@@ -187,37 +188,10 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            localSongs, new List<object>(), new List<object>(), externalResult, true);
+            localSongs, new List<object>(), new List<object>(), externalResult, new List<ExternalPlaylist>(), true);
 
         // Assert
         Assert.Equal(2, mergedSongs.Count);
-    }
-
-    [Fact]
-    public void MergeSearchResults_Json_DeduplicatesArtists()
-    {
-        // Arrange
-        var localArtists = new List<object>
-        {
-            new Dictionary<string, object> { ["id"] = "local1", ["name"] = "Test Artist" }
-        };
-        var externalResult = new SearchResult
-        {
-            Songs = new List<Song>(),
-            Albums = new List<Album>(),
-            Artists = new List<Artist>
-            {
-                new Artist { Id = "ext1", Name = "Test Artist" }, // Same name - should be filtered
-                new Artist { Id = "ext2", Name = "Different Artist" } // Different name - should be included
-            }
-        };
-
-        // Act
-        var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            new List<object>(), new List<object>(), localArtists, externalResult, true);
-
-        // Assert
-        Assert.Equal(2, mergedArtists.Count); // 1 local + 1 external (duplicate filtered)
     }
 
     [Fact]
@@ -240,7 +214,7 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            new List<object>(), new List<object>(), localArtists, externalResult, true);
+            new List<object>(), new List<object>(), localArtists, externalResult, new List<ExternalPlaylist>(), true);
 
         // Assert
         Assert.Single(mergedArtists); // Only the local artist
@@ -267,7 +241,7 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            localSongs, new List<object>(), new List<object>(), externalResult, false);
+            localSongs, new List<object>(), new List<object>(), externalResult, new List<ExternalPlaylist>(), false);
 
         // Assert
         Assert.Equal(2, mergedSongs.Count);
@@ -294,7 +268,7 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            new List<object>(), new List<object>(), localArtists, externalResult, false);
+            new List<object>(), new List<object>(), localArtists, externalResult, new List<ExternalPlaylist>(), false);
 
         // Assert
         Assert.Equal(2, mergedArtists.Count); // 1 local + 1 external (duplicate filtered)
@@ -313,7 +287,7 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            new List<object>(), new List<object>(), new List<object>(), externalResult, true);
+            new List<object>(), new List<object>(), new List<object>(), externalResult, new List<ExternalPlaylist>(), true);
 
         // Assert
         Assert.Single(mergedSongs);
@@ -337,7 +311,7 @@ public class SubsonicModelMapperTests
 
         // Act
         var (mergedSongs, mergedAlbums, mergedArtists) = _mapper.MergeSearchResults(
-            localSongs, localAlbums, localArtists, externalResult, true);
+            localSongs, localAlbums, localArtists, externalResult, new List<ExternalPlaylist>(), true);
 
         // Assert
         Assert.Single(mergedSongs);

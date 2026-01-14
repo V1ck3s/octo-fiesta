@@ -580,4 +580,226 @@ public class DeezerMetadataServiceTests
     }
 
     #endregion
+
+    #region Playlist Tests
+
+    [Fact]
+    public async Task SearchPlaylistsAsync_ReturnsListOfPlaylists()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            data = new[]
+            {
+                new
+                {
+                    id = 12345,
+                    title = "Chill Vibes",
+                    nb_tracks = 50,
+                    picture_medium = "https://example.com/playlist1.jpg",
+                    user = new { name = "Test User" }
+                },
+                new
+                {
+                    id = 67890,
+                    title = "Workout Mix",
+                    nb_tracks = 30,
+                    picture_medium = "https://example.com/playlist2.jpg",
+                    user = new { name = "Gym Buddy" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchPlaylistsAsync("chill");
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Equal("Chill Vibes", result[0].Name);
+        Assert.Equal(50, result[0].TrackCount);
+        Assert.Equal("pl-deezer-12345", result[0].Id);
+    }
+
+    [Fact]
+    public async Task SearchPlaylistsAsync_WithLimit_RespectsLimit()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            data = new[]
+            {
+                new
+                {
+                    id = 12345,
+                    title = "Playlist 1",
+                    nb_tracks = 10,
+                    picture_medium = "https://example.com/p1.jpg",
+                    user = new { name = "User 1" }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchPlaylistsAsync("test", 1);
+
+        // Assert
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public async Task SearchPlaylistsAsync_WithEmptyResults_ReturnsEmptyList()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            data = new object[] { }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.SearchPlaylistsAsync("nonexistent");
+
+        // Assert
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetPlaylistAsync_WithValidId_ReturnsPlaylist()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            id = 12345,
+            title = "Best Of Jazz",
+            description = "The best jazz tracks",
+            nb_tracks = 100,
+            picture_medium = "https://example.com/jazz.jpg",
+            user = new { name = "Jazz Lover" }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.GetPlaylistAsync("deezer", "12345");
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Best Of Jazz", result.Name);
+        Assert.Equal(100, result.TrackCount);
+        Assert.Equal("pl-deezer-12345", result.Id);
+    }
+
+    [Fact]
+    public async Task GetPlaylistAsync_WithWrongProvider_ReturnsNull()
+    {
+        // Act
+        var result = await _service.GetPlaylistAsync("qobuz", "12345");
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetPlaylistTracksAsync_ReturnsListOfSongs()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            tracks = new
+            {
+                data = new[]
+                {
+                    new
+                    {
+                        id = 111,
+                        title = "Track 1",
+                        duration = 200,
+                        track_position = 1,
+                        disk_number = 1,
+                        artist = new
+                        {
+                            id = 999,
+                            name = "Artist A"
+                        },
+                        album = new
+                        {
+                            id = 888,
+                            title = "Album X",
+                            release_date = "2020-01-15",
+                            cover_medium = "https://example.com/cover.jpg"
+                        }
+                    },
+                    new
+                    {
+                        id = 222,
+                        title = "Track 2",
+                        duration = 180,
+                        track_position = 2,
+                        disk_number = 1,
+                        artist = new
+                        {
+                            id = 777,
+                            name = "Artist B"
+                        },
+                        album = new
+                        {
+                            id = 666,
+                            title = "Album Y",
+                            release_date = "2021-05-20",
+                            cover_medium = "https://example.com/cover2.jpg"
+                        }
+                    }
+                }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.GetPlaylistTracksAsync("deezer", "12345");
+
+        // Assert
+        Assert.Equal(2, result.Count);
+        Assert.Equal("Track 1", result[0].Title);
+        Assert.Equal("Artist A", result[0].Artist);
+        Assert.Equal("ext-deezer-111", result[0].Id);
+    }
+
+    [Fact]
+    public async Task GetPlaylistTracksAsync_WithWrongProvider_ReturnsEmptyList()
+    {
+        // Act
+        var result = await _service.GetPlaylistTracksAsync("qobuz", "12345");
+
+        // Assert
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetPlaylistTracksAsync_WithEmptyPlaylist_ReturnsEmptyList()
+    {
+        // Arrange
+        var deezerResponse = new
+        {
+            tracks = new
+            {
+                data = new object[] { }
+            }
+        };
+
+        SetupHttpResponse(JsonSerializer.Serialize(deezerResponse));
+
+        // Act
+        var result = await _service.GetPlaylistTracksAsync("deezer", "12345");
+
+        // Assert
+        Assert.Empty(result);
+    }
+
+    #endregion
 }

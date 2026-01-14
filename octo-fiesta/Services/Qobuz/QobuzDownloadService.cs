@@ -43,8 +43,9 @@ public class QobuzDownloadService : BaseDownloadService
         QobuzBundleService bundleService,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<QobuzSettings> qobuzSettings,
+        IServiceProvider serviceProvider,
         ILogger<QobuzDownloadService> logger)
-        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, logger)
+        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _bundleService = bundleService;

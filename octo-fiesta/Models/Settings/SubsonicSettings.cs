@@ -113,4 +113,20 @@ public class SubsonicSettings
     /// Only applies when StorageMode is Cache
     /// </summary>
     public int CacheDurationHours { get; set; } = 1;
+    
+    /// <summary>
+    /// Enable external playlist search and streaming (default: true)
+    /// Environment variable: ENABLE_EXTERNAL_PLAYLISTS
+    /// When enabled, users can search for playlists from the configured music provider
+    /// Playlists appear as "albums" in search results with genre "Playlist"
+    /// </summary>
+    public bool EnableExternalPlaylists { get; set; } = true;
+    
+    /// <summary>
+    /// Directory name for storing playlist .m3u files (default: "playlists")
+    /// Environment variable: PLAYLISTS_DIRECTORY
+    /// Relative to the music library root directory
+    /// Playlist files will be stored in {MusicDirectory}/{PlaylistsDirectory}/
+    /// </summary>
+    public string PlaylistsDirectory { get; set; } = "playlists";
 }

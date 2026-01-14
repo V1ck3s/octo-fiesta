@@ -43,6 +43,14 @@ public interface IDownloadService
     DownloadInfo? GetDownloadStatus(string songId);
     
     /// <summary>
+    /// Gets the local path for a song if it has been downloaded already
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalId">The ID on the external provider</param>
+    /// <returns>The local file path if exists, null otherwise</returns>
+    Task<string?> GetLocalPathIfExistsAsync(string externalProvider, string externalId);
+    
+    /// <summary>
     /// Checks if the service is properly configured and functional
     /// </summary>
     Task<bool> IsAvailableAsync();
