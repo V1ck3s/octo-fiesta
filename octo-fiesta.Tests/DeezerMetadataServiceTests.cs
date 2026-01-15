@@ -767,7 +767,7 @@ public class DeezerMetadataServiceTests
         Assert.Equal(2, result.Count);
         Assert.Equal("Track 1", result[0].Title);
         Assert.Equal("Artist A", result[0].Artist);
-        Assert.Equal("ext-deezer-111", result[0].Id);
+        Assert.Equal("ext-deezer-song-111", result[0].Id);
     }
 
     [Fact]

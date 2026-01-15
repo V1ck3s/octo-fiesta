@@ -22,7 +22,6 @@ public class QobuzDownloadServiceTests : IDisposable
     private readonly Mock<IMusicMetadataService> _metadataServiceMock;
     private readonly Mock<ILogger<QobuzBundleService>> _bundleServiceLoggerMock;
     private readonly Mock<ILogger<QobuzDownloadService>> _loggerMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly IConfiguration _configuration;
     private readonly string _testDownloadPath;
     private QobuzBundleService _bundleService;
@@ -42,7 +41,6 @@ public class QobuzDownloadServiceTests : IDisposable
         _metadataServiceMock = new Mock<IMusicMetadataService>();
         _bundleServiceLoggerMock = new Mock<ILogger<QobuzBundleService>>();
         _loggerMock = new Mock<ILogger<QobuzDownloadService>>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
 
         // Create a real QobuzBundleService for testing (it will use the mocked HttpClient)
         _bundleService = new QobuzBundleService(_httpClientFactoryMock.Object, _bundleServiceLoggerMock.Object);
@@ -88,6 +86,10 @@ public class QobuzDownloadServiceTests : IDisposable
             Quality = quality
         });
 
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(octo_fiesta.Services.Subsonic.PlaylistSyncService)))
+            .Returns(null);
+
         return new QobuzDownloadService(
             _httpClientFactoryMock.Object,
             config,
@@ -96,7 +98,7 @@ public class QobuzDownloadServiceTests : IDisposable
             _bundleService,
             subsonicSettings,
             qobuzSettings,
-            _serviceProviderMock.Object,
+            serviceProviderMock.Object,
             _loggerMock.Object);
     }
 

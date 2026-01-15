@@ -30,6 +30,10 @@ public class PlaylistSyncService
     private readonly string _musicDirectory;
     private readonly string _playlistDirectory;
     
+    // Cancellation token for background cleanup task
+    private readonly CancellationTokenSource _cleanupCancellationTokenSource = new();
+    private readonly Task _cleanupTask;
+    
     public PlaylistSyncService(
         IEnumerable<IMusicMetadataService> metadataServices,
         IEnumerable<IDownloadService> downloadServices,
@@ -58,7 +62,20 @@ public class PlaylistSyncService
         }
         
         // Start background cleanup task for expired cache entries
-        _ = Task.Run(CleanupExpiredCacheEntriesAsync);
+        _cleanupTask = Task.Run(() => CleanupExpiredCacheEntriesAsync(_cleanupCancellationTokenSource.Token));
+    }
+    
+    /// <summary>
+    /// Gets the metadata service for the specified provider
+    /// </summary>
+    private IMusicMetadataService? GetMetadataServiceForProvider(string provider)
+    {
+        return provider.ToLower() switch
+        {
+            "deezer" => _deezerMetadataService,
+            "qobuz" => _qobuzMetadataService,
+            _ => null
+        };
     }
     
     /// <summary>
@@ -69,7 +86,7 @@ public class PlaylistSyncService
     {
         var expiresAt = DateTime.UtcNow.Add(CacheTTL);
         _trackPlaylistCache[trackId] = (playlistId, expiresAt);
-        _logger.LogDebug("Added track {TrackId} to playlist cache with playlistId {PlaylistId}", trackId, playlistId);
+        _logger.LogInformation("Added track {TrackId} to playlist cache with playlistId {PlaylistId}", trackId, playlistId);
     }
     
     /// <summary>
@@ -112,12 +129,11 @@ public class PlaylistSyncService
             var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(playlistId);
             
             // Get playlist metadata
-            var metadataService = provider.ToLower() switch
+            var metadataService = GetMetadataServiceForProvider(provider);
+            if (metadataService == null)
             {
-                "deezer" => _deezerMetadataService,
-                "qobuz" => _qobuzMetadataService,
-                _ => throw new NotSupportedException($"Provider '{provider}' not supported for playlists")
-            };
+                throw new NotSupportedException($"Provider '{provider}' not supported for playlists");
+            }
             
             var playlist = await metadataService.GetPlaylistAsync(provider, externalId);
             if (playlist == null)
@@ -145,7 +161,7 @@ public class PlaylistSyncService
                 return;
             }
             
-            // Download all tracks
+            // Download all tracks (M3U will be created once at the end)
             var downloadedTracks = new List<(Song Song, string LocalPath)>();
             
             foreach (var track in tracks)
@@ -159,6 +175,7 @@ public class PlaylistSyncService
                     }
                     
                     // Add track to playlist cache BEFORE downloading
+                    // This marks it as part of a full playlist download, so AddTrackToM3UAsync will skip real-time updates
                     var trackId = $"ext-{provider}-{track.ExternalId}";
                     AddTrackToPlaylistCache(trackId, playlistId);
                     
@@ -180,7 +197,7 @@ public class PlaylistSyncService
                 return;
             }
             
-            // Create M3U file
+            // Create M3U file ONCE at the end with all downloaded tracks
             await CreateM3UPlaylistAsync(playlist.Name, downloadedTracks);
             
             _logger.LogInformation("Playlist download completed: {DownloadedCount}/{TotalCount} tracks for '{PlaylistName}'",
@@ -233,11 +250,19 @@ public class PlaylistSyncService
     
     /// <summary>
     /// Adds a track to an existing M3U playlist or creates it if it doesn't exist.
-    /// This is called progressively as tracks are downloaded.
+    /// Called when individual tracks are played/downloaded (NOT during full playlist download).
     /// The M3U is rebuilt in the correct playlist order each time.
     /// </summary>
-    public async Task AddTrackToM3UAsync(string playlistId, Song track, string localPath)
+    /// <param name="isFullPlaylistDownload">If true, skips M3U update (will be done at the end by DownloadFullPlaylistAsync)</param>
+    public async Task AddTrackToM3UAsync(string playlistId, Song track, string localPath, bool isFullPlaylistDownload = false)
     {
+        // Skip real-time updates during full playlist download (M3U will be created once at the end)
+        if (isFullPlaylistDownload)
+        {
+            _logger.LogDebug("Skipping M3U update for track {TrackId} (full playlist download in progress)", track.Id);
+            return;
+        }
+        
         try
         {
             // Get playlist metadata to get the name and track order
@@ -249,13 +274,7 @@ public class PlaylistSyncService
             
             var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(playlistId);
             
-            var metadataService = provider.ToLower() switch
-            {
-                "deezer" => _deezerMetadataService,
-                "qobuz" => _qobuzMetadataService,
-                _ => null
-            };
-            
+            var metadataService = GetMetadataServiceForProvider(provider);
             if (metadataService == null)
             {
                 _logger.LogWarning("No metadata service found for provider '{Provider}'", provider);
@@ -342,13 +361,13 @@ public class PlaylistSyncService
     /// <summary>
     /// Background task to clean up expired cache entries every minute
     /// </summary>
-    private async Task CleanupExpiredCacheEntriesAsync()
+    private async Task CleanupExpiredCacheEntriesAsync(CancellationToken cancellationToken)
     {
-        while (true)
+        while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(1));
+                await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken);
                 
                 var now = DateTime.UtcNow;
                 var expiredKeys = _trackPlaylistCache
@@ -366,10 +385,27 @@ public class PlaylistSyncService
                     _logger.LogDebug("Cleaned up {Count} expired playlist cache entries", expiredKeys.Count);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation is requested
+                break;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Error during playlist cache cleanup");
             }
         }
+        
+        _logger.LogInformation("Playlist cache cleanup task stopped");
+    }
+    
+    /// <summary>
+    /// Stops the background cleanup task
+    /// </summary>
+    public async Task StopCleanupAsync()
+    {
+        _cleanupCancellationTokenSource.Cancel();
+        await _cleanupTask;
+        _cleanupCancellationTokenSource.Dispose();
     }
 }

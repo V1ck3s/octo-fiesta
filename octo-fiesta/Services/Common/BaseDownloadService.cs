@@ -22,13 +22,29 @@ public abstract class BaseDownloadService : IDownloadService
     protected readonly IMusicMetadataService MetadataService;
     protected readonly SubsonicSettings SubsonicSettings;
     protected readonly ILogger Logger;
-    protected readonly IServiceProvider ServiceProvider;
+    private readonly IServiceProvider _serviceProvider;
     
     protected readonly string DownloadPath;
     protected readonly string CachePath;
     
     protected readonly Dictionary<string, DownloadInfo> ActiveDownloads = new();
     protected readonly SemaphoreSlim DownloadLock = new(1, 1);
+    
+    /// <summary>
+    /// Lazy-loaded PlaylistSyncService to avoid circular dependency
+    /// </summary>
+    private PlaylistSyncService? _playlistSyncService;
+    protected PlaylistSyncService? PlaylistSyncService
+    {
+        get
+        {
+            if (_playlistSyncService == null)
+            {
+                _playlistSyncService = _serviceProvider.GetService<PlaylistSyncService>();
+            }
+            return _playlistSyncService;
+        }
+    }
     
     /// <summary>
     /// Provider name (e.g., "deezer", "qobuz")
@@ -47,7 +63,7 @@ public abstract class BaseDownloadService : IDownloadService
         LocalLibraryService = localLibraryService;
         MetadataService = metadataService;
         SubsonicSettings = subsonicSettings;
-        ServiceProvider = serviceProvider;
+        _serviceProvider = serviceProvider;
         Logger = logger;
         
         DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
@@ -269,22 +285,21 @@ public abstract class BaseDownloadService : IDownloadService
             song.LocalPath = localPath;
             
             // Check if this track belongs to a playlist and update M3U
-            try
+            if (PlaylistSyncService != null)
             {
-                var playlistSyncService = ServiceProvider.GetService(typeof(PlaylistSyncService)) as PlaylistSyncService;
-                if (playlistSyncService != null)
+                try
                 {
-                    var playlistId = playlistSyncService.GetPlaylistIdForTrack(songId);
+                    var playlistId = PlaylistSyncService.GetPlaylistIdForTrack(songId);
                     if (playlistId != null)
                     {
                         Logger.LogInformation("Track {SongId} belongs to playlist {PlaylistId}, adding to M3U", songId, playlistId);
-                        await playlistSyncService.AddTrackToM3UAsync(playlistId, song, localPath);
+                        await PlaylistSyncService.AddTrackToM3UAsync(playlistId, song, localPath, isFullPlaylistDownload: false);
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Failed to update playlist M3U for track {SongId}", songId);
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to update playlist M3U for track {SongId}", songId);
+                }
             }
             
             // Only register and scan if NOT in cache mode

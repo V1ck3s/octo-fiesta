@@ -26,11 +26,14 @@ public class QobuzMetadataServiceTests
         _httpClientFactoryMock = new Mock<IHttpClientFactory>();
         _httpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
         
-        var httpClientFactory = Mock.Of<IHttpClientFactory>();
+        // Mock QobuzBundleService (methods are now virtual so can be mocked)
+        var bundleHttpClientFactoryMock = new Mock<IHttpClientFactory>();
+        bundleHttpClientFactoryMock.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
         var bundleLogger = Mock.Of<ILogger<QobuzBundleService>>();
-        
-        _bundleServiceMock = new Mock<QobuzBundleService>(httpClientFactory, bundleLogger);
+        _bundleServiceMock = new Mock<QobuzBundleService>(bundleHttpClientFactoryMock.Object, bundleLogger) { CallBase = false };
         _bundleServiceMock.Setup(b => b.GetAppIdAsync()).ReturnsAsync("fake-app-id-12345");
+        _bundleServiceMock.Setup(b => b.GetSecretsAsync()).ReturnsAsync(new List<string> { "fake-secret" });
+        _bundleServiceMock.Setup(b => b.GetSecretAsync(It.IsAny<int>())).ReturnsAsync("fake-secret");
         
         _loggerMock = new Mock<ILogger<QobuzMetadataService>>();
         

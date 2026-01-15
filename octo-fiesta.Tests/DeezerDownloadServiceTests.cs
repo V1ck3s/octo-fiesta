@@ -24,7 +24,6 @@ public class DeezerDownloadServiceTests : IDisposable
     private readonly Mock<ILocalLibraryService> _localLibraryServiceMock;
     private readonly Mock<IMusicMetadataService> _metadataServiceMock;
     private readonly Mock<ILogger<DeezerDownloadService>> _loggerMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly IConfiguration _configuration;
     private readonly string _testDownloadPath;
 
@@ -42,7 +41,6 @@ public class DeezerDownloadServiceTests : IDisposable
         _localLibraryServiceMock = new Mock<ILocalLibraryService>();
         _metadataServiceMock = new Mock<IMusicMetadataService>();
         _loggerMock = new Mock<ILogger<DeezerDownloadService>>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
 
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -85,6 +83,10 @@ public class DeezerDownloadServiceTests : IDisposable
             Quality = null
         });
 
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(octo_fiesta.Services.Subsonic.PlaylistSyncService)))
+            .Returns(null);
+
         return new DeezerDownloadService(
             _httpClientFactoryMock.Object,
             config,
@@ -92,7 +94,7 @@ public class DeezerDownloadServiceTests : IDisposable
             _metadataServiceMock.Object,
             subsonicSettings,
             deezerSettings,
-            _serviceProviderMock.Object,
+            serviceProviderMock.Object,
             _loggerMock.Object);
     }
 

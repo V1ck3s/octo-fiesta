@@ -8,6 +8,7 @@ using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Common;
+using octo_fiesta.Services.Subsonic;
 using Microsoft.Extensions.Options;
 using IOFile = System.IO.File;
 

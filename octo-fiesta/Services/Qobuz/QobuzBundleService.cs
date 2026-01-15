@@ -40,7 +40,7 @@ public class QobuzBundleService
     /// <summary>
     /// Gets the Qobuz App ID, extracting it from the bundle if not cached
     /// </summary>
-    public async Task<string> GetAppIdAsync()
+    public virtual async Task<string> GetAppIdAsync()
     {
         await EnsureInitializedAsync();
         return _cachedAppId!;
@@ -49,7 +49,7 @@ public class QobuzBundleService
     /// <summary>
     /// Gets the Qobuz secrets list, extracting them from the bundle if not cached
     /// </summary>
-    public async Task<List<string>> GetSecretsAsync()
+    public virtual async Task<List<string>> GetSecretsAsync()
     {
         await EnsureInitializedAsync();
         return _cachedSecrets!;
@@ -58,7 +58,7 @@ public class QobuzBundleService
     /// <summary>
     /// Gets a specific secret by index (used for signing requests)
     /// </summary>
-    public async Task<string> GetSecretAsync(int index = 0)
+    public virtual async Task<string> GetSecretAsync(int index = 0)
     {
         var secrets = await GetSecretsAsync();
         if (index < 0 || index >= secrets.Count)
