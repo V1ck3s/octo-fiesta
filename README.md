@@ -116,6 +116,7 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
 |---------|-------------|
 | `Subsonic:Url` | URL of your Navidrome/Subsonic server |
 | `Subsonic:MusicService` | Music provider to use: `Deezer` or `Qobuz` (default: `Deezer`) |
+| `Subsonic:AutoUpgradeQuality` | Re-download existing MP3 tracks as FLAC when higher quality is available (default: `false`) |
 | `Library:DownloadPath` | Directory where downloaded songs are stored |
 
 ### Deezer Settings

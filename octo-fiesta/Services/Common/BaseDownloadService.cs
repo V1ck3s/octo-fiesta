@@ -166,6 +166,12 @@ public abstract class BaseDownloadService : IDownloadService
     /// </summary>
     protected abstract string? ExtractExternalIdFromAlbumId(string albumId);
     
+    /// <summary>
+    /// Gets the target quality setting for this provider.
+    /// Used for quality upgrade comparison.
+    /// </summary>
+    protected abstract string? GetTargetQuality();
+    
     #endregion
     
     #region Common Download Logic
@@ -194,8 +200,37 @@ public abstract class BaseDownloadService : IDownloadService
                 var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
                 if (existingPath != null && IOFile.Exists(existingPath))
                 {
-                    Logger.LogInformation("Song already downloaded: {Path}", existingPath);
-                    return existingPath;
+                    // Check if we should upgrade quality
+                    if (SubsonicSettings.AutoUpgradeQuality && QualityHelper.ShouldUpgrade(existingPath, GetTargetQuality()))
+                    {
+                        Logger.LogInformation("Upgrading quality for: {Path}", existingPath);
+                        var backupPath = existingPath + ".backup";
+                        try
+                        {
+                            IOFile.Move(existingPath, backupPath);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning(ex, "Failed to create backup for quality upgrade, skipping upgrade");
+                            return existingPath;
+                        }
+                        
+                        // Store backup path to restore on failure
+                        ActiveDownloads[songId] = new DownloadInfo
+                        {
+                            SongId = songId,
+                            ExternalId = externalId,
+                            ExternalProvider = externalProvider,
+                            Status = DownloadStatus.InProgress,
+                            StartedAt = DateTime.UtcNow,
+                            BackupPath = backupPath
+                        };
+                    }
+                    else
+                    {
+                        Logger.LogInformation("Song already downloaded: {Path}", existingPath);
+                        return existingPath;
+                    }
                 }
             }
             else
@@ -345,12 +380,44 @@ public abstract class BaseDownloadService : IDownloadService
             {
                 downloadInfo.Status = DownloadStatus.Failed;
                 downloadInfo.ErrorMessage = ex.Message;
+                
+                // Restore backup if quality upgrade failed
+                if (!string.IsNullOrEmpty(downloadInfo.BackupPath) && IOFile.Exists(downloadInfo.BackupPath))
+                {
+                    try
+                    {
+                        var originalPath = downloadInfo.BackupPath.Replace(".backup", "");
+                        IOFile.Move(downloadInfo.BackupPath, originalPath);
+                        Logger.LogInformation("Restored backup after failed quality upgrade: {Path}", originalPath);
+                    }
+                    catch (Exception restoreEx)
+                    {
+                        Logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", downloadInfo.BackupPath);
+                    }
+                }
             }
             Logger.LogError(ex, "Download failed for {SongId}", songId);
             throw;
         }
         finally
         {
+            // Clean up backup file on success
+            if (ActiveDownloads.TryGetValue(songId, out var info) && 
+                info.Status == DownloadStatus.Completed && 
+                !string.IsNullOrEmpty(info.BackupPath) && 
+                IOFile.Exists(info.BackupPath))
+            {
+                try
+                {
+                    IOFile.Delete(info.BackupPath);
+                    Logger.LogInformation("Deleted backup after successful quality upgrade");
+                }
+                catch (Exception deleteEx)
+                {
+                    Logger.LogWarning(deleteEx, "Failed to delete backup file: {BackupPath}", info.BackupPath);
+                }
+            }
+            
             DownloadLock.Release();
         }
     }

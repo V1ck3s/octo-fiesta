@@ -129,4 +129,12 @@ public class SubsonicSettings
     /// Playlist files will be stored in {MusicDirectory}/{PlaylistsDirectory}/
     /// </summary>
     public string PlaylistsDirectory { get; set; } = "playlists";
+    
+    /// <summary>
+    /// Automatically re-download tracks when higher quality is available (default: false)
+    /// Environment variable: AUTO_UPGRADE_QUALITY
+    /// When enabled, if an existing track is MP3 and FLAC quality is now available,
+    /// the track will be re-downloaded in FLAC
+    /// </summary>
+    public bool AutoUpgradeQuality { get; set; } = false;
 }

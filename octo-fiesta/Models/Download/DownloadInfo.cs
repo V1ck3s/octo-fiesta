@@ -14,4 +14,9 @@ public class DownloadInfo
     public string? ErrorMessage { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    
+    /// <summary>
+    /// Path to backup file during quality upgrade (used to restore on failure)
+    /// </summary>
+    public string? BackupPath { get; set; }
 }

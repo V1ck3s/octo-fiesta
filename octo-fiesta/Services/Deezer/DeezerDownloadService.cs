@@ -94,6 +94,8 @@ public class DeezerDownloadService : BaseDownloadService
         }
         return null;
     }
+    
+    protected override string? GetTargetQuality() => _preferredQuality;
 
     protected override async Task<string> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
