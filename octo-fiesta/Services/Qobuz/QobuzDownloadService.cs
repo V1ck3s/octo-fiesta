@@ -90,7 +90,7 @@ public class QobuzDownloadService : BaseDownloadService
         return null;
     }
     
-    protected override string? GetTargetQuality() => _preferredQuality;
+    protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC_24_HIGH";
 
     protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {

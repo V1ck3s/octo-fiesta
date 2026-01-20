@@ -206,10 +206,32 @@ public abstract class BaseDownloadService : IDownloadService
                 if (existingMapping != null && IOFile.Exists(existingMapping.LocalPath))
                 {
                     // Check if we should upgrade quality
-                    if (SubsonicSettings.AutoUpgradeQuality && QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, GetTargetQuality()))
+                    var targetQuality = GetTargetQuality();
+                    var shouldUpgrade = QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, targetQuality);
+                    
+                    if (SubsonicSettings.AutoUpgradeQuality && shouldUpgrade)
                     {
+                        // Check if another upgrade is already in progress for this song
+                        if (ActiveDownloads.TryGetValue(songId, out var existingDownload) && existingDownload.Status == DownloadStatus.InProgress)
+                        {
+                            Logger.LogInformation("Upgrade already in progress for {SongId}, waiting...", songId);
+                            DownloadLock.Release();
+                            
+                            while (ActiveDownloads.TryGetValue(songId, out existingDownload) && existingDownload.Status == DownloadStatus.InProgress)
+                            {
+                                await Task.Delay(500, cancellationToken);
+                            }
+                            
+                            if (existingDownload?.Status == DownloadStatus.Completed && existingDownload.LocalPath != null)
+                            {
+                                return existingDownload.LocalPath;
+                            }
+                            
+                            throw new Exception(existingDownload?.ErrorMessage ?? "Upgrade failed");
+                        }
+                        
                         Logger.LogInformation("Upgrading quality from {OldQuality} to {NewQuality} for: {Path}", 
-                            existingMapping.DownloadedQuality ?? "unknown", GetTargetQuality(), existingMapping.LocalPath);
+                            existingMapping.DownloadedQuality ?? "unknown", targetQuality, existingMapping.LocalPath);
                         var backupPath = existingMapping.LocalPath + ".backup";
                         try
                         {
@@ -221,7 +243,7 @@ public abstract class BaseDownloadService : IDownloadService
                             return existingMapping.LocalPath;
                         }
                         
-                        // Store backup path to restore on failure
+                        // Store backup path to restore on failure - mark as upgrade so we skip the "in progress" check below
                         ActiveDownloads[songId] = new DownloadInfo
                         {
                             SongId = songId,
@@ -231,6 +253,9 @@ public abstract class BaseDownloadService : IDownloadService
                             StartedAt = DateTime.UtcNow,
                             BackupPath = backupPath
                         };
+                        
+                        // Skip the "download in progress" check below since we just started this upgrade
+                        goto startDownload;
                     }
                     else
                     {
@@ -272,6 +297,8 @@ public abstract class BaseDownloadService : IDownloadService
                 throw new Exception(activeDownload?.ErrorMessage ?? "Download failed");
             }
 
+            startDownload:
+
             // Get metadata
             // In Album mode, fetch the full album first to ensure AlbumArtist is correctly set
             Song? song = null;
@@ -307,15 +334,19 @@ public abstract class BaseDownloadService : IDownloadService
                 throw new Exception("Song not found");
             }
 
-            var downloadInfo = new DownloadInfo
+            // Only create new DownloadInfo if not already created (e.g., by upgrade logic)
+            if (!ActiveDownloads.TryGetValue(songId, out var downloadInfo))
             {
-                SongId = songId,
-                ExternalId = externalId,
-                ExternalProvider = externalProvider,
-                Status = DownloadStatus.InProgress,
-                StartedAt = DateTime.UtcNow
-            };
-            ActiveDownloads[songId] = downloadInfo;
+                downloadInfo = new DownloadInfo
+                {
+                    SongId = songId,
+                    ExternalId = externalId,
+                    ExternalProvider = externalProvider,
+                    Status = DownloadStatus.InProgress,
+                    StartedAt = DateTime.UtcNow
+                };
+                ActiveDownloads[songId] = downloadInfo;
+            }
 
             var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
             var localPath = downloadResult.LocalPath;

@@ -142,9 +142,21 @@ public class DeezerDownloadServiceTests : IDisposable
         var existingPath = Path.Combine(_testDownloadPath, "existing-song.mp3");
         await File.WriteAllTextAsync(existingPath, "fake audio content");
 
+        var mapping = new LocalSongMapping
+        {
+            ExternalProvider = "deezer",
+            ExternalId = "123456",
+            LocalPath = existingPath,
+            Title = "Test Song",
+            Artist = "Test Artist",
+            Album = "Test Album",
+            DownloadedAt = DateTime.UtcNow,
+            DownloadedQuality = "FLAC" // Same or higher quality, so no upgrade needed
+        };
+
         _localLibraryServiceMock
-            .Setup(s => s.GetLocalPathForExternalSongAsync("deezer", "123456"))
-            .ReturnsAsync(existingPath);
+            .Setup(s => s.GetMappingForExternalSongAsync("deezer", "123456"))
+            .ReturnsAsync(mapping);
 
         var service = CreateService(arl: "test-arl");
 

@@ -138,14 +138,8 @@ public class SubsonicController : ControllerBase
             return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
-        var localPath = await _localLibraryService.GetLocalPathForExternalSongAsync(provider!, externalId!);
-
-        if (localPath != null && System.IO.File.Exists(localPath))
-        {
-            var stream = System.IO.File.OpenRead(localPath);
-            return File(stream, GetContentType(localPath), enableRangeProcessing: true);
-        }
-
+        // Always go through DownloadAndStreamAsync for external songs
+        // This ensures quality upgrade logic is applied
         try
         {
             var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, HttpContext.RequestAborted);
