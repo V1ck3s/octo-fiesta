@@ -97,7 +97,7 @@ public class DeezerDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality;
 
-    protected override async Task<string> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         var downloadInfo = await GetTrackDownloadInfoAsync(trackId, cancellationToken);
         
@@ -109,6 +109,15 @@ public class DeezerDownloadService : BaseDownloadService
         {
             "FLAC" => ".flac",
             _ => ".mp3"
+        };
+        
+        // Determine actual quality for storage
+        var downloadedQuality = downloadInfo.Format?.ToUpper() switch
+        {
+            "FLAC" => "FLAC",
+            "MP3_320" => "MP3_320",
+            "MP3_128" => "MP3_128",
+            _ => downloadInfo.Format
         };
 
         // Build organized folder structure: Artist/Album/Track using AlbumArtist (fallback to Artist for singles)
@@ -147,7 +156,7 @@ public class DeezerDownloadService : BaseDownloadService
         // Write metadata and cover art
         await WriteMetadataAsync(outputPath, song, cancellationToken);
 
-        return outputPath;
+        return new DownloadResult(outputPath, downloadedQuality);
     }
 
     #endregion
@@ -196,7 +205,7 @@ public class DeezerDownloadService : BaseDownloadService
         });
     }
 
-    private async Task<DownloadResult> GetTrackDownloadInfoAsync(string trackId, CancellationToken cancellationToken)
+    private async Task<TrackDownloadInfo> GetTrackDownloadInfoAsync(string trackId, CancellationToken cancellationToken)
     {
         var tryDownload = async (string arl) =>
         {
@@ -317,7 +326,7 @@ public class DeezerDownloadService : BaseDownloadService
 
                     Logger.LogInformation("Selected quality: {Format}", selectedFormat);
 
-                    return new DownloadResult
+                    return new TrackDownloadInfo
                     {
                         DownloadUrl = downloadUrl,
                         Format = selectedFormat ?? "MP3_128",
@@ -520,7 +529,7 @@ public class DeezerDownloadService : BaseDownloadService
 
     #endregion
 
-    private class DownloadResult
+    private class TrackDownloadInfo
     {
         public string DownloadUrl { get; set; } = string.Empty;
         public string Format { get; set; } = string.Empty;

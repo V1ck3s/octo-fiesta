@@ -58,7 +58,7 @@ public class LocalLibraryService : ILocalLibraryService
         return null;
     }
 
-    public async Task RegisterDownloadedSongAsync(Song song, string localPath)
+public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)
     {
         if (song.ExternalProvider == null || song.ExternalId == null) return;
         
@@ -78,7 +78,8 @@ public class LocalLibraryService : ILocalLibraryService
                 Title = song.Title,
                 Artist = song.Artist,
                 Album = song.Album,
-                DownloadedAt = DateTime.UtcNow
+                DownloadedAt = DateTime.UtcNow,
+                DownloadedQuality = downloadedQuality
             };
             
             await SaveMappingsAsync(mappings);
@@ -87,6 +88,19 @@ public class LocalLibraryService : ILocalLibraryService
         {
             _lock.Release();
         }
+    }
+    
+    public async Task<LocalSongMapping?> GetMappingForExternalSongAsync(string externalProvider, string externalId)
+    {
+        var mappings = await LoadMappingsAsync();
+        var key = $"{externalProvider}:{externalId}";
+        
+        if (mappings.TryGetValue(key, out var mapping) && File.Exists(mapping.LocalPath))
+        {
+            return mapping;
+        }
+        
+        return null;
     }
 
     public async Task<string?> GetLocalIdForExternalSongAsync(string externalProvider, string externalId)
@@ -272,4 +286,10 @@ public class LocalSongMapping
     public string Artist { get; set; } = string.Empty;
     public string Album { get; set; } = string.Empty;
     public DateTime DownloadedAt { get; set; }
+    
+    /// <summary>
+    /// Quality of the downloaded file (e.g., "FLAC", "MP3_320", "MP3_128")
+    /// Null for legacy downloads before quality tracking was added
+    /// </summary>
+    public string? DownloadedQuality { get; set; }
 }

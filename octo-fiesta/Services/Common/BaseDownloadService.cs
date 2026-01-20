@@ -151,14 +151,19 @@ public abstract class BaseDownloadService : IDownloadService
     #region Template Methods (to be implemented by subclasses)
     
     /// <summary>
+    /// Result of a track download containing path and quality info
+    /// </summary>
+    public record DownloadResult(string LocalPath, string? DownloadedQuality);
+    
+    /// <summary>
     /// Downloads a track and saves it to disk.
     /// Subclasses implement provider-specific logic (encryption, authentication, etc.)
     /// </summary>
     /// <param name="trackId">External track ID</param>
     /// <param name="song">Song metadata</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Local file path where the track was saved</returns>
-    protected abstract Task<string> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken);
+    /// <returns>Download result with local file path and quality</returns>
+    protected abstract Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken);
     
     /// <summary>
     /// Extracts the external album ID from the internal album ID format.
@@ -197,22 +202,23 @@ public abstract class BaseDownloadService : IDownloadService
             // Check if already downloaded (skip for cache mode as we want to check cache folder)
             if (!isCache)
             {
-                var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
-                if (existingPath != null && IOFile.Exists(existingPath))
+                var existingMapping = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
+                if (existingMapping != null && IOFile.Exists(existingMapping.LocalPath))
                 {
                     // Check if we should upgrade quality
-                    if (SubsonicSettings.AutoUpgradeQuality && QualityHelper.ShouldUpgrade(existingPath, GetTargetQuality()))
+                    if (SubsonicSettings.AutoUpgradeQuality && QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, GetTargetQuality()))
                     {
-                        Logger.LogInformation("Upgrading quality for: {Path}", existingPath);
-                        var backupPath = existingPath + ".backup";
+                        Logger.LogInformation("Upgrading quality from {OldQuality} to {NewQuality} for: {Path}", 
+                            existingMapping.DownloadedQuality ?? "unknown", GetTargetQuality(), existingMapping.LocalPath);
+                        var backupPath = existingMapping.LocalPath + ".backup";
                         try
                         {
-                            IOFile.Move(existingPath, backupPath);
+                            IOFile.Move(existingMapping.LocalPath, backupPath);
                         }
                         catch (Exception ex)
                         {
                             Logger.LogWarning(ex, "Failed to create backup for quality upgrade, skipping upgrade");
-                            return existingPath;
+                            return existingMapping.LocalPath;
                         }
                         
                         // Store backup path to restore on failure
@@ -228,8 +234,8 @@ public abstract class BaseDownloadService : IDownloadService
                     }
                     else
                     {
-                        Logger.LogInformation("Song already downloaded: {Path}", existingPath);
-                        return existingPath;
+                        Logger.LogInformation("Song already downloaded: {Path}", existingMapping.LocalPath);
+                        return existingMapping.LocalPath;
                     }
                 }
             }
@@ -311,7 +317,8 @@ public abstract class BaseDownloadService : IDownloadService
             };
             ActiveDownloads[songId] = downloadInfo;
 
-            var localPath = await DownloadTrackAsync(externalId, song, cancellationToken);
+            var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
+            var localPath = downloadResult.LocalPath;
             
             downloadInfo.Status = DownloadStatus.Completed;
             downloadInfo.LocalPath = localPath;
@@ -340,7 +347,7 @@ public abstract class BaseDownloadService : IDownloadService
             // Only register and scan if NOT in cache mode
             if (!isCache)
             {
-                await LocalLibraryService.RegisterDownloadedSongAsync(song, localPath);
+                await LocalLibraryService.RegisterDownloadedSongAsync(song, localPath, downloadResult.DownloadedQuality);
                 
                 // Trigger a Subsonic library rescan (with debounce)
                 _ = Task.Run(async () =>

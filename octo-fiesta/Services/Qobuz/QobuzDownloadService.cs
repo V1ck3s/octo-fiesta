@@ -92,7 +92,7 @@ public class QobuzDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality;
 
-    protected override async Task<string> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         // Get the download URL with signature
         var downloadInfo = await GetTrackDownloadUrlAsync(trackId, cancellationToken);
@@ -109,6 +109,16 @@ public class QobuzDownloadService : BaseDownloadService
 
         // Determine extension based on MIME type
         var extension = downloadInfo.MimeType?.Contains("flac") == true ? ".flac" : ".mp3";
+        
+        // Determine quality string for storage
+        var downloadedQuality = downloadInfo.FormatId switch
+        {
+            FormatFlac24High => "FLAC_24_HIGH",
+            FormatFlac24Low => "FLAC_24_LOW",
+            FormatFlac16 => "FLAC_16",
+            FormatMp3320 => "MP3_320",
+            _ => downloadInfo.MimeType?.Contains("flac") == true ? "FLAC" : "MP3_320"
+        };
 
         // Build organized folder structure using AlbumArtist (fallback to Artist for singles)
         var artistForPath = song.AlbumArtist ?? song.Artist;
@@ -133,7 +143,7 @@ public class QobuzDownloadService : BaseDownloadService
         // Write metadata and cover art
         await WriteMetadataAsync(outputPath, song, cancellationToken);
 
-        return outputPath;
+        return new DownloadResult(outputPath, downloadedQuality);
     }
 
     #endregion

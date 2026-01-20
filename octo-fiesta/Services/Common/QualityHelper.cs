@@ -6,21 +6,50 @@ namespace octo_fiesta.Services.Common;
 public static class QualityHelper
 {
     /// <summary>
-    /// Determines if a file should be upgraded based on its extension and target quality
+    /// Quality hierarchy from lowest to highest
     /// </summary>
-    /// <param name="existingFilePath">Path to the existing file</param>
-    /// <param name="targetQuality">Target quality setting (e.g., "FLAC", "MP3_320")</param>
-    /// <returns>True if the existing file should be replaced with higher quality</returns>
-    public static bool ShouldUpgrade(string existingFilePath, string? targetQuality)
+    private static readonly Dictionary<string, int> QualityLevels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // MP3 qualities
+        { "MP3_128", 1 },
+        { "MP3_320", 2 },
+        
+        // FLAC qualities (Qobuz variants)
+        { "FLAC", 3 },
+        { "FLAC_16", 3 },
+        { "FLAC_24_LOW", 4 },
+        { "FLAC_24_HIGH", 5 }
+    };
+    
+    /// <summary>
+    /// Determines if a track should be upgraded based on stored quality vs target quality
+    /// </summary>
+    /// <param name="existingQuality">Quality of the existing file (null for legacy downloads)</param>
+    /// <param name="targetQuality">Target quality setting</param>
+    /// <returns>True if upgrade is needed</returns>
+    public static bool ShouldUpgrade(string? existingQuality, string? targetQuality)
     {
         if (string.IsNullOrEmpty(targetQuality))
             return false;
         
-        var extension = Path.GetExtension(existingFilePath).ToLowerInvariant();
-        var isExistingFlac = extension == ".flac";
-        var isTargetFlac = targetQuality.Contains("FLAC", StringComparison.OrdinalIgnoreCase);
+        // Legacy downloads without quality info should always be re-downloaded
+        if (string.IsNullOrEmpty(existingQuality))
+            return true;
         
-        // Only upgrade if existing is MP3 and target is FLAC
-        return !isExistingFlac && isTargetFlac;
+        var existingLevel = GetQualityLevel(existingQuality);
+        var targetLevel = GetQualityLevel(targetQuality);
+        
+        return targetLevel > existingLevel;
+    }
+    
+    /// <summary>
+    /// Gets the numeric quality level for comparison
+    /// </summary>
+    public static int GetQualityLevel(string? quality)
+    {
+        if (string.IsNullOrEmpty(quality))
+            return 0;
+        
+        return QualityLevels.TryGetValue(quality, out var level) ? level : 0;
     }
 }
