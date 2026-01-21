@@ -781,18 +781,22 @@ public class SubsonicController : ControllerBase
     [Route("{**endpoint}")]
     public async Task<IActionResult> GenericEndpoint(string endpoint)
     {
-        var parameters = await ExtractAllParameters();
-        var format = parameters.GetValueOrDefault("f", "xml");
-        
         try
         {
-            var result = await _proxyService.RelayAsync(endpoint, parameters);
-            var contentType = result.ContentType ?? $"application/{format}";
+            var result = await _proxyService.RelayRequestAsync(endpoint, Request, HttpContext.RequestAborted);
+            
+            if (result.StatusCode >= 400)
+            {
+                return StatusCode(result.StatusCode);
+            }
+            
+            var contentType = result.ContentType ?? "application/xml";
             return File(result.Body, contentType);
         }
         catch (HttpRequestException ex)
         {
-            // Return Subsonic-compatible error response
+            var parameters = await ExtractAllParameters();
+            var format = parameters.GetValueOrDefault("f", "xml");
             return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }
     }

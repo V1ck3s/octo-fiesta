@@ -60,6 +60,71 @@ public class SubsonicProxyService
         }
     }
 
+    /// <summary>
+    /// Headers that should not be forwarded (hop-by-hop headers).
+    /// </summary>
+    private static readonly HashSet<string> ExcludedRequestHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Host", "Connection", "Keep-Alive", "Transfer-Encoding",
+        "TE", "Trailer", "Upgrade", "Proxy-Authorization", "Proxy-Authenticate",
+        "Accept-Encoding" // Don't forward to avoid compressed responses that we'd need to handle
+    };
+
+    /// <summary>
+    /// Relays a request to the Subsonic server, preserving HTTP method, body, and headers.
+    /// This provides true transparent proxying for better client compatibility.
+    /// </summary>
+    public async Task<(byte[] Body, string? ContentType, int StatusCode)> RelayRequestAsync(
+        string endpoint,
+        HttpRequest incomingRequest,
+        CancellationToken cancellationToken = default)
+    {
+        // Build URL with query string from original request
+        var url = $"{_subsonicSettings.Url}/{endpoint}{incomingRequest.QueryString}";
+        
+        using var request = new HttpRequestMessage(new HttpMethod(incomingRequest.Method), url);
+        
+        // Forward headers (excluding hop-by-hop headers)
+        foreach (var header in incomingRequest.Headers)
+        {
+            if (!ExcludedRequestHeaders.Contains(header.Key) && 
+                !header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+            }
+        }
+        
+        // Forward body for POST/PUT/PATCH
+        if (incomingRequest.Method != "GET" && incomingRequest.Method != "HEAD")
+        {
+            incomingRequest.EnableBuffering();
+            incomingRequest.Body.Position = 0;
+            
+            using var reader = new StreamReader(incomingRequest.Body, leaveOpen: true);
+            var bodyContent = await reader.ReadToEndAsync(cancellationToken);
+            incomingRequest.Body.Position = 0;
+            
+            if (!string.IsNullOrEmpty(bodyContent))
+            {
+                request.Content = new StringContent(bodyContent);
+                
+                // Preserve content type
+                if (incomingRequest.ContentType != null)
+                {
+                    request.Content.Headers.ContentType = 
+                        System.Net.Http.Headers.MediaTypeHeaderValue.Parse(incomingRequest.ContentType);
+                }
+            }
+        }
+        
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        
+        var body = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        var contentType = response.Content.Headers.ContentType?.ToString();
+        
+        return (body, contentType, (int)response.StatusCode);
+    }
+
     private static readonly string[] StreamingRequiredHeaders =
     {
         "Accept-Ranges",
