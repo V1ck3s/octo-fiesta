@@ -2,6 +2,7 @@ using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
 using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
+using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Validation;
 using octo_fiesta.Services.Subsonic;
@@ -29,6 +30,8 @@ builder.Services.Configure<DeezerSettings>(
     builder.Configuration.GetSection("Deezer"));
 builder.Services.Configure<QobuzSettings>(
     builder.Configuration.GetSection("Qobuz"));
+builder.Services.Configure<SquidWTFSettings>(
+    builder.Configuration.GetSection("SquidWTF"));
 
 // Get the configured music service
 var musicService = builder.Configuration.GetValue<MusicService>("Subsonic:MusicService");
@@ -62,6 +65,20 @@ if (musicService == MusicService.Qobuz)
     builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
     builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
 }
+else if (musicService == MusicService.SquidWTF)
+{
+    // If playlists enabled, register Deezer FIRST (secondary provider)
+    if (enableExternalPlaylists)
+    {
+        builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
+        builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
+        builder.Services.AddSingleton<PlaylistSyncService>();
+    }
+    
+    // SquidWTF services (primary) - registered LAST to be injected by default
+    builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();
+}
 else
 {
     // If playlists enabled, register Qobuz FIRST (secondary provider)
@@ -82,6 +99,7 @@ else
 builder.Services.AddSingleton<IStartupValidator, SubsonicStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, DeezerStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
+builder.Services.AddSingleton<IStartupValidator, SquidWTFStartupValidator>();
 
 // Register orchestrator as hosted service
 builder.Services.AddHostedService<StartupValidationOrchestrator>();

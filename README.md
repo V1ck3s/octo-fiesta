@@ -52,15 +52,17 @@ These clients are **not compatible** with octo-fiesta due to architectural limit
 
 - **[Deezer](https://www.deezer.com/)** - Quality: FLAC, MP3_320, MP3_128
 - **[Qobuz](https://www.qobuz.com/)** - Quality: FLAC, FLAC_24_HIGH (Hi-Res 24-bit/192kHz), FLAC_24_LOW, FLAC_16, MP3_320
+- **[SquidWTF](https://squid.wtf/)** - No credentials required! Supports Qobuz and Tidal backends with FLAC quality
 
 Choose your preferred provider via the `MUSIC_SERVICE` environment variable. Additional providers may be added in future releases.
 
 ## Requirements
 
 - A running Subsonic-compatible server (developed and tested with [Navidrome](https://www.navidrome.org/))
-- Credentials for at least one music provider:
+- Credentials for at least one music provider (or use SquidWTF which requires no credentials):
   - **Deezer**: ARL token from browser cookies
   - **Qobuz**: User ID + User Auth Token from browser localStorage ([see Wiki guide](https://github.com/V1ck3s/octo-fiesta/wiki/Getting-Qobuz-Credentials-(User-ID-&-Token)))
+  - **SquidWTF**: No credentials needed
 - Docker and Docker Compose (recommended) **or** [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) for manual installation
 
 ## Quick Start (Docker)
@@ -80,12 +82,16 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
    # Path where downloaded songs will be stored on the host
    DOWNLOAD_PATH=./downloads
    
-   # Music service provider (Deezer or Qobuz)
-   MUSIC_SERVICE=Qobuz
+   # Music service provider (Deezer, Qobuz, or SquidWTF)
+   MUSIC_SERVICE=SquidWTF
    
    # === External Playlists (optional) ===
    ENABLE_EXTERNAL_PLAYLISTS=true  # Enable/disable playlist support (default: true)
    PLAYLISTS_DIRECTORY=playlists    # Directory name for M3U files (default: playlists)
+   
+   # === SquidWTF Configuration (no credentials needed!) ===
+   SQUIDWTF_SOURCE=Qobuz         # Backend: Qobuz or Tidal (default: Qobuz)
+   SQUIDWTF_QUALITY=27           # Qobuz: 27/7/6/5, Tidal: HI_RES_LOSSLESS/LOSSLESS
    
    # === Qobuz Configuration (if using Qobuz) ===
    QOBUZ_USER_AUTH_TOKEN=your-qobuz-token
@@ -117,7 +123,7 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
 | Setting | Description |
 |---------|-------------|
 | `Subsonic:Url` | URL of your Navidrome/Subsonic server |
-| `Subsonic:MusicService` | Music provider to use: `Deezer` or `Qobuz` (default: `Deezer`) |
+| `Subsonic:MusicService` | Music provider to use: `Deezer`, `Qobuz`, or `SquidWTF` (default: `SquidWTF`) |
 | `Subsonic:AutoUpgradeQuality` | Re-download existing MP3 tracks as FLAC when higher quality is available (default: `false`) |
 | `Library:DownloadPath` | Directory where downloaded songs are stored |
 
@@ -136,6 +142,15 @@ The easiest way to run Octo-Fiesta is with Docker Compose.
 | `Qobuz:UserAuthToken` | Your Qobuz User Auth Token (required if using Qobuz) - [How to get it](https://github.com/V1ck3s/octo-fiesta/wiki/Getting-Qobuz-Credentials-(User-ID-&-Token)) |
 | `Qobuz:UserId` | Your Qobuz User ID (required if using Qobuz) |
 | `Qobuz:Quality` | Preferred audio quality: `FLAC`, `FLAC_24_HIGH`, `FLAC_24_LOW`, `FLAC_16`, `MP3_320`. If not specified, the highest available quality will be used |
+
+### SquidWTF Settings
+
+SquidWTF is a third-party service that provides access to Qobuz and Tidal catalogs without requiring personal credentials. Perfect for trying out octo-fiesta without setting up provider accounts.
+
+| Setting | Description |
+|---------|-------------|
+| `SquidWTF:Source` | Backend to use: `Qobuz` or `Tidal` (default: `Qobuz`) |
+| `SquidWTF:Quality` | Preferred audio quality. For Qobuz: `27` (FLAC 24-bit), `7` (FLAC 16-bit), `6` (MP3 320), `5` (MP3 128). For Tidal: `HI_RES_LOSSLESS`, `LOSSLESS`. If not specified, the highest available quality will be used |
 
 ### External Playlists
 
@@ -190,6 +205,7 @@ See the [Wiki guide](https://github.com/V1ck3s/octo-fiesta/wiki/Getting-Qobuz-Cr
                         │ Music Providers │
                         │  - Deezer       │
                         │  - Qobuz        │
+                        │  - SquidWTF     │
                         │  - (more...)    │
                         └─────────────────┘
 ```
@@ -268,9 +284,9 @@ External (streaming provider) content uses typed IDs:
 
 | Type | Format | Example |
 |------|--------|---------|
-| Song | `ext-{provider}-song-{id}` | `ext-deezer-song-123456`, `ext-qobuz-song-789012` |
-| Album | `ext-{provider}-album-{id}` | `ext-deezer-album-789012`, `ext-qobuz-album-456789` |
-| Artist | `ext-{provider}-artist-{id}` | `ext-deezer-artist-259`, `ext-qobuz-artist-123` |
+| Song | `ext-{provider}-song-{id}` | `ext-deezer-song-123456`, `ext-qobuz-song-789012`, `ext-squidwtf-song-54091881` |
+| Album | `ext-{provider}-album-{id}` | `ext-deezer-album-789012`, `ext-qobuz-album-456789`, `ext-squidwtf-album-abc123` |
+| Artist | `ext-{provider}-artist-{id}` | `ext-deezer-artist-259`, `ext-qobuz-artist-123`, `ext-squidwtf-artist-38324` |
 
 Legacy format `ext-deezer-{id}` is also supported (assumes song type).
 
@@ -336,7 +352,8 @@ octo-fiesta/
 │   ├── Settings/                          # Configuration models
 │   │   ├── SubsonicSettings.cs
 │   │   ├── DeezerSettings.cs
-│   │   └── QobuzSettings.cs
+│   │   ├── QobuzSettings.cs
+│   │   └── SquidWTFSettings.cs
 │   ├── Download/                          # Download-related models
 │   │   ├── DownloadInfo.cs
 │   │   └── DownloadStatus.cs
@@ -359,6 +376,10 @@ octo-fiesta/
 │   │   ├── QobuzMetadataService.cs
 │   │   ├── QobuzBundleService.cs
 │   │   └── QobuzStartupValidator.cs
+│   ├── SquidWTF/                          # SquidWTF provider (Qobuz/Tidal backends)
+│   │   ├── SquidWTFDownloadService.cs
+│   │   ├── SquidWTFMetadataService.cs
+│   │   └── SquidWTFStartupValidator.cs
 │   ├── Local/                             # Local library
 │   │   ├── ILocalLibraryService.cs
 │   │   └── LocalLibraryService.cs
@@ -408,4 +429,5 @@ GPL-3.0
 - [Navidrome](https://www.navidrome.org/) - The excellent self-hosted music server
 - [Deezer](https://www.deezer.com/) - Music streaming service
 - [Qobuz](https://www.qobuz.com/) - Hi-Res music streaming service
+- [SquidWTF](https://squid.wtf/) - Third-party music API service
 - [Subsonic API](http://www.subsonic.org/pages/api.jsp) - The API specification

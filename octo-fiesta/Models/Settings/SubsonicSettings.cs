@@ -70,7 +70,12 @@ public enum MusicService
     /// <summary>
     /// Qobuz music service
     /// </summary>
-    Qobuz
+    Qobuz,
+    
+    /// <summary>
+    /// SquidWTF music service (supports Qobuz and Tidal backends)
+    /// </summary>
+    SquidWTF
 }
 
 public class SubsonicSettings
@@ -93,11 +98,11 @@ public class SubsonicSettings
     public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
     
     /// <summary>
-    /// Music service to use (default: Deezer)
+    /// Music service to use (default: SquidWTF)
     /// Environment variable: MUSIC_SERVICE
-    /// Values: "Deezer", "Qobuz"
+    /// Values: "Deezer", "Qobuz", "SquidWTF"
     /// </summary>
-    public MusicService MusicService { get; set; } = MusicService.Deezer;
+    public MusicService MusicService { get; set; } = MusicService.SquidWTF;
     
     /// <summary>
     /// Storage mode for downloaded files (default: Permanent)
