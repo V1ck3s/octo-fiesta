@@ -52,6 +52,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -80,6 +82,39 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # Tag release: v0.4.0 -> 0.4.0
+            VERSION=${GITHUB_REF#refs/tags/v}
+          elif [[ "${{ github.ref }}" == refs/heads/dev ]]; then
+            # Dev branch: get version from git describe with commit info
+            git fetch --tags
+            DESCRIBE=$(git describe --tags 2>/dev/null || echo "v0.0.0")
+            # v0.4.0 -> 0.4.0-dev
+            # v0.4.0-5-g1a2b3c4 -> 0.4.0-dev.5+g1a2b3c4
+            if [[ "$DESCRIBE" == *-*-* ]]; then
+              # Has commits after tag: v0.4.0-5-g1a2b3c4
+              BASE=$(echo $DESCRIBE | sed 's/^v//' | cut -d'-' -f1)
+              COMMITS=$(echo $DESCRIBE | cut -d'-' -f2)
+              HASH=$(echo $DESCRIBE | cut -d'-' -f3)
+              VERSION="${BASE}-dev.${COMMITS}+${HASH}"
+            else
+              # Exactly on tag: v0.4.0
+              VERSION="${DESCRIBE#v}-dev"
+            fi
+          elif [[ "${{ github.ref }}" == refs/heads/master ]]; then
+            # Master branch: get latest tag
+            git fetch --tags
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            VERSION="${LATEST_TAG#v}"
+          else
+            # Other branches (PR, etc.)
+            VERSION="0.0.0-dev"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -88,5 +123,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

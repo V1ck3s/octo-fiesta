@@ -19,7 +19,12 @@ public interface ILocalLibraryService
     /// <summary>
     /// Registers a downloaded song in the local library
     /// </summary>
-    Task RegisterDownloadedSongAsync(Song song, string localPath);
+    Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null);
+    
+    /// <summary>
+    /// Gets the full mapping for an external song (includes quality info)
+    /// </summary>
+    Task<LocalSongMapping?> GetMappingForExternalSongAsync(string externalProvider, string externalId);
     
     /// <summary>
     /// Gets the mapping between external ID and local ID

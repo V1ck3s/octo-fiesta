@@ -25,8 +25,6 @@ public class QobuzStartupValidator : BaseStartupValidator
         var userId = _qobuzSettings.Value.UserId;
         var quality = _qobuzSettings.Value.Quality;
 
-        Console.WriteLine();
-
         if (string.IsNullOrWhiteSpace(userAuthToken))
         {
             WriteStatus("Qobuz UserAuthToken", "NOT CONFIGURED", ConsoleColor.Red);

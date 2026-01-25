@@ -29,7 +29,6 @@ public class CacheCleanupService : BackgroundService
         // Only run if storage mode is Cache
         if (_subsonicSettings.StorageMode != StorageMode.Cache)
         {
-            _logger.LogInformation("CacheCleanupService disabled: StorageMode is not Cache");
             return;
         }
 

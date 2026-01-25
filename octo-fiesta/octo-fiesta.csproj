@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
-    <PropertyGroup>
+<PropertyGroup>
         <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <RootNamespace>octo_fiesta</RootNamespace>
+        <Version>0.0.0-dev</Version>
     </PropertyGroup>
 
     <ItemGroup>

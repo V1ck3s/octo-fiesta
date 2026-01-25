@@ -2,6 +2,7 @@ using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
 using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
+using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Validation;
 using octo_fiesta.Services.Subsonic;
@@ -29,10 +30,14 @@ builder.Services.Configure<DeezerSettings>(
     builder.Configuration.GetSection("Deezer"));
 builder.Services.Configure<QobuzSettings>(
     builder.Configuration.GetSection("Qobuz"));
+builder.Services.Configure<SquidWTFSettings>(
+    builder.Configuration.GetSection("SquidWTF"));
 
-// Get the configured music service
-var musicService = builder.Configuration.GetValue<MusicService>("Subsonic:MusicService");
-var enableExternalPlaylists = builder.Configuration.GetValue<bool>("Subsonic:EnableExternalPlaylists", true);
+// Get the configured music service from bound settings (to respect default values)
+var subsonicSettings = new SubsonicSettings();
+builder.Configuration.GetSection("Subsonic").Bind(subsonicSettings);
+var musicService = subsonicSettings.MusicService;
+var enableExternalPlaylists = subsonicSettings.EnableExternalPlaylists;
 
 // Business services
 // Registered as Singleton to share state (mappings cache, scan debounce, download tracking, rate limiting)
@@ -62,6 +67,21 @@ if (musicService == MusicService.Qobuz)
     builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
     builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
 }
+else if (musicService == MusicService.SquidWTF)
+{
+    var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
+    var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
+    
+    // Only enable playlists for Tidal source (Qobuz doesn't support playlists via SquidWTF)
+    if (enableExternalPlaylists && isTidalSource)
+    {
+        builder.Services.AddSingleton<PlaylistSyncService>();
+    }
+    
+    // SquidWTF services (primary) - registered LAST to be injected by default
+    builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();
+}
 else
 {
     // If playlists enabled, register Qobuz FIRST (secondary provider)
@@ -82,6 +102,7 @@ else
 builder.Services.AddSingleton<IStartupValidator, SubsonicStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, DeezerStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
+builder.Services.AddSingleton<IStartupValidator, SquidWTFStartupValidator>();
 
 // Register orchestrator as hosted service
 builder.Services.AddHostedService<StartupValidationOrchestrator>();
@@ -103,6 +124,9 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+// Enable request body buffering FIRST to allow multiple reads (for proxy forwarding)
+app.UseRequestBodyBuffering();
+
 app.UseExceptionHandler(_ => { }); // Global exception handler
 
 if (app.Environment.IsDevelopment())
@@ -119,4 +143,22 @@ app.UseCors();
 
 app.MapControllers();
 
-app.Run();
+// Start the application
+app.Start();
+
+// Display listening URL after startup
+foreach (var url in app.Urls)
+{
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.Write("✓ ");
+    Console.ResetColor();
+    Console.Write("Listening on: ");
+    Console.ForegroundColor = ConsoleColor.Cyan;
+    Console.WriteLine(url);
+    Console.ResetColor();
+}
+
+Console.WriteLine();
+
+// Wait for shutdown
+app.WaitForShutdown();

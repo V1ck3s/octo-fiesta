@@ -27,8 +27,6 @@ public class DeezerStartupValidator : BaseStartupValidator
         var arlFallback = _settings.ArlFallback;
         var quality = _settings.Quality;
 
-        Console.WriteLine();
-
         if (string.IsNullOrWhiteSpace(arl))
         {
             WriteStatus("Deezer ARL", "NOT CONFIGURED", ConsoleColor.Red);

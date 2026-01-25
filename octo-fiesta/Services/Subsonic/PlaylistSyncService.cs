@@ -41,11 +41,9 @@ public class PlaylistSyncService
         IOptions<SubsonicSettings> subsonicSettings,
         ILogger<PlaylistSyncService> logger)
     {
-        // Get Deezer and Qobuz metadata services
-        _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"))
-            ?? throw new InvalidOperationException("Deezer metadata service not found");
-        _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"))
-            ?? throw new InvalidOperationException("Qobuz metadata service not found");
+        // Get Deezer and Qobuz metadata services (optional - may not be registered for SquidWTF)
+        _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"))!;
+        _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"))!;
         
         _downloadServices = downloadServices;
         _configuration = configuration;
@@ -72,8 +70,8 @@ public class PlaylistSyncService
     {
         return provider.ToLower() switch
         {
-            "deezer" => _deezerMetadataService,
-            "qobuz" => _qobuzMetadataService,
+            "deezer" when _deezerMetadataService != null => _deezerMetadataService,
+            "qobuz" when _qobuzMetadataService != null => _qobuzMetadataService,
             _ => null
         };
     }

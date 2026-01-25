@@ -138,14 +138,8 @@ public class SubsonicController : ControllerBase
             return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
-        var localPath = await _localLibraryService.GetLocalPathForExternalSongAsync(provider!, externalId!);
-
-        if (localPath != null && System.IO.File.Exists(localPath))
-        {
-            var stream = System.IO.File.OpenRead(localPath);
-            return File(stream, GetContentType(localPath), enableRangeProcessing: true);
-        }
-
+        // Always go through DownloadAndStreamAsync for external songs
+        // This ensures quality upgrade logic is applied
         try
         {
             var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, HttpContext.RequestAborted);
@@ -787,18 +781,22 @@ public class SubsonicController : ControllerBase
     [Route("{**endpoint}")]
     public async Task<IActionResult> GenericEndpoint(string endpoint)
     {
-        var parameters = await ExtractAllParameters();
-        var format = parameters.GetValueOrDefault("f", "xml");
-        
         try
         {
-            var result = await _proxyService.RelayAsync(endpoint, parameters);
-            var contentType = result.ContentType ?? $"application/{format}";
+            var result = await _proxyService.RelayRequestAsync(endpoint, Request, HttpContext.RequestAborted);
+            
+            if (result.StatusCode >= 400)
+            {
+                return StatusCode(result.StatusCode);
+            }
+            
+            var contentType = result.ContentType ?? "application/xml";
             return File(result.Body, contentType);
         }
         catch (HttpRequestException ex)
         {
-            // Return Subsonic-compatible error response
+            var parameters = await ExtractAllParameters();
+            var format = parameters.GetValueOrDefault("f", "xml");
             return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }
     }

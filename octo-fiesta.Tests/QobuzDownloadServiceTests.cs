@@ -217,9 +217,21 @@ public class QobuzDownloadServiceTests : IDisposable
         var existingPath = Path.Combine(_testDownloadPath, "existing-song.flac");
         await File.WriteAllTextAsync(existingPath, "fake audio content");
 
+        var mapping = new LocalSongMapping
+        {
+            ExternalProvider = "qobuz",
+            ExternalId = "123456",
+            LocalPath = existingPath,
+            Title = "Test Song",
+            Artist = "Test Artist",
+            Album = "Test Album",
+            DownloadedAt = DateTime.UtcNow,
+            DownloadedQuality = "FLAC_24_HIGH" // Same or higher quality, so no upgrade needed
+        };
+
         _localLibraryServiceMock
-            .Setup(s => s.GetLocalPathForExternalSongAsync("qobuz", "123456"))
-            .ReturnsAsync(existingPath);
+            .Setup(s => s.GetMappingForExternalSongAsync("qobuz", "123456"))
+            .ReturnsAsync(mapping);
 
         var service = CreateService(userAuthToken: "test-token", userId: "123");
 
