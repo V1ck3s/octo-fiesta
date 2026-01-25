@@ -148,7 +148,8 @@ public class DeezerDownloadService : BaseDownloadService
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var outputFile = IOFile.Create(outputPath);
         
-        await DecryptAndWriteStreamAsync(responseStream, outputFile, trackId, cancellationToken);
+        // Use the actual track ID from downloadInfo for decryption (may be alternative track)
+        await DecryptAndWriteStreamAsync(responseStream, outputFile, downloadInfo.TrackId, cancellationToken);
         
         // Close file before writing metadata
         await outputFile.DisposeAsync();
@@ -221,16 +222,51 @@ public class DeezerDownloadService : BaseDownloadService
                 var trackJson = await trackResponse.Content.ReadAsStringAsync(cancellationToken);
                 var trackDoc = JsonDocument.Parse(trackJson);
                 
+                // Track ID used for decryption (may change if using alternative)
+                var decryptionTrackId = trackId;
+                
+                var title = trackDoc.RootElement.GetProperty("title").GetString() ?? "";
+                var artist = trackDoc.RootElement.TryGetProperty("artist", out var artistEl) 
+                    ? artistEl.GetProperty("name").GetString() ?? "" 
+                    : "";
+                
+                // Check if track is readable (available in user's region)
+                var isReadable = trackDoc.RootElement.TryGetProperty("readable", out var readableEl) 
+                    && readableEl.GetBoolean();
+                
+                // If track is not readable, try to find an alternative
+                if (!isReadable)
+                {
+                    Logger.LogWarning("Track {TrackId} ({Title} - {Artist}) is not available, searching for alternative...", 
+                        trackId, title, artist);
+                    
+                    var alternativeTrackId = await FindAlternativeTrackAsync(title, artist, cancellationToken);
+                    if (alternativeTrackId != null)
+                    {
+                        Logger.LogInformation("Found alternative track: {AlternativeId}", alternativeTrackId);
+                        
+                        // Update decryption track ID to use the alternative
+                        decryptionTrackId = alternativeTrackId;
+                        
+                        // Get the alternative track info
+                        var altResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{alternativeTrackId}", cancellationToken);
+                        altResponse.EnsureSuccessStatusCode();
+                        
+                        var altJson = await altResponse.Content.ReadAsStringAsync(cancellationToken);
+                        trackDoc = JsonDocument.Parse(altJson);
+                    }
+                    else
+                    {
+                        throw new Exception($"Track is not available in your region and no alternative found for: {title} - {artist}");
+                    }
+                }
+                
                 if (!trackDoc.RootElement.TryGetProperty("track_token", out var trackTokenElement))
                 {
                     throw new Exception("Track not found or track_token missing");
                 }
 
                 var trackToken = trackTokenElement.GetString();
-                var title = trackDoc.RootElement.GetProperty("title").GetString() ?? "";
-                var artist = trackDoc.RootElement.TryGetProperty("artist", out var artistEl) 
-                    ? artistEl.GetProperty("name").GetString() ?? "" 
-                    : "";
 
                 // Get download URL via media API
                 // Build format list based on preferred quality
@@ -331,7 +367,8 @@ public class DeezerDownloadService : BaseDownloadService
                         DownloadUrl = downloadUrl,
                         Format = selectedFormat ?? "MP3_128",
                         Title = title,
-                        Artist = artist
+                        Artist = artist,
+                        TrackId = decryptionTrackId
                     };
                 }
             });
@@ -529,11 +566,106 @@ public class DeezerDownloadService : BaseDownloadService
 
     #endregion
 
+    #region Alternative Track Search
+
+    /// <summary>
+    /// Searches for an alternative track when the original is not available (readable: false)
+    /// </summary>
+    private async Task<string?> FindAlternativeTrackAsync(string title, string artist, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Normalize title by removing common suffixes in parentheses
+            var normalizedTitle = NormalizeTitle(title);
+            
+            var searchQuery = Uri.EscapeDataString($"{normalizedTitle} {artist}");
+            var searchResponse = await _httpClient.GetAsync($"{DeezerApiBase}/search/track?q={searchQuery}&limit=10", cancellationToken);
+            searchResponse.EnsureSuccessStatusCode();
+            
+            var searchJson = await searchResponse.Content.ReadAsStringAsync(cancellationToken);
+            var searchDoc = JsonDocument.Parse(searchJson);
+            
+            if (!searchDoc.RootElement.TryGetProperty("data", out var data))
+                return null;
+            
+            // Find the first readable track that matches title and artist (case-insensitive)
+            foreach (var track in data.EnumerateArray())
+            {
+                var isReadable = track.TryGetProperty("readable", out var readableEl) && readableEl.GetBoolean();
+                if (!isReadable)
+                    continue;
+                
+                var trackTitle = track.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null;
+                var trackArtist = track.TryGetProperty("artist", out var artistEl) 
+                    ? (artistEl.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null) 
+                    : null;
+                
+                // Check if title matches (exact or normalized)
+                if (trackTitle != null && 
+                    (string.Equals(NormalizeTitle(trackTitle), normalizedTitle, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(trackTitle, title, StringComparison.OrdinalIgnoreCase)) &&
+                    string.Equals(artist, trackArtist, StringComparison.OrdinalIgnoreCase))
+                {
+                    var trackId = track.GetProperty("id").GetInt64().ToString();
+                    Logger.LogInformation("Found alternative: {Title} by {Artist} (ID: {Id})", trackTitle, trackArtist, trackId);
+                    return trackId;
+                }
+            }
+            
+            // If exact match not found, try a more lenient match (just title contains)
+            foreach (var track in data.EnumerateArray())
+            {
+                var isReadable = track.TryGetProperty("readable", out var readableEl) && readableEl.GetBoolean();
+                if (!isReadable)
+                    continue;
+                
+                var trackTitle = track.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null;
+                var trackArtist = track.TryGetProperty("artist", out var artistEl) 
+                    ? (artistEl.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null) 
+                    : null;
+                
+                if (trackTitle != null && 
+                    trackTitle.Contains(normalizedTitle, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(artist, trackArtist, StringComparison.OrdinalIgnoreCase))
+                {
+                    var trackId = track.GetProperty("id").GetInt64().ToString();
+                    Logger.LogInformation("Found alternative (lenient match): {Title} by {Artist} (ID: {Id})", trackTitle, trackArtist, trackId);
+                    return trackId;
+                }
+            }
+            
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error searching for alternative track");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Normalizes a track title by removing common suffixes in parentheses
+    /// e.g., "Danger Zone (From Top Gun)" -> "Danger Zone"
+    /// </summary>
+    private static string NormalizeTitle(string title)
+    {
+        // Remove content in parentheses at the end: "Song (From Album)" -> "Song"
+        var parenIndex = title.IndexOf('(');
+        if (parenIndex > 0)
+        {
+            return title.Substring(0, parenIndex).Trim();
+        }
+        return title;
+    }
+
+    #endregion
+
     private class TrackDownloadInfo
     {
         public string DownloadUrl { get; set; } = string.Empty;
         public string Format { get; set; } = string.Empty;
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
+        public string TrackId { get; set; } = string.Empty;
     }
 }
