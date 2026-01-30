@@ -53,7 +53,7 @@ public class DeezerDownloadService : BaseDownloadService
         IOptions<DeezerSettings> deezerSettings,
         IServiceProvider serviceProvider,
         ILogger<DeezerDownloadService> logger)
-        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         

@@ -271,8 +271,8 @@ public class SubsonicResponseBuilder
     /// </summary>
     public Dictionary<string, object> ConvertSongToJson(Song song)
     {
-        var (suffix, contentType) = GetSuffixAndContentType(song);
-        
+        var (suffix, contentType, bitRate) = GetSuffixContentTypeAndBitrate(song);
+
         var result = new Dictionary<string, object>
         {
             ["id"] = song.Id,
@@ -293,8 +293,8 @@ public class SubsonicResponseBuilder
             ["isVideo"] = false,
             ["isExternal"] = !song.IsLocal
         };
-        
-        result["bitRate"] = song.IsLocal ? 128 : 0; // Default bitrate for local files
+
+        result["bitRate"] = bitRate;
         
         return result;
     }
@@ -337,8 +337,8 @@ public class SubsonicResponseBuilder
     /// </summary>
     public XElement ConvertSongToXml(Song song, XNamespace ns)
     {
-        var (suffix, contentType) = GetSuffixAndContentType(song);
-        
+        var (suffix, contentType, bitRate) = GetSuffixContentTypeAndBitrate(song);
+
         return new XElement(ns + "song",
             new XAttribute("id", song.Id),
             new XAttribute("title", song.Title),
@@ -350,6 +350,7 @@ public class SubsonicResponseBuilder
             new XAttribute("coverArt", song.Id),
             new XAttribute("suffix", suffix),
             new XAttribute("contentType", contentType),
+            new XAttribute("bitRate", bitRate),
             new XAttribute("isExternal", (!song.IsLocal).ToString().ToLower())
         );
     }
@@ -409,24 +410,42 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
-    /// Determines the file suffix and MIME content type based on the song's local path.
-    /// Supports FLAC, M4A (AAC), and MP3 formats.
+    /// Determines the file suffix, MIME content type, and bitrate based on the song's provider and local path.
+    /// Supports FLAC, M4A (AAC), and MP3 formats for local files, and provider-specific formats for external files.
     /// </summary>
-    private static (string suffix, string contentType) GetSuffixAndContentType(Song song)
+    private static (string suffix, string contentType, int bitRate) GetSuffixContentTypeAndBitrate(Song song)
     {
-        if (!song.IsLocal || string.IsNullOrEmpty(song.LocalPath))
+        // For cached/downloaded files, determine format from file extension
+        if (!string.IsNullOrEmpty(song.LocalPath))
         {
-            return ("Remote", "audio/mpeg");
+            var extension = Path.GetExtension(song.LocalPath).ToLowerInvariant();
+            return extension switch
+            {
+                ".flac" => ("flac", "audio/flac", 1411),
+                ".m4a" => ("m4a", "audio/mp4", 320),
+                ".mp3" => ("mp3", "audio/mpeg", 320),
+                _ => ("mp3", "audio/mpeg", 128)
+            };
         }
+
+        // For SquidWTF provider without cached file, default to FLAC
+        // (actual format depends on quality settings, but FLAC is the most common)
+        var isSquid = !string.IsNullOrEmpty(song.ExternalProvider) && 
+                      song.ExternalProvider.Equals("SquidWTF", StringComparison.OrdinalIgnoreCase);
         
-        var extension = Path.GetExtension(song.LocalPath).ToLowerInvariant();
-        return extension switch
+        if (isSquid)
         {
-            ".flac" => ("flac", "audio/flac"),
-            ".m4a" => ("m4a", "audio/mp4"),
-            ".mp3" => ("mp3", "audio/mpeg"),
-            _ => ("mp3", "audio/mpeg")
-        };
+            return ("flac", "audio/flac", 1411);
+        }
+
+        // For local library files without path info
+        if (song.IsLocal)
+        {
+            return ("mp3", "audio/mpeg", 128);
+        }
+
+        // Default for other external providers
+        return ("Remote", "audio/mpeg", 0);
     }
 
     private object ConvertJsonValue(JsonElement value)

@@ -47,7 +47,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         IOptions<SquidWTFSettings> squidWTFSettings,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
-        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
