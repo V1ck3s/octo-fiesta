@@ -271,6 +271,8 @@ public class SubsonicResponseBuilder
     /// </summary>
     public Dictionary<string, object> ConvertSongToJson(Song song)
     {
+        var (suffix, contentType) = GetSuffixAndContentType(song);
+        
         var result = new Dictionary<string, object>
         {
             ["id"] = song.Id,
@@ -285,8 +287,8 @@ public class SubsonicResponseBuilder
             ["track"] = song.Track ?? 0,
             ["year"] = song.Year ?? 0,
             ["coverArt"] = song.Id,
-            ["suffix"] = song.IsLocal ? "mp3" : "Remote",
-            ["contentType"] = "audio/mpeg",
+            ["suffix"] = suffix,
+            ["contentType"] = contentType,
             ["type"] = "music",
             ["isVideo"] = false,
             ["isExternal"] = !song.IsLocal
@@ -335,6 +337,8 @@ public class SubsonicResponseBuilder
     /// </summary>
     public XElement ConvertSongToXml(Song song, XNamespace ns)
     {
+        var (suffix, contentType) = GetSuffixAndContentType(song);
+        
         return new XElement(ns + "song",
             new XAttribute("id", song.Id),
             new XAttribute("title", song.Title),
@@ -344,6 +348,8 @@ public class SubsonicResponseBuilder
             new XAttribute("track", song.Track ?? 0),
             new XAttribute("year", song.Year ?? 0),
             new XAttribute("coverArt", song.Id),
+            new XAttribute("suffix", suffix),
+            new XAttribute("contentType", contentType),
             new XAttribute("isExternal", (!song.IsLocal).ToString().ToLower())
         );
     }
@@ -400,6 +406,27 @@ public class SubsonicResponseBuilder
         var newElement = new XElement(element);
         newElement.SetAttributeValue("isExternal", "false");
         return newElement;
+    }
+
+    /// <summary>
+    /// Determines the file suffix and MIME content type based on the song's local path.
+    /// Supports FLAC, M4A (AAC), and MP3 formats.
+    /// </summary>
+    private static (string suffix, string contentType) GetSuffixAndContentType(Song song)
+    {
+        if (!song.IsLocal || string.IsNullOrEmpty(song.LocalPath))
+        {
+            return ("Remote", "audio/mpeg");
+        }
+        
+        var extension = Path.GetExtension(song.LocalPath).ToLowerInvariant();
+        return extension switch
+        {
+            ".flac" => ("flac", "audio/flac"),
+            ".m4a" => ("m4a", "audio/mp4"),
+            ".mp3" => ("mp3", "audio/mpeg"),
+            _ => ("mp3", "audio/mpeg")
+        };
     }
 
     private object ConvertJsonValue(JsonElement value)

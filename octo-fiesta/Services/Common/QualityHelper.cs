@@ -10,13 +10,16 @@ public static class QualityHelper
     /// </summary>
     private static readonly Dictionary<string, int> QualityLevels = new(StringComparer.OrdinalIgnoreCase)
     {
-        // MP3 qualities
+        // Lossy qualities (from lowest to highest)
+        { "AAC_96", 0 },    // Tidal LOW - 96kbps AAC
         { "MP3_128", 1 },
+        { "AAC_320", 2 },   // Tidal HIGH - 320kbps AAC
         { "MP3_320", 2 },
         
-        // FLAC qualities (Qobuz variants)
+        // Lossless qualities (Qobuz/Tidal variants)
         { "FLAC", 3 },
         { "FLAC_16", 3 },
+        { "FLAC_24", 4 },   // Tidal HI_RES_LOSSLESS
         { "FLAC_24_LOW", 4 },
         { "FLAC_24_HIGH", 5 }
     };

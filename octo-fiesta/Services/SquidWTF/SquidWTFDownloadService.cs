@@ -32,7 +32,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     
     // Quality mappings
     // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
-    // Tidal: HI_RES_LOSSLESS, LOSSLESS
+    // Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
     
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
 
@@ -296,6 +296,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         {
             "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => "HI_RES_LOSSLESS",
             "LOSSLESS" or "FLAC" or "FLAC_16" => "LOSSLESS",
+            "HIGH" or "AAC_320" or "AAC_HIGH" => "HIGH",
+            "LOW" or "AAC_96" or "AAC_LOW" => "LOW",
             _ => "HI_RES_LOSSLESS"
         };
     }
@@ -331,11 +333,16 @@ public class SquidWTFDownloadService : BaseDownloadService
             return requestedQuality == "HI_RES_LOSSLESS" ? "FLAC_24" : "FLAC_16";
         }
         
-        // AAC/M4A from Tidal is typically 256kbps
+        // AAC/M4A from Tidal - determine bitrate based on requested quality
         if (mimeType?.Contains("mp4", StringComparison.OrdinalIgnoreCase) == true ||
             mimeType?.Contains("aac", StringComparison.OrdinalIgnoreCase) == true)
         {
-            return "AAC_256";
+            return requestedQuality switch
+            {
+                "HIGH" => "AAC_320",
+                "LOW" => "AAC_96",
+                _ => "AAC_320"  // Default if we got AAC but didn't specifically request it
+            };
         }
         
         return "MP3_320";
