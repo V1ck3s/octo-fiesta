@@ -460,13 +460,17 @@ public class SubsonicResponseBuilder
             new XAttribute("id", album.Id),
             new XAttribute("name", album.Title),
             new XAttribute("artist", album.Artist ?? ""),
-            new XAttribute("artistId", album.ArtistId ?? string.Empty),
             new XAttribute("songCount", album.Songs?.Count ?? album.SongCount ?? 0),
             new XAttribute("duration", totalDuration),
             new XAttribute("year", album.Year ?? 0),
             new XAttribute("coverArt", album.Id),
             new XAttribute("isExternal", (!album.IsLocal).ToString().ToLower())
         );
+
+        if (!string.IsNullOrEmpty(album.ArtistId))
+        {
+            element.Add(new XAttribute("artistId", album.ArtistId));
+        }
 
         if (!string.IsNullOrEmpty(album.Genre))
         {
