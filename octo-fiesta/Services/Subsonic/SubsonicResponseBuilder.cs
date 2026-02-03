@@ -544,7 +544,7 @@ public class SubsonicResponseBuilder
         }
 
         // Default for external providers (Deezer, Qobuz, SquidWTF) without cached file
-        return ("Remote", "audio/mpeg", 0);
+        return ("flac", "audio/flac", 0);
     }
 
     private object ConvertJsonValue(JsonElement value)
