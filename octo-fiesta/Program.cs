@@ -32,6 +32,8 @@ builder.Services.Configure<QobuzSettings>(
     builder.Configuration.GetSection("Qobuz"));
 builder.Services.Configure<SquidWTFSettings>(
     builder.Configuration.GetSection("SquidWTF"));
+builder.Services.Configure<InstanceOptions>(
+    builder.Configuration.GetSection("Instances"));
 
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();
@@ -109,6 +111,16 @@ builder.Services.AddHostedService<StartupValidationOrchestrator>();
 
 // Register cache cleanup service (only runs when StorageMode is Cache)
 builder.Services.AddHostedService<CacheCleanupService>();
+
+// Instance management services
+// NOTE: InstanceRefreshHostedService is registered as singleton to allow injection in AdminInstancesController
+builder.Services.AddSingleton<InstanceManager>();
+builder.Services.AddTransient<ApiClient>();
+builder.Services.AddSingleton<InstanceRefreshHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<InstanceRefreshHostedService>());
+builder.Services.AddHttpClient("instanceLoader");
+builder.Services.AddHttpClient("instanceTester");
+builder.Services.AddHttpClient("apiClient");
 
 builder.Services.AddCors(options =>
 {

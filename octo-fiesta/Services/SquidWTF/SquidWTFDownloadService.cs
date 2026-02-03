@@ -19,21 +19,28 @@ public class SquidWTFDownloadService : BaseDownloadService
 {
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _squidWTFSettings;
-    
+    private readonly InstanceManager _instanceManager;
+
+    // Cached Tidal base URL to minimize instance lookups
+    private string? _cachedTidalBaseUrl;
+    private DateTimeOffset _cachedTidalBaseUrlExpiry = DateTimeOffset.MinValue;
+    private readonly object _tidalBaseUrlLock = new();
+    private static readonly TimeSpan TidalBaseUrlCacheTTL = TimeSpan.FromSeconds(30);
+
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://tidal-api.binimum.org";
+    private const string DefaultTidalBaseUrl = "https://tidal-api.binimum.org";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    
+
     // Quality mappings
     // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
     // Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
-    
+
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
 
     protected override string ProviderName => "squidwtf";
@@ -45,12 +52,62 @@ public class SquidWTFDownloadService : BaseDownloadService
         IMusicMetadataService metadataService,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<SquidWTFSettings> squidWTFSettings,
+        InstanceManager instanceManager,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
         : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
+        _instanceManager = instanceManager;
+    }
+
+    private async Task<string> ResolveTidalBaseUrlAsync(CancellationToken cancellationToken = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        string? cached;
+        DateTimeOffset expiry;
+
+        lock (_tidalBaseUrlLock)
+        {
+            cached = _cachedTidalBaseUrl;
+            expiry = _cachedTidalBaseUrlExpiry;
+        }
+
+        if (cached != null && expiry > now)
+        {
+            Logger.LogDebug("Using cached Tidal base URL: {Url}", cached);
+            return cached;
+        }
+
+        try
+        {
+            var instances = await _instanceManager.GetInstancesAsync(InstanceType.Streaming, cancellationToken);
+            var url = instances.FirstOrDefault()?.BaseUrl;
+            if (!string.IsNullOrEmpty(url))
+            {
+                url = url.TrimEnd('/');
+                lock (_tidalBaseUrlLock)
+                {
+                    _cachedTidalBaseUrl = url;
+                    _cachedTidalBaseUrlExpiry = DateTimeOffset.UtcNow.Add(TidalBaseUrlCacheTTL);
+                }
+                Logger.LogDebug("Resolved Tidal base URL: {Url}", url);
+                return url;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to resolve tidal base url from instances; falling back to default");
+        }
+
+        lock (_tidalBaseUrlLock)
+        {
+            _cachedTidalBaseUrl = DefaultTidalBaseUrl;
+            _cachedTidalBaseUrlExpiry = DateTimeOffset.UtcNow.Add(TidalBaseUrlCacheTTL);
+        }
+
+        return DefaultTidalBaseUrl;
     }
 
     #region BaseDownloadService Implementation
@@ -70,7 +127,8 @@ public class SquidWTFDownloadService : BaseDownloadService
             }
             else
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{TidalBaseUrl}/search/?s=test");
+                var baseUrl = await ResolveTidalBaseUrlAsync();
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=test");
                 request.Headers.Add(TidalClientHeader, TidalClientValue);
                 
                 var response = await _httpClient.SendAsync(request);
@@ -130,7 +188,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
         
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -246,12 +304,13 @@ public class SquidWTFDownloadService : BaseDownloadService
     private async Task<(TidalManifest? manifest, string quality)> GetTidalManifestAsync(
         string trackId, string quality, CancellationToken cancellationToken)
     {
-        var url = $"{TidalBaseUrl}/track/?id={trackId}&quality={quality}";
+        var baseUrl = await ResolveTidalBaseUrlAsync(cancellationToken);
+        var url = $"{baseUrl}/track/?id={trackId}&quality={quality}";
         
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add(TidalClientHeader, TidalClientValue);
         
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -324,7 +383,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     }
 
     /// <summary>
-    /// Determines the quality string for the downloaded file
+    /// Determines the downloaded quality string based on the requested quality and MIME type.
     /// </summary>
     private static string GetDownloadedQuality(string requestedQuality, string? mimeType)
     {
@@ -353,16 +412,24 @@ public class SquidWTFDownloadService : BaseDownloadService
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("User-Agent", "Mozilla/5.0");
         request.Headers.Add("Accept", "*/*");
-        
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var outputFile = IOFile.Create(outputPath);
-        
-        await responseStream.CopyToAsync(outputFile, cancellationToken);
-        
-        Logger.LogInformation("Downloaded file to: {Path}", outputPath);
+
+        try
+        {
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var outputFile = IOFile.Create(outputPath);
+
+            await responseStream.CopyToAsync(outputFile, cancellationToken);
+
+            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to download {Url}. HttpClient: Timeout={Timeout}, BaseAddress={BaseAddress}", url, _httpClient.Timeout, _httpClient.BaseAddress);
+            throw;
+        }
     }
 
     #endregion

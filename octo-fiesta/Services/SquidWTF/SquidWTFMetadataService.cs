@@ -18,10 +18,17 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private readonly SquidWTFSettings _settings;
     private readonly SubsonicSettings _subsonicSettings;
     private readonly ILogger<SquidWTFMetadataService> _logger;
-    
+    private readonly InstanceManager _instanceManager;
+
+    // Small cached Tidal base URL to avoid repeated instance lookups
+    private string? _cachedTidalBaseUrl;
+    private DateTimeOffset _cachedTidalBaseUrlExpiry = DateTimeOffset.MinValue;
+    private readonly object _tidalBaseUrlLock = new();
+    private static readonly TimeSpan TidalBaseUrlCacheTTL = TimeSpan.FromSeconds(30);
+
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://tidal-api.binimum.org";
+    private const string DefaultTidalBaseUrl = "https://tidal-api.binimum.org";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -35,12 +42,62 @@ public class SquidWTFMetadataService : IMusicMetadataService
         IHttpClientFactory httpClientFactory, 
         IOptions<SquidWTFSettings> settings,
         IOptions<SubsonicSettings> subsonicSettings,
+        InstanceManager instanceManager,
         ILogger<SquidWTFMetadataService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _subsonicSettings = subsonicSettings.Value;
+        _instanceManager = instanceManager;
         _logger = logger;
+    }
+
+    private async Task<string> ResolveTidalBaseUrlAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        string? cached;
+        DateTimeOffset expiry;
+        lock (_tidalBaseUrlLock)
+        {
+            cached = _cachedTidalBaseUrl;
+            expiry = _cachedTidalBaseUrlExpiry;
+        }
+
+        if (cached != null && expiry > now)
+        {
+            _logger.LogDebug("Using cached Tidal base URL: {Url}", cached);
+            return cached;
+        }
+
+        try
+        {
+            var instances = await _instanceManager.GetInstancesAsync(InstanceType.Streaming);
+            var url = instances.FirstOrDefault()?.BaseUrl;
+            if (!string.IsNullOrEmpty(url))
+            {
+                url = url.TrimEnd('/');
+                lock (_tidalBaseUrlLock)
+                {
+                    _cachedTidalBaseUrl = url;
+                    _cachedTidalBaseUrlExpiry = DateTimeOffset.UtcNow.Add(TidalBaseUrlCacheTTL);
+                }
+                _logger.LogDebug("Resolved Tidal base URL: {Url}", url);
+                return url;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to resolve tidal base url from instances; falling back to default");
+        }
+
+        // Cache default for a brief period to avoid repeated failed lookups
+        lock (_tidalBaseUrlLock)
+        {
+            _cachedTidalBaseUrl = DefaultTidalBaseUrl;
+            _cachedTidalBaseUrlExpiry = DateTimeOffset.UtcNow.Add(TidalBaseUrlCacheTTL);
+        }
+
+        return DefaultTidalBaseUrl;
     }
 
     #region IMusicMetadataService Implementation
@@ -429,7 +486,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Qobuz API returned {StatusCode} for {Url}", response.StatusCode, url);
@@ -451,7 +508,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> SearchSongsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?s={Uri.EscapeDataString(query)}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/search/?s={Uri.EscapeDataString(query)}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return new List<Song>();
@@ -474,7 +532,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Album>> SearchAlbumsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(query)}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/search/?al={Uri.EscapeDataString(query)}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return new List<Album>();
@@ -490,7 +549,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Artist>> SearchArtistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?a={Uri.EscapeDataString(query)}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/search/?a={Uri.EscapeDataString(query)}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return new List<Artist>();
@@ -506,7 +566,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<ExternalPlaylist>> SearchPlaylistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?p={Uri.EscapeDataString(query)}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/search/?p={Uri.EscapeDataString(query)}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null)
@@ -545,7 +606,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<Song?> GetSongTidalAsync(string trackId)
     {
-        var url = $"{TidalBaseUrl}/info/?id={trackId}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/info/?id={trackId}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return null;
@@ -559,7 +621,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Album?> GetAlbumTidalAsync(string albumId)
     {
         // Use dedicated /album/ endpoint for fetching album by ID
-        var url = $"{TidalBaseUrl}/album/?id={albumId}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/album/?id={albumId}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return null;
@@ -606,7 +669,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Artist?> GetArtistTidalAsync(string artistId)
     {
         // Use dedicated /artist/ endpoint for fetching artist by ID
-        var url = $"{TidalBaseUrl}/artist/?id={artistId}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/artist/?id={artistId}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return null;
@@ -626,7 +690,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
         if (artist == null) return new List<Album>();
         
         // Search for albums by artist name
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(artist.Name)}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/search/?al={Uri.EscapeDataString(artist.Name)}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null) return new List<Album>();
@@ -644,7 +709,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<ExternalPlaylist?> GetPlaylistTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/playlist/?id={playlistUuid}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null)
@@ -674,7 +740,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> GetPlaylistTracksTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
+        var baseUrl = await ResolveTidalBaseUrlAsync();
+        var url = $"{baseUrl}/playlist/?id={playlistUuid}";
         var response = await SendTidalRequestAsync(url);
         
         if (response == null)
@@ -725,7 +792,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Add(TidalClientHeader, TidalClientValue);
             
-            var response = await _httpClient.SendAsync(request);
+            using var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Tidal API returned {StatusCode} for {Url}", response.StatusCode, url);
