@@ -78,6 +78,9 @@ else if (musicService == MusicService.SquidWTF)
         builder.Services.AddSingleton<PlaylistSyncService>();
     }
     
+    // Instance manager for automatic API failover (required for Tidal)
+    builder.Services.AddSingleton<SquidWTFInstanceManager>();
+    
     // SquidWTF services (primary) - registered LAST to be injected by default
     builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
     builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();

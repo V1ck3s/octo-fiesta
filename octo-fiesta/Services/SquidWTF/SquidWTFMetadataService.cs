@@ -17,11 +17,11 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _settings;
     private readonly SubsonicSettings _subsonicSettings;
+    private readonly SquidWTFInstanceManager _instanceManager;
     private readonly ILogger<SquidWTFMetadataService> _logger;
     
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://tidal-api.binimum.org";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -35,11 +35,13 @@ public class SquidWTFMetadataService : IMusicMetadataService
         IHttpClientFactory httpClientFactory, 
         IOptions<SquidWTFSettings> settings,
         IOptions<SubsonicSettings> subsonicSettings,
+        SquidWTFInstanceManager instanceManager,
         ILogger<SquidWTFMetadataService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _subsonicSettings = subsonicSettings.Value;
+        _instanceManager = instanceManager;
         _logger = logger;
     }
 
@@ -451,8 +453,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> SearchSongsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?s={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?s={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Song>();
         
@@ -474,8 +475,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Album>> SearchAlbumsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?al={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Album>();
         
@@ -490,8 +490,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Artist>> SearchArtistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?a={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?a={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Artist>();
         
@@ -506,8 +505,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<ExternalPlaylist>> SearchPlaylistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?p={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?p={Uri.EscapeDataString(query)}");
         
         if (response == null)
         {
@@ -545,8 +543,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<Song?> GetSongTidalAsync(string trackId)
     {
-        var url = $"{TidalBaseUrl}/info/?id={trackId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/info/?id={trackId}");
         
         if (response == null) return null;
         
@@ -559,8 +556,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Album?> GetAlbumTidalAsync(string albumId)
     {
         // Use dedicated /album/ endpoint for fetching album by ID
-        var url = $"{TidalBaseUrl}/album/?id={albumId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/album/?id={albumId}");
         
         if (response == null) return null;
         
@@ -606,8 +602,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Artist?> GetArtistTidalAsync(string artistId)
     {
         // Use dedicated /artist/ endpoint for fetching artist by ID
-        var url = $"{TidalBaseUrl}/artist/?id={artistId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/artist/?id={artistId}");
         
         if (response == null) return null;
         
@@ -626,8 +621,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
         if (artist == null) return new List<Album>();
         
         // Search for albums by artist name
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(artist.Name)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?al={Uri.EscapeDataString(artist.Name)}");
         
         if (response == null) return new List<Album>();
         
@@ -644,8 +638,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<ExternalPlaylist?> GetPlaylistTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/playlist/?id={playlistUuid}");
         
         if (response == null)
         {
@@ -674,8 +667,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> GetPlaylistTracksTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/playlist/?id={playlistUuid}");
         
         if (response == null)
         {
@@ -718,25 +710,37 @@ public class SquidWTFMetadataService : IMusicMetadataService
         }
     }
 
-    private async Task<string?> SendTidalRequestAsync(string url)
+    /// <summary>
+    /// Sends a request to the Tidal API with automatic instance failover
+    /// </summary>
+    /// <param name="path">Relative path (e.g., "/search/?s=query")</param>
+    private async Task<string?> SendTidalRequestAsync(string path)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add(TidalClientHeader, TidalClientValue);
+            var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}{path}");
+                request.Headers.Add(TidalClientHeader, TidalClientValue);
+                return request;
+            });
             
-            var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Tidal API returned {StatusCode} for {Url}", response.StatusCode, url);
+                _logger.LogWarning("Tidal API returned {StatusCode} for {Path}", response.StatusCode, path);
                 return null;
             }
             
             return await response.Content.ReadAsStringAsync();
         }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "All Tidal instances failed for {Path}", path);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send Tidal request to {Url}", url);
+            _logger.LogError(ex, "Failed to send Tidal request to {Path}", path);
             return null;
         }
     }

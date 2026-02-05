@@ -19,4 +19,10 @@ public class SquidWTFSettings
     /// If not specified, highest quality will be used
     /// </summary>
     public string? Quality { get; set; }
+    
+    /// <summary>
+    /// Timeout in seconds for API instance requests before switching to next instance
+    /// Only applies to Tidal source. Defaults to 5 seconds if not specified.
+    /// </summary>
+    public int InstanceTimeoutSeconds { get; set; } = 5;
 }

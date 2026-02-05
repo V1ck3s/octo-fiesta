@@ -53,5 +53,8 @@ services:
       # Qobuz: 27 (FLAC 24-bit), 7 (FLAC 16-bit), 6 (MP3 320), 5 (MP3 128)
       # Tidal: HI_RES_LOSSLESS, LOSSLESS
       - SquidWTF__Quality=${SQUIDWTF_QUALITY:-}
+      # Instance timeout in seconds for Tidal backend (default: 5)
+      # Switches to next instance if current one doesn't respond in time
+      - SquidWTF__InstanceTimeoutSeconds=${SQUIDWTF_INSTANCE_TIMEOUT:-5}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

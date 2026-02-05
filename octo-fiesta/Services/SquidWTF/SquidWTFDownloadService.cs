@@ -12,17 +12,17 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Download service implementation using SquidWTF API
-/// Supports both Qobuz and Tidal backends
+/// Supports both Qobuz and Tidal backends with automatic instance failover for Tidal
 /// No decryption needed - SquidWTF returns direct streaming URLs
 /// </summary>
 public class SquidWTFDownloadService : BaseDownloadService
 {
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _squidWTFSettings;
+    private readonly SquidWTFInstanceManager _instanceManager;
     
-    // API endpoints
+    // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://tidal-api.binimum.org";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -45,12 +45,14 @@ public class SquidWTFDownloadService : BaseDownloadService
         IMusicMetadataService metadataService,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<SquidWTFSettings> squidWTFSettings,
+        SquidWTFInstanceManager instanceManager,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
         : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
+        _instanceManager = instanceManager;
     }
 
     #region BaseDownloadService Implementation
@@ -70,10 +72,13 @@ public class SquidWTFDownloadService : BaseDownloadService
             }
             else
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{TidalBaseUrl}/search/?s=test");
-                request.Headers.Add(TidalClientHeader, TidalClientValue);
-                
-                var response = await _httpClient.SendAsync(request);
+                // Test Tidal with instance manager
+                var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=test");
+                    request.Headers.Add(TidalClientHeader, TidalClientValue);
+                    return request;
+                });
                 return response.IsSuccessStatusCode;
             }
         }
@@ -242,16 +247,18 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     /// <summary>
     /// Gets the Tidal manifest, falling back to LOSSLESS if HI_RES_LOSSLESS returns DASH format
+    /// Uses instance manager for automatic failover
     /// </summary>
     private async Task<(TidalManifest? manifest, string quality)> GetTidalManifestAsync(
         string trackId, string quality, CancellationToken cancellationToken)
     {
-        var url = $"{TidalBaseUrl}/track/?id={trackId}&quality={quality}";
+        var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/track/?id={trackId}&quality={quality}");
+            request.Headers.Add(TidalClientHeader, TidalClientValue);
+            return request;
+        }, cancellationToken);
         
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(TidalClientHeader, TidalClientValue);
-        
-        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
