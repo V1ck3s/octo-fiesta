@@ -12,6 +12,7 @@ public class Album
     public int? Year { get; set; }
     public int? SongCount { get; set; }
     public string? CoverArtUrl { get; set; }
+    public string? CoverArtUrlLarge { get; set; }
     public string? Genre { get; set; }
     public bool IsLocal { get; set; }
     public string? ExternalProvider { get; set; }

@@ -53,7 +53,7 @@ public class DeezerDownloadService : BaseDownloadService
         IOptions<DeezerSettings> deezerSettings,
         IServiceProvider serviceProvider,
         ILogger<DeezerDownloadService> logger)
-        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         
@@ -208,185 +208,202 @@ public class DeezerDownloadService : BaseDownloadService
 
     private async Task<TrackDownloadInfo> GetTrackDownloadInfoAsync(string trackId, CancellationToken cancellationToken)
     {
-        var tryDownload = async (string arl) =>
-        {
-            // Refresh token with specific ARL
-            await InitializeAsync(arl);
+        return await GetTrackDownloadInfoInternalAsync(trackId, _arl!, isRetryWithFallback: false, cancellationToken);
+    }
 
-            return await QueueRequestAsync(async () =>
+    private async Task<TrackDownloadInfo> GetTrackDownloadInfoInternalAsync(
+        string trackId, 
+        string arl, 
+        bool isRetryWithFallback,
+        CancellationToken cancellationToken)
+    {
+        // Refresh token with specific ARL
+        await InitializeAsync(arl);
+
+        return await QueueRequestAsync(async () =>
+        {
+            // Get track info
+            var trackResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{trackId}", cancellationToken);
+            trackResponse.EnsureSuccessStatusCode();
+            
+            var trackJson = await trackResponse.Content.ReadAsStringAsync(cancellationToken);
+            var trackDoc = JsonDocument.Parse(trackJson);
+            
+            // Track ID used for decryption (may change if using alternative)
+            var decryptionTrackId = trackId;
+            
+            var title = trackDoc.RootElement.GetProperty("title").GetString() ?? "";
+            var artist = trackDoc.RootElement.TryGetProperty("artist", out var artistEl) 
+                ? artistEl.GetProperty("name").GetString() ?? "" 
+                : "";
+            
+            // Check if track is readable (available in user's region)
+            var isReadable = trackDoc.RootElement.TryGetProperty("readable", out var readableEl) 
+                && readableEl.GetBoolean();
+            
+            // If track is not readable, try to find an alternative using enhanced fallbacks
+            if (!isReadable)
             {
-                // Get track info
-                var trackResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{trackId}", cancellationToken);
-                trackResponse.EnsureSuccessStatusCode();
+                Logger.LogWarning("Track {TrackId} ({Title} - {Artist}) is not readable, searching for alternative...", 
+                    trackId, title, artist);
                 
-                var trackJson = await trackResponse.Content.ReadAsStringAsync(cancellationToken);
-                var trackDoc = JsonDocument.Parse(trackJson);
-                
-                // Track ID used for decryption (may change if using alternative)
-                var decryptionTrackId = trackId;
-                
-                var title = trackDoc.RootElement.GetProperty("title").GetString() ?? "";
-                var artist = trackDoc.RootElement.TryGetProperty("artist", out var artistEl) 
-                    ? artistEl.GetProperty("name").GetString() ?? "" 
-                    : "";
-                
-                // Check if track is readable (available in user's region)
-                var isReadable = trackDoc.RootElement.TryGetProperty("readable", out var readableEl) 
-                    && readableEl.GetBoolean();
-                
-                // If track is not readable, try to find an alternative
-                if (!isReadable)
+                var alternativeTrackId = await FindAlternativeTrackWithFallbacksAsync(trackId, title, artist, arl, cancellationToken);
+                if (alternativeTrackId != null)
                 {
-                    Logger.LogWarning("Track {TrackId} ({Title} - {Artist}) is not available, searching for alternative...", 
-                        trackId, title, artist);
+                    Logger.LogInformation("Found alternative track: {AlternativeId}", alternativeTrackId);
                     
-                    var alternativeTrackId = await FindAlternativeTrackAsync(title, artist, cancellationToken);
-                    if (alternativeTrackId != null)
-                    {
-                        Logger.LogInformation("Found alternative track: {AlternativeId}", alternativeTrackId);
-                        
-                        // Update decryption track ID to use the alternative
-                        decryptionTrackId = alternativeTrackId;
-                        
-                        // Get the alternative track info
-                        var altResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{alternativeTrackId}", cancellationToken);
-                        altResponse.EnsureSuccessStatusCode();
-                        
-                        var altJson = await altResponse.Content.ReadAsStringAsync(cancellationToken);
-                        trackDoc = JsonDocument.Parse(altJson);
-                    }
-                    else
-                    {
-                        throw new Exception($"Track is not available in your region and no alternative found for: {title} - {artist}");
-                    }
-                }
-                
-                if (!trackDoc.RootElement.TryGetProperty("track_token", out var trackTokenElement))
-                {
-                    throw new Exception("Track not found or track_token missing");
-                }
-
-                var trackToken = trackTokenElement.GetString();
-
-                // Get download URL via media API
-                // Build format list based on preferred quality
-                var formatsList = BuildFormatsList(_preferredQuality);
-                
-                var mediaRequest = new
-                {
-                    license_token = _licenseToken,
-                    media = new[]
-                    {
-                        new
-                        {
-                            type = "FULL",
-                            formats = formatsList
-                        }
-                    },
-                    track_tokens = new[] { trackToken }
-                };
-
-                var mediaHttpRequest = new HttpRequestMessage(HttpMethod.Post, "https://media.deezer.com/v1/get_url");
-                mediaHttpRequest.Content = new StringContent(
-                    JsonSerializer.Serialize(mediaRequest), 
-                    Encoding.UTF8, 
-                    "application/json");
-
-                using (mediaHttpRequest)
-                {
-                    var mediaResponse = await _httpClient.SendAsync(mediaHttpRequest, cancellationToken);
-                    mediaResponse.EnsureSuccessStatusCode();
-
-                    var mediaJson = await mediaResponse.Content.ReadAsStringAsync(cancellationToken);
-                    var mediaDoc = JsonDocument.Parse(mediaJson);
-
-                    if (!mediaDoc.RootElement.TryGetProperty("data", out var data) || 
-                        data.GetArrayLength() == 0)
-                    {
-                        throw new Exception("No download URL available");
-                    }
-
-                    var firstData = data[0];
-                    if (!firstData.TryGetProperty("media", out var media) || 
-                        media.GetArrayLength() == 0)
-                    {
-                        throw new Exception("No media sources available - track may be unavailable in your region");
-                    }
-
-                    // Build a dictionary of available formats
-                    var availableFormats = new Dictionary<string, string>();
-                    foreach (var mediaItem in media.EnumerateArray())
-                    {
-                        if (mediaItem.TryGetProperty("format", out var formatEl) &&
-                            mediaItem.TryGetProperty("sources", out var sources) && 
-                            sources.GetArrayLength() > 0)
-                        {
-                            var fmt = formatEl.GetString();
-                            var url = sources[0].GetProperty("url").GetString();
-                            if (!string.IsNullOrEmpty(fmt) && !string.IsNullOrEmpty(url))
-                            {
-                                availableFormats[fmt] = url;
-                            }
-                        }
-                    }
-
-                    if (availableFormats.Count == 0)
-                    {
-                        throw new Exception("No download URL found in media sources - track may be region locked");
-                    }
-
-                    // Log available formats for debugging
-                    Logger.LogInformation("Available formats from Deezer: {Formats}", string.Join(", ", availableFormats.Keys));
-
-                    // Quality priority order (highest to lowest)
-                    var qualityPriority = new[] { "FLAC", "MP3_320", "MP3_128" };
+                    // Update decryption track ID to use the alternative
+                    decryptionTrackId = alternativeTrackId;
                     
-                    string? selectedFormat = null;
-                    string? downloadUrl = null;
-
-                    // Select the best available quality from what Deezer returned
-                    foreach (var quality in qualityPriority)
-                    {
-                        if (availableFormats.TryGetValue(quality, out var url))
-                        {
-                            selectedFormat = quality;
-                            downloadUrl = url;
-                            break;
-                        }
-                    }
-
-                    if (string.IsNullOrEmpty(downloadUrl))
-                    {
-                        throw new Exception("No compatible format found in available media sources");
-                    }
-
-                    Logger.LogInformation("Selected quality: {Format}", selectedFormat);
-
-                    return new TrackDownloadInfo
-                    {
-                        DownloadUrl = downloadUrl,
-                        Format = selectedFormat ?? "MP3_128",
-                        Title = title,
-                        Artist = artist,
-                        TrackId = decryptionTrackId
-                    };
+                    // Get the alternative track info
+                    var altResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{alternativeTrackId}", cancellationToken);
+                    altResponse.EnsureSuccessStatusCode();
+                    
+                    var altJson = await altResponse.Content.ReadAsStringAsync(cancellationToken);
+                    trackDoc = JsonDocument.Parse(altJson);
                 }
-            });
-        };
-
-        try
-        {
-            return await tryDownload(_arl!);
-        }
-        catch (Exception ex)
-        {
-            if (!string.IsNullOrEmpty(_arlFallback))
-            {
-                Logger.LogWarning(ex, "Primary ARL failed, trying fallback ARL...");
-                return await tryDownload(_arlFallback);
+                else
+                {
+                    throw new Exception($"Track is not available in your region and no alternative found for: {title} - {artist}");
+                }
             }
-            throw;
-        }
+            
+            if (!trackDoc.RootElement.TryGetProperty("track_token", out var trackTokenElement))
+            {
+                throw new Exception("Track not found or track_token missing");
+            }
+
+            var trackToken = trackTokenElement.GetString();
+
+            // Get download URL via media API
+            // Build format list based on preferred quality
+            var formatsList = BuildFormatsList(_preferredQuality);
+            
+            var mediaRequest = new
+            {
+                license_token = _licenseToken,
+                media = new[]
+                {
+                    new
+                    {
+                        type = "FULL",
+                        formats = formatsList
+                    }
+                },
+                track_tokens = new[] { trackToken }
+            };
+
+            var mediaHttpRequest = new HttpRequestMessage(HttpMethod.Post, "https://media.deezer.com/v1/get_url");
+            mediaHttpRequest.Headers.Add("Cookie", $"arl={arl}");
+            mediaHttpRequest.Content = new StringContent(
+                JsonSerializer.Serialize(mediaRequest), 
+                Encoding.UTF8, 
+                "application/json");
+
+            using (mediaHttpRequest)
+            {
+                var mediaResponse = await _httpClient.SendAsync(mediaHttpRequest, cancellationToken);
+                mediaResponse.EnsureSuccessStatusCode();
+
+                var mediaJson = await mediaResponse.Content.ReadAsStringAsync(cancellationToken);
+                var mediaDoc = JsonDocument.Parse(mediaJson);
+
+                if (!mediaDoc.RootElement.TryGetProperty("data", out var data) || 
+                    data.GetArrayLength() == 0)
+                {
+                    throw new Exception("No download URL available");
+                }
+
+                var firstData = data[0];
+                var hasMedia = firstData.TryGetProperty("media", out var media) && media.GetArrayLength() > 0;
+
+                // If no media available and this is the first attempt, try fallbacks
+                if (!hasMedia && !isRetryWithFallback)
+                {
+                    Logger.LogWarning("Track {TrackId} returned no media sources (readable={IsReadable}), trying fallbacks...", 
+                        trackId, isReadable);
+                    
+                    var alternativeTrackId = await FindAlternativeTrackWithFallbacksAsync(trackId, title, artist, arl, cancellationToken);
+                    if (alternativeTrackId != null && alternativeTrackId != trackId)
+                    {
+                        Logger.LogInformation("Retrying with alternative track: {AlternativeId}", alternativeTrackId);
+                        return await GetTrackDownloadInfoInternalAsync(alternativeTrackId, arl, isRetryWithFallback: true, cancellationToken);
+                    }
+                    
+                    // If no alternative found but we have a fallback ARL, try that
+                    if (!string.IsNullOrEmpty(_arlFallback) && arl != _arlFallback)
+                    {
+                        Logger.LogWarning("No alternative found, trying fallback ARL...");
+                        return await GetTrackDownloadInfoInternalAsync(trackId, _arlFallback, isRetryWithFallback: true, cancellationToken);
+                    }
+                    
+                    throw new Exception("No media sources available - track may be unavailable in your region");
+                }
+
+                if (!hasMedia)
+                {
+                    throw new Exception("No media sources available - track may be unavailable in your region");
+                }
+
+                // Build a dictionary of available formats
+                var availableFormats = new Dictionary<string, string>();
+                foreach (var mediaItem in media.EnumerateArray())
+                {
+                    if (mediaItem.TryGetProperty("format", out var formatEl) &&
+                        mediaItem.TryGetProperty("sources", out var sources) && 
+                        sources.GetArrayLength() > 0)
+                    {
+                        var fmt = formatEl.GetString();
+                        var url = sources[0].GetProperty("url").GetString();
+                        if (!string.IsNullOrEmpty(fmt) && !string.IsNullOrEmpty(url))
+                        {
+                            availableFormats[fmt] = url;
+                        }
+                    }
+                }
+
+                if (availableFormats.Count == 0)
+                {
+                    throw new Exception("No download URL found in media sources - track may be region locked");
+                }
+
+                // Log available formats for debugging
+                Logger.LogInformation("Available formats from Deezer: {Formats}", string.Join(", ", availableFormats.Keys));
+
+                // Quality priority order (highest to lowest)
+                var qualityPriority = new[] { "FLAC", "MP3_320", "MP3_128" };
+                
+                string? selectedFormat = null;
+                string? downloadUrl = null;
+
+                // Select the best available quality from what Deezer returned
+                foreach (var quality in qualityPriority)
+                {
+                    if (availableFormats.TryGetValue(quality, out var url))
+                    {
+                        selectedFormat = quality;
+                        downloadUrl = url;
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(downloadUrl))
+                {
+                    throw new Exception("No compatible format found in available media sources");
+                }
+
+                Logger.LogInformation("Selected quality: {Format}", selectedFormat);
+
+                return new TrackDownloadInfo
+                {
+                    DownloadUrl = downloadUrl,
+                    Format = selectedFormat ?? "MP3_128",
+                    Title = title,
+                    Artist = artist,
+                    TrackId = decryptionTrackId
+                };
+            }
+        });
     }
 
     #endregion
@@ -567,6 +584,176 @@ public class DeezerDownloadService : BaseDownloadService
     #endregion
 
     #region Alternative Track Search
+
+    /// <summary>
+    /// Data returned from the private Deezer API (deezer.pageTrack)
+    /// </summary>
+    private class TrackPageData
+    {
+        public string? FallbackId { get; set; }
+        public string? Isrc { get; set; }
+        public string? TrackToken { get; set; }
+    }
+
+    /// <summary>
+    /// Gets track data from the private Deezer API (deezer.pageTrack)
+    /// This returns FALLBACK_ID and ISRC which are not available in the public API
+    /// </summary>
+    private async Task<TrackPageData?> GetTrackPageDataAsync(string trackId, string arl, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                $"https://www.deezer.com/ajax/gw-light.php?method=deezer.pageTrack&input=3&api_version=1.0&api_token={_apiToken}");
+            
+            request.Headers.Add("Cookie", $"arl={arl}");
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { SNG_ID = trackId }),
+                Encoding.UTF8,
+                "application/json");
+
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            var doc = JsonDocument.Parse(json);
+
+            // Check for error - only treat as error if it has actual error content
+            if (doc.RootElement.TryGetProperty("error", out var error))
+            {
+                // Empty error array is not an actual error
+                if (error.ValueKind != JsonValueKind.Array || error.GetArrayLength() > 0)
+                {
+                    Logger.LogWarning("pageTrack API error for {TrackId}: {Error}", trackId, error.ToString());
+                    return null;
+                }
+            }
+
+            if (!doc.RootElement.TryGetProperty("results", out var results))
+            {
+                Logger.LogWarning("pageTrack returned no results for {TrackId}", trackId);
+                return null;
+            }
+
+            var data = new TrackPageData();
+
+            // Extract DATA section
+            if (results.TryGetProperty("DATA", out var trackData))
+            {
+                // Get FALLBACK.SNG_ID if available
+                if (trackData.TryGetProperty("FALLBACK", out var fallback) &&
+                    fallback.TryGetProperty("SNG_ID", out var fallbackId))
+                {
+                    data.FallbackId = fallbackId.GetString();
+                }
+
+                // Get ISRC
+                if (trackData.TryGetProperty("ISRC", out var isrc))
+                {
+                    data.Isrc = isrc.GetString();
+                }
+
+                // Get TRACK_TOKEN
+                if (trackData.TryGetProperty("TRACK_TOKEN", out var trackToken))
+                {
+                    data.TrackToken = trackToken.GetString();
+                }
+            }
+
+            return data;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error getting track page data for {TrackId}", trackId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Searches for a track by ISRC code
+    /// </summary>
+    private async Task<string?> FindTrackByIsrcAsync(string isrc, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var searchResponse = await _httpClient.GetAsync(
+                $"{DeezerApiBase}/track/isrc:{isrc}", 
+                cancellationToken);
+            
+            if (!searchResponse.IsSuccessStatusCode)
+                return null;
+            
+            var searchJson = await searchResponse.Content.ReadAsStringAsync(cancellationToken);
+            var searchDoc = JsonDocument.Parse(searchJson);
+            
+            // Check if we got a valid track (not an error)
+            if (searchDoc.RootElement.TryGetProperty("error", out _))
+                return null;
+            
+            // Check if track is readable
+            var isReadable = searchDoc.RootElement.TryGetProperty("readable", out var readableEl) 
+                && readableEl.GetBoolean();
+            
+            if (!isReadable)
+                return null;
+            
+            if (searchDoc.RootElement.TryGetProperty("id", out var idEl))
+            {
+                var trackId = idEl.GetInt64().ToString();
+                var title = searchDoc.RootElement.TryGetProperty("title", out var titleEl) 
+                    ? titleEl.GetString() : "Unknown";
+                Logger.LogInformation("Found track by ISRC {Isrc}: {Title} (ID: {Id})", isrc, title, trackId);
+                return trackId;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Error searching track by ISRC {Isrc}", isrc);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Tries to find an alternative track using multiple fallback strategies:
+    /// 1. FALLBACK_ID from Deezer's private API
+    /// 2. ISRC search
+    /// 3. Title/Artist search
+    /// </summary>
+    private async Task<string?> FindAlternativeTrackWithFallbacksAsync(
+        string originalTrackId,
+        string title, 
+        string artist,
+        string arl,
+        CancellationToken cancellationToken)
+    {
+        // Strategy 1: Try FALLBACK_ID from private API
+        var pageData = await GetTrackPageDataAsync(originalTrackId, arl, cancellationToken);
+        
+        if (pageData?.FallbackId != null && pageData.FallbackId != "0" && pageData.FallbackId != originalTrackId)
+        {
+            Logger.LogInformation("Using Deezer FALLBACK_ID: {FallbackId} for track {TrackId}", 
+                pageData.FallbackId, originalTrackId);
+            return pageData.FallbackId;
+        }
+
+        // Strategy 2: Try ISRC search
+        if (!string.IsNullOrEmpty(pageData?.Isrc))
+        {
+            var isrcTrackId = await FindTrackByIsrcAsync(pageData.Isrc, cancellationToken);
+            if (isrcTrackId != null && isrcTrackId != originalTrackId)
+            {
+                Logger.LogInformation("Found alternative via ISRC {Isrc}: {AlternativeId}", 
+                    pageData.Isrc, isrcTrackId);
+                return isrcTrackId;
+            }
+        }
+
+        // Strategy 3: Fall back to title/artist search
+        Logger.LogInformation("Trying title/artist search fallback for: {Title} - {Artist}", title, artist);
+        return await FindAlternativeTrackAsync(title, artist, cancellationToken);
+    }
 
     /// <summary>
     /// Searches for an alternative track when the original is not available (readable: false)

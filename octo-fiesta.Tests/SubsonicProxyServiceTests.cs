@@ -182,7 +182,7 @@ public class SubsonicProxyServiceTests
         // Assert
         Assert.True(success);
         Assert.Equal(responseContent, body);
-        Assert.Equal("application/xml", contentType);
+        Assert.StartsWith("application/xml", contentType);
     }
 
     [Fact]

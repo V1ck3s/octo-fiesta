@@ -251,7 +251,7 @@ public class SubsonicModelMapper
         if (playlist.CreatedDate.HasValue)
         {
             album["year"] = playlist.CreatedDate.Value.Year;
-            album["created"] = playlist.CreatedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss");
+            album["created"] = playlist.CreatedDate.Value.ToUniversalTime().ToString("o");
         }
         
         if (!string.IsNullOrEmpty(playlist.CoverUrl))
@@ -289,7 +289,7 @@ public class SubsonicModelMapper
         if (playlist.CreatedDate.HasValue)
         {
             album.Add(new XAttribute("year", playlist.CreatedDate.Value.Year));
-            album.Add(new XAttribute("created", playlist.CreatedDate.Value.ToString("yyyy-MM-ddTHH:mm:ss")));
+            album.Add(new XAttribute("created", playlist.CreatedDate.Value.ToUniversalTime().ToString("o")));
         }
         
         if (!string.IsNullOrEmpty(playlist.CoverUrl))

@@ -1,0 +1,104 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: not-a-fork
+    attributes:
+      label: Official version
+      description: We only provide support for the official octo-fiesta repository, not forks.
+      options:
+        - label: I confirm I'm using the official octo-fiesta, not a fork
+          required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug!
+        Please fill out the sections below to help us understand and reproduce the issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which version of octo-fiesta are you running?
+      placeholder: "e.g. v0.4.0 or commit hash"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: music-service
+    attributes:
+      label: Music Service
+      description: Which music service are you using?
+      options:
+        - Local
+        - Deezer
+        - Qobuz
+        - SquidWTF (Tidal)
+        - SquidWTF (Qobuz)
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: Which Subsonic client are you using?
+      placeholder: "e.g. Aonsoku, Feishin, etc."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      description: How are you running octo-fiesta?
+      options:
+        - Docker
+        - Docker Compose
+        - Manual (dotnet run)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the bug clearly and concisely.
+      placeholder: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste any relevant logs here. Please remove any sensitive information (tokens, credentials, etc.).
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Paste your configuration here (remove sensitive values like ARL, tokens, passwords).
+      render: json
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that might help (screenshots, etc.)

@@ -12,17 +12,17 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Download service implementation using SquidWTF API
-/// Supports both Qobuz and Tidal backends
+/// Supports both Qobuz and Tidal backends with automatic instance failover for Tidal
 /// No decryption needed - SquidWTF returns direct streaming URLs
 /// </summary>
 public class SquidWTFDownloadService : BaseDownloadService
 {
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _squidWTFSettings;
+    private readonly SquidWTFInstanceManager _instanceManager;
     
-    // API endpoints
+    // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://triton.squid.wtf";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -31,8 +31,8 @@ public class SquidWTFDownloadService : BaseDownloadService
     private const string TidalClientValue = "BiniLossless/v3.4";
     
     // Quality mappings
-    // Qobuz: 27 = FLAC (24-bit), 7 = FLAC (16-bit), 6 = MP3 320, 5 = MP3 128
-    // Tidal: HI_RES_LOSSLESS, LOSSLESS
+    // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
+    // Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
     
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
 
@@ -45,12 +45,14 @@ public class SquidWTFDownloadService : BaseDownloadService
         IMusicMetadataService metadataService,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<SquidWTFSettings> squidWTFSettings,
+        SquidWTFInstanceManager instanceManager,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
-        : base(configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
+        _instanceManager = instanceManager;
     }
 
     #region BaseDownloadService Implementation
@@ -70,10 +72,13 @@ public class SquidWTFDownloadService : BaseDownloadService
             }
             else
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{TidalBaseUrl}/search/?s=test");
-                request.Headers.Add(TidalClientHeader, TidalClientValue);
-                
-                var response = await _httpClient.SendAsync(request);
+                // Test Tidal with instance manager
+                var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=test");
+                    request.Headers.Add(TidalClientHeader, TidalClientValue);
+                    return request;
+                });
                 return response.IsSuccessStatusCode;
             }
         }
@@ -145,13 +150,14 @@ public class SquidWTFDownloadService : BaseDownloadService
         Logger.LogInformation("Got download URL for track {TrackId}: {Title}", trackId, song.Title);
         
         // Determine file extension based on quality
-        var extension = quality == "27" || quality == "7" ? ".flac" : ".mp3";
+        // Qobuz: 27/7/6 = FLAC, 5 = MP3
+        var extension = quality == "5" ? ".mp3" : ".flac";
         var downloadedQuality = quality switch
         {
-            "27" => "FLAC_24",
-            "7" => "FLAC_16",
-            "6" => "MP3_320",
-            "5" => "MP3_128",
+            "27" => "FLAC_24_192",
+            "7" => "FLAC_24_96",
+            "6" => "FLAC_16",
+            "5" => "MP3_320",
             _ => "FLAC"
         };
         
@@ -182,16 +188,17 @@ public class SquidWTFDownloadService : BaseDownloadService
         
         if (string.IsNullOrEmpty(quality))
         {
-            return "27"; // Default to highest quality FLAC
+            return "27"; // Default to highest quality FLAC (24-bit/192kHz)
         }
         
         // Map common quality names to Qobuz quality codes
+        // 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
         return quality.ToUpperInvariant() switch
         {
-            "FLAC" or "FLAC_24" or "27" => "27",
-            "FLAC_16" or "7" => "7",
-            "MP3_320" or "6" => "6",
-            "MP3_128" or "5" => "5",
+            "FLAC_24_192" or "FLAC_24" or "27" => "27",
+            "FLAC_24_96" or "7" => "7",
+            "FLAC_16" or "FLAC" or "6" => "6",
+            "MP3_320" or "MP3" or "5" => "5",
             _ => "27"
         };
     }
@@ -240,16 +247,18 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     /// <summary>
     /// Gets the Tidal manifest, falling back to LOSSLESS if HI_RES_LOSSLESS returns DASH format
+    /// Uses instance manager for automatic failover
     /// </summary>
     private async Task<(TidalManifest? manifest, string quality)> GetTidalManifestAsync(
         string trackId, string quality, CancellationToken cancellationToken)
     {
-        var url = $"{TidalBaseUrl}/track/?id={trackId}&quality={quality}";
+        var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/track/?id={trackId}&quality={quality}");
+            request.Headers.Add(TidalClientHeader, TidalClientValue);
+            return request;
+        }, cancellationToken);
         
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(TidalClientHeader, TidalClientValue);
-        
-        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -294,6 +303,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         {
             "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => "HI_RES_LOSSLESS",
             "LOSSLESS" or "FLAC" or "FLAC_16" => "LOSSLESS",
+            "HIGH" or "AAC_320" or "AAC_HIGH" => "HIGH",
+            "LOW" or "AAC_96" or "AAC_LOW" => "LOW",
             _ => "HI_RES_LOSSLESS"
         };
     }
@@ -329,11 +340,16 @@ public class SquidWTFDownloadService : BaseDownloadService
             return requestedQuality == "HI_RES_LOSSLESS" ? "FLAC_24" : "FLAC_16";
         }
         
-        // AAC/M4A from Tidal is typically 256kbps
+        // AAC/M4A from Tidal - determine bitrate based on requested quality
         if (mimeType?.Contains("mp4", StringComparison.OrdinalIgnoreCase) == true ||
             mimeType?.Contains("aac", StringComparison.OrdinalIgnoreCase) == true)
         {
-            return "AAC_256";
+            return requestedQuality switch
+            {
+                "HIGH" => "AAC_320",
+                "LOW" => "AAC_96",
+                _ => "AAC_320"  // Default if we got AAC but didn't specifically request it
+            };
         }
         
         return "MP3_320";

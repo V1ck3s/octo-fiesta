@@ -32,8 +32,8 @@ See the [Supported Music Providers](https://github.com/V1ck3s/octo-fiesta/wiki/S
 | Platform | Clients |
 |----------|---------|
 | **Desktop** | [Aonsoku](https://github.com/victoralvesf/aonsoku), [Feishin](https://github.com/jeffvli/feishin), [Supersonic](https://github.com/dweymouth/supersonic), [Subplayer](https://github.com/peguerosdc/subplayer), [Aurial](https://github.com/shrimpza/aurial) |
-| **Android** | [Tempus](https://github.com/eddyizm/tempus), [Substreamer](https://substreamerapp.com/) |
-| **iOS** | [Narjo](https://www.reddit.com/r/NarjoApp/), [BeatsX](https://apps.apple.com/fr/app/beatsx/id6745130542) |
+| **Android** | [Tempus](https://github.com/eddyizm/tempus), [Substreamer](https://substreamerapp.com/), [Yuzic](https://github.com/eftpmc/yuzic) |
+| **iOS** | [Narjo](https://www.reddit.com/r/NarjoApp/), [BeatsX](https://apps.apple.com/fr/app/beatsx/id6745130542), [Yuzic](https://github.com/eftpmc/yuzic) |
 
 See the [Compatible Clients](https://github.com/V1ck3s/octo-fiesta/wiki/Compatible-Clients) wiki page for details and incompatible clients.
 

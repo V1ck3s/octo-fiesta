@@ -17,11 +17,11 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _settings;
     private readonly SubsonicSettings _subsonicSettings;
+    private readonly SquidWTFInstanceManager _instanceManager;
     private readonly ILogger<SquidWTFMetadataService> _logger;
     
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://triton.squid.wtf";
     
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -35,11 +35,13 @@ public class SquidWTFMetadataService : IMusicMetadataService
         IHttpClientFactory httpClientFactory, 
         IOptions<SquidWTFSettings> settings,
         IOptions<SubsonicSettings> subsonicSettings,
+        SquidWTFInstanceManager instanceManager,
         ILogger<SquidWTFMetadataService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _subsonicSettings = subsonicSettings.Value;
+        _instanceManager = instanceManager;
         _logger = logger;
     }
 
@@ -113,11 +115,32 @@ public class SquidWTFMetadataService : IMusicMetadataService
         
         await Task.WhenAll(songsTask, albumsTask, artistsTask);
         
+        var songs = await songsTask;
+        var albums = await albumsTask;
+        var artists = await artistsTask;
+        
+        // Cross-reference artists with albums to populate AlbumCount
+        // This avoids extra API calls since we already have album results
+        if (artists.Count > 0 && albums.Count > 0)
+        {
+            foreach (var artist in artists)
+            {
+                if (artist.AlbumCount == null || artist.AlbumCount == 0)
+                {
+                    var matchingAlbums = albums.Count(a => a.ArtistId == artist.Id);
+                    if (matchingAlbums > 0)
+                    {
+                        artist.AlbumCount = matchingAlbums;
+                    }
+                }
+            }
+        }
+        
         return new SearchResult
         {
-            Songs = await songsTask,
-            Albums = await albumsTask,
-            Artists = await artistsTask
+            Songs = songs,
+            Albums = albums,
+            Artists = artists
         };
     }
 
@@ -368,6 +391,16 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 song.AlbumId = album.Id;
                 song.AlbumArtist = album.Artist;
                 
+                // Use album cover for tracks if track doesn't have one (common for tracks from /api/get-album)
+                if (string.IsNullOrEmpty(song.CoverArtUrl))
+                {
+                    song.CoverArtUrl = album.CoverArtUrl;
+                }
+                if (string.IsNullOrEmpty(song.CoverArtUrlLarge))
+                {
+                    song.CoverArtUrlLarge = album.CoverArtUrlLarge;
+                }
+                
                 if (ShouldIncludeSong(song))
                 {
                     album.Songs.Add(song);
@@ -393,15 +426,21 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Album>> GetArtistAlbumsQobuzAsync(string artistId)
     {
-        var url = $"{QobuzBaseUrl}/api/get-artist?artist_id={artistId}";
+        var artist = await GetArtistQobuzAsync(artistId);
+        if (artist == null) return new List<Album>();
+        
+        // Search for albums by artist name (Qobuz get-artist doesn't return albums list)
+        var url = $"{QobuzBaseUrl}/api/get-music?q={Uri.EscapeDataString(artist.Name)}&offset=0";
         var response = await SendQobuzRequestAsync(url);
         
         if (response == null) return new List<Album>();
         
-        var artistResponse = JsonSerializer.Deserialize<QobuzArtistResponse>(response);
-        if (artistResponse?.Data?.Albums?.Items == null) return new List<Album>();
+        var searchResponse = JsonSerializer.Deserialize<QobuzSearchResponse>(response);
+        if (searchResponse?.Data?.Albums?.Items == null) return new List<Album>();
         
-        return artistResponse.Data.Albums.Items
+        // Filter albums that have this artist as main artist
+        return searchResponse.Data.Albums.Items
+            .Where(a => a.Artist?.Id.ToString() == artistId)
             .Select(MapQobuzAlbumToAlbum)
             .ToList();
     }
@@ -435,8 +474,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> SearchSongsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?s={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?s={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Song>();
         
@@ -458,8 +496,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Album>> SearchAlbumsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?al={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Album>();
         
@@ -474,8 +511,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Artist>> SearchArtistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?a={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?a={Uri.EscapeDataString(query)}");
         
         if (response == null) return new List<Artist>();
         
@@ -490,8 +526,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<ExternalPlaylist>> SearchPlaylistsTidalAsync(string query, int limit)
     {
-        var url = $"{TidalBaseUrl}/search/?p={Uri.EscapeDataString(query)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?p={Uri.EscapeDataString(query)}");
         
         if (response == null)
         {
@@ -529,8 +564,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<Song?> GetSongTidalAsync(string trackId)
     {
-        var url = $"{TidalBaseUrl}/info/?id={trackId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/info/?id={trackId}");
         
         if (response == null) return null;
         
@@ -543,8 +577,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Album?> GetAlbumTidalAsync(string albumId)
     {
         // Use dedicated /album/ endpoint for fetching album by ID
-        var url = $"{TidalBaseUrl}/album/?id={albumId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/album/?id={albumId}");
         
         if (response == null) return null;
         
@@ -571,6 +604,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
                     {
                         song.CoverArtUrl = album.CoverArtUrl;
                     }
+                    if (string.IsNullOrEmpty(song.CoverArtUrlLarge))
+                    {
+                        song.CoverArtUrlLarge = album.CoverArtUrlLarge;
+                    }
                     
                     if (ShouldIncludeSong(song))
                     {
@@ -586,8 +623,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<Artist?> GetArtistTidalAsync(string artistId)
     {
         // Use dedicated /artist/ endpoint for fetching artist by ID
-        var url = $"{TidalBaseUrl}/artist/?id={artistId}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/artist/?id={artistId}");
         
         if (response == null) return null;
         
@@ -606,8 +642,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
         if (artist == null) return new List<Album>();
         
         // Search for albums by artist name
-        var url = $"{TidalBaseUrl}/search/?al={Uri.EscapeDataString(artist.Name)}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/search/?al={Uri.EscapeDataString(artist.Name)}");
         
         if (response == null) return new List<Album>();
         
@@ -624,8 +659,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<ExternalPlaylist?> GetPlaylistTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/playlist/?id={playlistUuid}");
         
         if (response == null)
         {
@@ -654,8 +688,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Song>> GetPlaylistTracksTidalAsync(string playlistUuid)
     {
-        var url = $"{TidalBaseUrl}/playlist/?id={playlistUuid}";
-        var response = await SendTidalRequestAsync(url);
+        var response = await SendTidalRequestAsync($"/playlist/?id={playlistUuid}");
         
         if (response == null)
         {
@@ -698,25 +731,37 @@ public class SquidWTFMetadataService : IMusicMetadataService
         }
     }
 
-    private async Task<string?> SendTidalRequestAsync(string url)
+    /// <summary>
+    /// Sends a request to the Tidal API with automatic instance failover
+    /// </summary>
+    /// <param name="path">Relative path (e.g., "/search/?s=query")</param>
+    private async Task<string?> SendTidalRequestAsync(string path)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add(TidalClientHeader, TidalClientValue);
+            var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}{path}");
+                request.Headers.Add(TidalClientHeader, TidalClientValue);
+                return request;
+            });
             
-            var response = await _httpClient.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Tidal API returned {StatusCode} for {Url}", response.StatusCode, url);
+                _logger.LogWarning("Tidal API returned {StatusCode} for {Path}", response.StatusCode, path);
                 return null;
             }
             
             return await response.Content.ReadAsStringAsync();
         }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "All Tidal instances failed for {Path}", path);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send Tidal request to {Url}", url);
+            _logger.LogError(ex, "Failed to send Tidal request to {Path}", path);
             return null;
         }
     }
@@ -729,6 +774,30 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         var externalId = track.Id.ToString();
         
+        // Parse year from release date
+        int? year = null;
+        var releaseDate = track.ReleaseDateOriginal ?? track.Album?.ReleaseDateOriginal;
+        if (!string.IsNullOrEmpty(releaseDate) && releaseDate.Length >= 4)
+        {
+            if (int.TryParse(releaseDate.Substring(0, 4), out var y))
+            {
+                year = y;
+            }
+        }
+        // Fallback to album released_at timestamp
+        if (year == null && track.Album?.ReleasedAt.HasValue == true)
+        {
+            var dateTime = DateTimeOffset.FromUnixTimeSeconds(track.Album.ReleasedAt.Value).DateTime;
+            year = dateTime.Year;
+        }
+        
+        // Get composers from composer field
+        var contributors = new List<string>();
+        if (track.Composer != null && !string.IsNullOrEmpty(track.Composer.Name))
+        {
+            contributors.Add(track.Composer.Name);
+        }
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
@@ -739,6 +808,13 @@ public class SquidWTFMetadataService : IMusicMetadataService
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,
             Track = track.TrackNumber,
+            DiscNumber = track.MediaNumber > 0 ? track.MediaNumber : null,
+            Year = year,
+            Genre = track.Album?.Genre?.Name,
+            Isrc = track.Isrc,
+            Copyright = track.Copyright ?? track.Album?.Copyright,
+            Contributors = contributors,
+            TotalTracks = track.Album?.TracksCount,
             CoverArtUrl = track.Album?.Image?.Thumbnail ?? track.Album?.Image?.Small,
             CoverArtUrlLarge = track.Album?.Image?.Large,
             IsLocal = false,
@@ -767,7 +843,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
             ArtistId = album.Artist != null ? $"ext-squidwtf-artist-{album.Artist.Id}" : null,
             Year = year,
             SongCount = album.TracksCount,
-            CoverArtUrl = album.Image?.Thumbnail ?? album.Image?.Small,
+            CoverArtUrl = album.Image?.Small ?? album.Image?.Thumbnail,
+            CoverArtUrlLarge = album.Image?.Large,
             Genre = album.Genre?.Name,
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -799,17 +876,36 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         var externalId = track.Id.ToString();
         
+        // Parse year from album release date
+        int? year = null;
+        if (!string.IsNullOrEmpty(track.Album?.ReleaseDate) && track.Album.ReleaseDate.Length >= 4)
+        {
+            if (int.TryParse(track.Album.ReleaseDate.Substring(0, 4), out var y))
+            {
+                year = y;
+            }
+        }
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = track.Artist?.Name ?? (track.Artists?.FirstOrDefault()?.Name ?? ""),
-            ArtistId = track.Artist != null ? $"ext-squidwtf-artist-{track.Artist.Id}" : null,
+            ArtistId = track.Artist != null 
+                ? $"ext-squidwtf-artist-{track.Artist.Id}" 
+                : (track.Artists?.FirstOrDefault() is { } firstArtist 
+                    ? $"ext-squidwtf-artist-{firstArtist.Id}" 
+                    : null),
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,
             Track = track.TrackNumber,
             DiscNumber = track.VolumeNumber,
+            Year = year,
+            Isrc = track.Isrc,
+            Bpm = track.Bpm,
+            Copyright = track.Copyright,
+            TotalTracks = track.Album?.NumberOfTracks,
             CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "320x320"),
             CoverArtUrlLarge = GetTidalCoverUrl(track.Album?.Cover, "1280x1280"),
             IsLocal = false,
@@ -823,18 +919,36 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         var externalId = track.Id.ToString();
         
+        // Parse year from album release date
+        int? year = null;
+        if (!string.IsNullOrEmpty(track.Album?.ReleaseDate) && track.Album.ReleaseDate.Length >= 4)
+        {
+            if (int.TryParse(track.Album.ReleaseDate.Substring(0, 4), out var y))
+            {
+                year = y;
+            }
+        }
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = track.Artist?.Name ?? (track.Artists?.FirstOrDefault()?.Name ?? ""),
-            ArtistId = track.Artist != null ? $"ext-squidwtf-artist-{track.Artist.Id}" : null,
+            ArtistId = track.Artist != null 
+                ? $"ext-squidwtf-artist-{track.Artist.Id}" 
+                : (track.Artists?.FirstOrDefault() is { } firstTrackInfoArtist 
+                    ? $"ext-squidwtf-artist-{firstTrackInfoArtist.Id}" 
+                    : null),
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,
             Track = track.TrackNumber,
             DiscNumber = track.VolumeNumber,
+            Year = year,
             Isrc = track.Isrc,
+            Bpm = track.Bpm,
+            Copyright = track.Copyright,
+            TotalTracks = track.Album?.NumberOfTracks,
             CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "320x320"),
             CoverArtUrlLarge = GetTidalCoverUrl(track.Album?.Cover, "1280x1280"),
             IsLocal = false,
@@ -857,15 +971,19 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
+        // Get main artist from singular field or first in artists array
+        var mainArtist = album.Artist ?? album.Artists?.FirstOrDefault();
+        
         return new Album
         {
             Id = $"ext-squidwtf-album-{externalId}",
             Title = album.Title ?? "",
-            Artist = album.Artist?.Name ?? (album.Artists?.FirstOrDefault()?.Name ?? ""),
-            ArtistId = album.Artist != null ? $"ext-squidwtf-artist-{album.Artist.Id}" : null,
+            Artist = mainArtist?.Name ?? "",
+            ArtistId = mainArtist != null ? $"ext-squidwtf-artist-{mainArtist.Id}" : null,
             Year = year,
             SongCount = album.NumberOfTracks,
             CoverArtUrl = GetTidalCoverUrl(album.Cover, "320x320"),
+            CoverArtUrlLarge = GetTidalCoverUrl(album.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId
@@ -903,15 +1021,19 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
+        // Get main artist from singular field or first in artists array
+        var mainArtist = albumData.Artist ?? albumData.Artists?.FirstOrDefault();
+        
         return new Album
         {
             Id = $"ext-squidwtf-album-{externalId}",
             Title = albumData.Title ?? "",
-            Artist = albumData.Artist?.Name ?? (albumData.Artists?.FirstOrDefault()?.Name ?? ""),
-            ArtistId = albumData.Artist != null ? $"ext-squidwtf-artist-{albumData.Artist.Id}" : null,
+            Artist = mainArtist?.Name ?? "",
+            ArtistId = mainArtist != null ? $"ext-squidwtf-artist-{mainArtist.Id}" : null,
             Year = year,
             SongCount = albumData.NumberOfTracks,
             CoverArtUrl = GetTidalCoverUrl(albumData.Cover, "320x320"),
+            CoverArtUrlLarge = GetTidalCoverUrl(albumData.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId

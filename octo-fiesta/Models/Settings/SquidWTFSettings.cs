@@ -14,9 +14,15 @@ public class SquidWTFSettings
     
     /// <summary>
     /// Preferred audio quality
-    /// For Qobuz: 27 (FLAC), 7 (MP3 320), 5 (MP3 128)
-    /// For Tidal: "HI_RES_LOSSLESS", "LOSSLESS"
+    /// For Qobuz: 27 (FLAC 24-bit/192kHz), 7 (FLAC 24-bit/96kHz), 6 (FLAC 16-bit), 5 (MP3 320kbps)
+    /// For Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
     /// If not specified, highest quality will be used
     /// </summary>
     public string? Quality { get; set; }
+    
+    /// <summary>
+    /// Timeout in seconds for API instance requests before switching to next instance
+    /// Only applies to Tidal source. Defaults to 5 seconds if not specified.
+    /// </summary>
+    public int InstanceTimeoutSeconds { get; set; } = 5;
 }

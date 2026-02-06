@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services.Validation;
@@ -5,114 +6,191 @@ using octo_fiesta.Services.Validation;
 namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
-/// Validates SquidWTF service connectivity at startup
+/// Validates SquidWTF service connectivity at startup (no auth needed)
 /// </summary>
 public class SquidWTFStartupValidator : BaseStartupValidator
 {
     private readonly SquidWTFSettings _settings;
-    
-    // API endpoints
-    private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string TidalBaseUrl = "https://triton.squid.wtf";
-    
-    // Required headers
-    private const string QobuzCountryHeader = "Token-Country";
-    private const string QobuzCountryValue = "US";
-    private const string TidalClientHeader = "x-client";
-    private const string TidalClientValue = "BiniLossless/v3.4";
+    private readonly SquidWTFInstanceManager? _instanceManager;
 
     public override string ServiceName => "SquidWTF";
 
-    public SquidWTFStartupValidator(IOptions<SquidWTFSettings> settings, HttpClient httpClient)
+    public SquidWTFStartupValidator(
+        IOptions<SquidWTFSettings> settings, 
+        HttpClient httpClient,
+        IServiceProvider serviceProvider)
         : base(httpClient)
     {
         _settings = settings.Value;
+        _instanceManager = serviceProvider.GetService<SquidWTFInstanceManager>();
     }
 
     public override async Task<ValidationResult> ValidateAsync(CancellationToken cancellationToken)
     {
+        Console.WriteLine();
+
         var source = _settings.Source ?? "Qobuz";
-        var quality = _settings.Quality;
-        var isQobuz = source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
+        var quality = _settings.Quality?.ToUpperInvariant() switch
+        {
+            "FLAC" => "LOSSLESS",
+            "HI_RES" => "HI_RES_LOSSLESS",
+            "LOSSLESS" => "LOSSLESS",
+            "HIGH" => "HIGH",
+            "LOW" => "LOW",
+            "27" => "FLAC 24-bit/192kHz",
+            "7" => "FLAC 24-bit/96kHz",
+            "6" => "FLAC 16-bit",
+            "5" => "MP3 320kbps",
+            _ => source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase) 
+                ? "FLAC 24-bit/192kHz (default)" 
+                : "LOSSLESS (default)"
+        };
 
         WriteStatus("SquidWTF Source", source, ConsoleColor.Cyan);
+        WriteStatus("SquidWTF Quality", quality, ConsoleColor.Cyan);
         
-        var qualityDisplay = string.IsNullOrWhiteSpace(quality) 
-            ? "auto (highest available)" 
-            : quality;
-        WriteStatus("SquidWTF Quality", qualityDisplay, ConsoleColor.Cyan);
+        if (_settings.InstanceTimeoutSeconds > 0)
+        {
+            WriteStatus("Instance Timeout", $"{_settings.InstanceTimeoutSeconds}s", ConsoleColor.Cyan);
+        }
 
-        // Test connectivity
         try
         {
-            if (isQobuz)
+            if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
             {
-                await ValidateQobuzAsync(cancellationToken);
+                return await ValidateQobuzAsync(cancellationToken);
             }
             else
             {
-                await ValidateTidalAsync(cancellationToken);
+                return await ValidateTidalAsync(cancellationToken);
             }
-
-            return ValidationResult.Success("SquidWTF validation completed");
         }
         catch (TaskCanceledException)
         {
             WriteStatus("SquidWTF API", "TIMEOUT", ConsoleColor.Yellow);
             WriteDetail("Could not reach service within timeout period");
-            return ValidationResult.Failure("TIMEOUT", "Service unreachable", ConsoleColor.Yellow);
+            return ValidationResult.Failure("-1", "SquidWTF connection timeout");
         }
         catch (HttpRequestException ex)
         {
-            WriteStatus("SquidWTF API", "UNREACHABLE", ConsoleColor.Yellow);
+            WriteStatus("SquidWTF API", "UNREACHABLE", ConsoleColor.Red);
             WriteDetail(ex.Message);
-            return ValidationResult.Failure("UNREACHABLE", ex.Message, ConsoleColor.Yellow);
+            return ValidationResult.Failure("-1", $"Cannot connect to SquidWTF: {ex.Message}");
         }
         catch (Exception ex)
         {
             WriteStatus("SquidWTF API", "ERROR", ConsoleColor.Red);
             WriteDetail(ex.Message);
-            return ValidationResult.Failure("ERROR", ex.Message, ConsoleColor.Red);
+            return ValidationResult.Failure("-1", $"Validation error: {ex.Message}");
         }
     }
 
-    private async Task ValidateQobuzAsync(CancellationToken cancellationToken)
+    private async Task<ValidationResult> ValidateQobuzAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, 
-            $"{QobuzBaseUrl}/api/get-music?q=test&offset=0");
-        request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var response = await _httpClient.GetAsync("https://qobuz.squid.wtf/api/get-music?q=test&offset=0", cancellationToken);
 
         if (response.IsSuccessStatusCode)
         {
-            WriteStatus("SquidWTF Qobuz API", "AVAILABLE", ConsoleColor.Green);
-            WriteDetail("Service is responding normally");
+            WriteStatus("SquidWTF API", "REACHABLE", ConsoleColor.Green);
+            WriteDetail("No authentication required - powered by Qobuz");
+            return ValidationResult.Success("SquidWTF Qobuz validation completed");
         }
         else
         {
-            WriteStatus("SquidWTF Qobuz API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
-            WriteDetail("Service returned an error status");
+            WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
+            WriteDetail("Service may be temporarily unavailable");
+            return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF returned code");
         }
     }
 
-    private async Task ValidateTidalAsync(CancellationToken cancellationToken)
+    private async Task<ValidationResult> ValidateTidalAsync(CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, 
-            $"{TidalBaseUrl}/search/?s=test");
-        request.Headers.Add(TidalClientHeader, TidalClientValue);
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-
-        if (response.IsSuccessStatusCode)
+        if (_instanceManager != null)
         {
-            WriteStatus("SquidWTF Tidal API", "AVAILABLE", ConsoleColor.Green);
-            WriteDetail("Service is responding normally");
+            // Use instance manager to test with failover
+            var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+            {
+                return new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=test");
+            }, cancellationToken);
+
+            var currentInstance = _instanceManager.GetCurrentInstance();
+            
+            if (response.IsSuccessStatusCode)
+            {
+                WriteStatus("SquidWTF API", "REACHABLE", ConsoleColor.Green);
+                WriteStatus("Active Instance", currentInstance ?? "unknown", ConsoleColor.Cyan);
+                WriteDetail("No authentication required - powered by Tidal");
+                
+                // Try a test search to verify functionality
+                await ValidateSearchFunctionality(cancellationToken);
+                
+                return ValidationResult.Success("SquidWTF Tidal validation completed");
+            }
+            else
+            {
+                WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
+                WriteDetail("Service may be temporarily unavailable");
+                return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF returned code");
+            }
         }
         else
         {
-            WriteStatus("SquidWTF Tidal API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
-            WriteDetail("Service returned an error status");
+            // Fallback if instance manager not available
+            var response = await _httpClient.GetAsync("https://tidal-api.binimum.org/", cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                WriteStatus("SquidWTF API", "REACHABLE", ConsoleColor.Green);
+                WriteDetail("No authentication required - powered by Tidal");
+                return ValidationResult.Success("SquidWTF Tidal validation completed");
+            }
+            else
+            {
+                WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
+                WriteDetail("Service may be temporarily unavailable");
+                return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF returned code");
+            }
+        }
+    }
+
+    private async Task ValidateSearchFunctionality(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_instanceManager != null)
+            {
+                var searchResponse = await _instanceManager.SendWithFailoverAsync(baseUrl =>
+                {
+                    return new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=Taylor%20Swift");
+                }, cancellationToken);
+
+                if (searchResponse.IsSuccessStatusCode)
+                {
+                    var json = await searchResponse.Content.ReadAsStringAsync(cancellationToken);
+                    var doc = JsonDocument.Parse(json);
+                    
+                    if (doc.RootElement.TryGetProperty("data", out var data) &&
+                        data.TryGetProperty("items", out var items))
+                    {
+                        var itemCount = items.GetArrayLength();
+                        WriteStatus("Search Functionality", "WORKING", ConsoleColor.Green);
+                        WriteDetail($"Test search returned {itemCount} results");
+                    }
+                    else
+                    {
+                        WriteStatus("Search Functionality", "UNEXPECTED RESPONSE", ConsoleColor.Yellow);
+                    }
+                }
+                else
+                {
+                    WriteStatus("Search Functionality", $"HTTP {(int)searchResponse.StatusCode}", ConsoleColor.Yellow);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            WriteStatus("Search Functionality", "ERROR", ConsoleColor.Yellow);
+            WriteDetail($"Could not verify search: {ex.Message}");
         }
     }
 }

@@ -93,6 +93,15 @@ public class TidalTrack
     [JsonPropertyName("explicit")]
     public bool Explicit { get; set; }
     
+    [JsonPropertyName("isrc")]
+    public string? Isrc { get; set; }
+    
+    [JsonPropertyName("bpm")]
+    public int? Bpm { get; set; }
+    
+    [JsonPropertyName("copyright")]
+    public string? Copyright { get; set; }
+    
     [JsonPropertyName("artist")]
     public TidalArtist? Artist { get; set; }
     
@@ -298,6 +307,12 @@ public class TidalTrackInfoResponse
     
     [JsonPropertyName("isrc")]
     public string? Isrc { get; set; }
+    
+    [JsonPropertyName("bpm")]
+    public int? Bpm { get; set; }
+    
+    [JsonPropertyName("copyright")]
+    public string? Copyright { get; set; }
     
     [JsonPropertyName("artist")]
     public TidalArtist? Artist { get; set; }

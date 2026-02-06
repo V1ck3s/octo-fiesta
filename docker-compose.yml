@@ -7,19 +7,54 @@ services:
       - "5274:8080"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      # Navidrome/Subsonic server URL
-      - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
-      # Explicit content filter: All, ExplicitOnly, CleanOnly (default: ExplicitOnly)
-      - Subsonic__ExplicitFilter=${EXPLICIT_FILTER:-ExplicitOnly}
-      # Download mode: Track (only requested track), Album (full album when playing a track)
-      - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
-      # Deezer ARL token (required)
-      - Deezer__Arl=${DEEZER_ARL}
+      
+      # ===== SUBSONIC SETTINGS =====
+      # Navidrome/Subsonic server URL
+      - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
+      # Music service to use: Deezer, Qobuz, or SquidWTF (default: SquidWTF)
+      - Subsonic__MusicService=${MUSIC_SERVICE:-SquidWTF}
+      # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
+      - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
+      # Cache duration in hours when StorageMode=Cache (default: 1)
+      - Subsonic__CacheDurationHours=${CACHE_DURATION_HOURS:-1}
+      # Enable external playlist search and download (default: true)
+      - Subsonic__EnableExternalPlaylists=${ENABLE_EXTERNAL_PLAYLISTS:-true}
+      # Directory name for playlist .m3u files (default: playlists)
+      - Subsonic__PlaylistsDirectory=${PLAYLISTS_DIRECTORY:-playlists}
+      # Explicit content filter: All, ExplicitOnly, CleanOnly (default: All)
+      - Subsonic__ExplicitFilter=${EXPLICIT_FILTER:-All}
+      # Download mode: Track (only requested track), Album (full album when playing a track)
+      - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
+      # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
+      - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      
+      # ===== DEEZER SETTINGS =====
+      # Deezer ARL token (required if using Deezer)
+      - Deezer__Arl=${DEEZER_ARL:-}
       # Fallback ARL token (optional)
       - Deezer__ArlFallback=${DEEZER_ARL_FALLBACK:-}
       # Preferred audio quality: FLAC, MP3_320, MP3_128 (optional, defaults to highest available)
       - Deezer__Quality=${DEEZER_QUALITY:-}
+      
+      # ===== QOBUZ SETTINGS =====
+      # Qobuz user authentication token (required if using Qobuz)
+      - Qobuz__UserAuthToken=${QOBUZ_USER_AUTH_TOKEN:-}
+      # Qobuz user ID (required if using Qobuz)
+      - Qobuz__UserId=${QOBUZ_USER_ID:-}
+      # Preferred audio quality: FLAC, FLAC_24_HIGH, FLAC_24_LOW, FLAC_16, MP3_320 (optional)
+      - Qobuz__Quality=${QOBUZ_QUALITY:-}
+      
+      # ===== SQUIDWTF SETTINGS =====
+      # Backend source: Qobuz or Tidal (default: Qobuz)
+      - SquidWTF__Source=${SQUIDWTF_SOURCE:-Qobuz}
+      # Preferred audio quality (optional)
+      # Qobuz: 27 (FLAC 24-bit), 7 (FLAC 16-bit), 6 (MP3 320), 5 (MP3 128)
+      # Tidal: HI_RES_LOSSLESS, LOSSLESS
+      - SquidWTF__Quality=${SQUIDWTF_QUALITY:-}
+      # Instance timeout in seconds for Tidal backend (default: 5)
+      # Switches to next instance if current one doesn't respond in time
+      - SquidWTF__InstanceTimeoutSeconds=${SQUIDWTF_INSTANCE_TIMEOUT:-5}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

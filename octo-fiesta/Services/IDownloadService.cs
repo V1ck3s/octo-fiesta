@@ -47,8 +47,9 @@ public interface IDownloadService
     /// </summary>
     /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
     /// <param name="externalId">The ID on the external provider</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The local file path if exists, null otherwise</returns>
-    Task<string?> GetLocalPathIfExistsAsync(string externalProvider, string externalId);
+    Task<string?> GetLocalPathIfExistsAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Checks if the service is properly configured and functional

@@ -67,6 +67,9 @@ public class QobuzAlbum
     [JsonPropertyName("released_at")]
     public long? ReleasedAt { get; set; }
     
+    [JsonPropertyName("release_date_original")]
+    public string? ReleaseDateOriginal { get; set; }
+    
     [JsonPropertyName("duration")]
     public int Duration { get; set; }
     
@@ -75,6 +78,12 @@ public class QobuzAlbum
     
     [JsonPropertyName("genre")]
     public QobuzGenre? Genre { get; set; }
+    
+    [JsonPropertyName("copyright")]
+    public string? Copyright { get; set; }
+    
+    [JsonPropertyName("label")]
+    public QobuzLabel? Label { get; set; }
 }
 
 public class QobuzTrack
@@ -91,14 +100,29 @@ public class QobuzTrack
     [JsonPropertyName("track_number")]
     public int TrackNumber { get; set; }
     
+    [JsonPropertyName("media_number")]
+    public int MediaNumber { get; set; }
+    
     [JsonPropertyName("album")]
     public QobuzAlbum? Album { get; set; }
     
     [JsonPropertyName("performer")]
     public QobuzArtist? Performer { get; set; }
     
+    [JsonPropertyName("composer")]
+    public QobuzArtist? Composer { get; set; }
+    
     [JsonPropertyName("parental_warning")]
     public bool ParentalWarning { get; set; }
+    
+    [JsonPropertyName("isrc")]
+    public string? Isrc { get; set; }
+    
+    [JsonPropertyName("copyright")]
+    public string? Copyright { get; set; }
+    
+    [JsonPropertyName("release_date_original")]
+    public string? ReleaseDateOriginal { get; set; }
 }
 
 public class QobuzArtist
@@ -189,6 +213,15 @@ public class QobuzGenre
 {
     [JsonPropertyName("id")]
     public int Id { get; set; }
+    
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
+public class QobuzLabel
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
     
     [JsonPropertyName("name")]
     public string? Name { get; set; }

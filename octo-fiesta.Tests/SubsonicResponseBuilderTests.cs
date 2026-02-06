@@ -40,7 +40,7 @@ public class SubsonicResponseBuilderTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Equal("application/xml", contentResult.ContentType);
+        Assert.Equal("application/xml; charset=utf-8", contentResult.ContentType);
         
         var doc = XDocument.Parse(contentResult.Content!);
         var root = doc.Root!;
@@ -74,7 +74,7 @@ public class SubsonicResponseBuilderTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Equal("application/xml", contentResult.ContentType);
+        Assert.Equal("application/xml; charset=utf-8", contentResult.ContentType);
         
         var doc = XDocument.Parse(contentResult.Content!);
         var root = doc.Root!;
@@ -128,8 +128,12 @@ public class SubsonicResponseBuilderTests
             Id = "song123",
             Title = "Test Song",
             Artist = "Test Artist",
+            ArtistId = "artist123",
             Album = "Test Album",
-            Duration = 180
+            AlbumId = "album123",
+            Duration = 180,
+            ReleaseDate = "2023-01-02",
+            IsLocal = true
         };
 
         // Act
@@ -137,7 +141,7 @@ public class SubsonicResponseBuilderTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Equal("application/xml", contentResult.ContentType);
+        Assert.Equal("application/xml; charset=utf-8", contentResult.ContentType);
         
         var doc = XDocument.Parse(contentResult.Content!);
         var ns = doc.Root!.GetDefaultNamespace();
@@ -145,6 +149,21 @@ public class SubsonicResponseBuilderTests
         Assert.NotNull(songElement);
         Assert.Equal("song123", songElement.Attribute("id")?.Value);
         Assert.Equal("Test Song", songElement.Attribute("title")?.Value);
+        Assert.Equal("album123", songElement.Attribute("albumId")?.Value);
+        Assert.Equal("artist123", songElement.Attribute("artistId")?.Value);
+        Assert.Equal("180", songElement.Attribute("duration")?.Value);
+        Assert.Equal("audio/mpeg", songElement.Attribute("contentType")?.Value);
+        Assert.Equal("mp3", songElement.Attribute("suffix")?.Value);
+        // Since we estimate size from bitrate when file isn't present, expect non-zero
+        Assert.Equal((128L * 125L * 180L).ToString(), songElement.Attribute("size")?.Value);
+        var createdVal = songElement.Attribute("created")?.Value;
+        Assert.False(string.IsNullOrEmpty(createdVal));
+        // ISO8601 with timezone: should end with 'Z'
+        Assert.EndsWith("Z", createdVal);
+        Assert.Equal("false", songElement.Attribute("isDir")?.Value);
+        Assert.Equal("music", songElement.Attribute("type")?.Value);
+        Assert.Equal("false", songElement.Attribute("isVideo")?.Value);
+        Assert.Equal("audio/mpeg", songElement.Attribute("contentType")?.Value);
     }
 
     [Fact]
@@ -201,7 +220,7 @@ public class SubsonicResponseBuilderTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Equal("application/xml", contentResult.ContentType);
+        Assert.Equal("application/xml; charset=utf-8", contentResult.ContentType);
         
         var doc = XDocument.Parse(contentResult.Content!);
         var ns = doc.Root!.GetDefaultNamespace();
@@ -209,6 +228,14 @@ public class SubsonicResponseBuilderTests
         Assert.NotNull(albumElement);
         Assert.Equal("album123", albumElement.Attribute("id")?.Value);
         Assert.Equal("2", albumElement.Attribute("songCount")?.Value);
+        Assert.Equal("0", albumElement.Attribute("duration")?.Value);
+
+        var songs = albumElement.Elements(ns + "song").ToList();
+        Assert.Equal(2, songs.Count);
+        foreach (var s in songs)
+        {
+            Assert.Equal("album123", s.Attribute("albumId")?.Value);
+        }
     }
 
     [Fact]
@@ -260,7 +287,7 @@ public class SubsonicResponseBuilderTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Equal("application/xml", contentResult.ContentType);
+        Assert.Equal("application/xml; charset=utf-8", contentResult.ContentType);
         
         var doc = XDocument.Parse(contentResult.Content!);
         var ns = doc.Root!.GetDefaultNamespace();

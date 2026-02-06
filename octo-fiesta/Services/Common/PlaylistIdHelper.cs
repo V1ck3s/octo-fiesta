@@ -9,14 +9,34 @@ public static class PlaylistIdHelper
 {
     private const string PlaylistPrefix = "pl-";
     
+    // Known external providers for playlists
+    private static readonly string[] KnownProviders = { "deezer", "qobuz", "squidwtf" };
+    
     /// <summary>
     /// Checks if an ID represents an external playlist.
+    /// Must match format "pl-{provider}-{externalId}" where provider is a known provider.
     /// </summary>
     /// <param name="id">The ID to check</param>
-    /// <returns>True if the ID starts with "pl-", false otherwise</returns>
+    /// <returns>True if the ID is a valid external playlist ID, false otherwise</returns>
     public static bool IsExternalPlaylist(string? id)
     {
-        return !string.IsNullOrEmpty(id) && id.StartsWith(PlaylistPrefix, StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(id) || !id.StartsWith(PlaylistPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        
+        // Remove "pl-" prefix and check for known provider
+        var withoutPrefix = id.Substring(PlaylistPrefix.Length);
+        
+        foreach (var provider in KnownProviders)
+        {
+            if (withoutPrefix.StartsWith(provider + "-", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     /// <summary>

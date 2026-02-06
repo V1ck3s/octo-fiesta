@@ -58,7 +58,15 @@ public class SubsonicController : ControllerBase
             throw new Exception("Error: Environment variable SUBSONIC_URL is not set.");
         }
     }
-
+    /// <summary>
+    /// Simple health check for root path to return HTTP 200. Some clients need this (ex. Amperfy)
+    /// </summary>
+    [HttpGet]
+    [Route("")]
+    public IActionResult Index()
+    {
+        return Ok(new { status = "ok" });
+    }
     // Extract all parameters (query + body)
     private async Task<Dictionary<string, string>> ExtractAllParameters()
     {
@@ -188,7 +196,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Merges local and Deezer albums.
+    /// Merges local and external albums.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getArtist")]
@@ -216,7 +224,7 @@ public class SubsonicController : ControllerBase
 
             var albums = await _metadataService.GetArtistAlbumsAsync(provider!, externalId!);
             
-            // Fill artist info for each album (Deezer API doesn't include it in artist/albums endpoint)
+            // Fill artist info for each album (external API may not include it in artist/albums endpoint)
             foreach (var album in albums)
             {
                 if (string.IsNullOrEmpty(album.Artist))
@@ -269,19 +277,19 @@ public class SubsonicController : ControllerBase
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
 
-        var deezerArtists = await _metadataService.SearchArtistsAsync(artistName, 1);
-        var deezerAlbums = new List<Album>();
+        var externalArtists = await _metadataService.SearchArtistsAsync(artistName, 1);
+        var externalAlbums = new List<Album>();
         
-        if (deezerArtists.Count > 0)
+        if (externalArtists.Count > 0)
         {
-            var deezerArtist = deezerArtists[0];
-            if (deezerArtist.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
+            var externalArtist = externalArtists[0];
+            if (externalArtist.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
             {
-                deezerAlbums = await _metadataService.GetArtistAlbumsAsync("deezer", deezerArtist.ExternalId!);
+                externalAlbums = await _metadataService.GetArtistAlbumsAsync(externalArtist.ExternalProvider!, externalArtist.ExternalId!);
                 
-                // Fill artist info for each album (Deezer API doesn't include it in artist/albums endpoint)
+                // Fill artist info for each album (external API may not include it in artist/albums endpoint)
                 // Use local artist ID and name so albums link back to the local artist
-                foreach (var album in deezerAlbums)
+                foreach (var album in externalAlbums)
                 {
                     if (string.IsNullOrEmpty(album.Artist))
                     {
@@ -305,11 +313,11 @@ public class SubsonicController : ControllerBase
         }
 
         var mergedAlbums = localAlbums.ToList();
-        foreach (var deezerAlbum in deezerAlbums)
+        foreach (var externalAlbum in externalAlbums)
         {
-            if (!localAlbumNames.Contains(deezerAlbum.Title))
+            if (!localAlbumNames.Contains(externalAlbum.Title))
             {
-                mergedAlbums.Add(_responseBuilder.ConvertAlbumToJson(deezerAlbum));
+                mergedAlbums.Add(_responseBuilder.ConvertAlbumToJson(externalAlbum));
             }
         }
 
@@ -328,7 +336,7 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Enriches local albums with Deezer songs.
+    /// Enriches local albums with external songs.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getAlbum")]
@@ -439,38 +447,38 @@ public class SubsonicController : ControllerBase
         }
 
         var searchQuery = $"{artistName} {albumName}";
-        var deezerAlbums = await _metadataService.SearchAlbumsAsync(searchQuery, 5);
-        Album? deezerAlbum = null;
+        var externalAlbumsSearch = await _metadataService.SearchAlbumsAsync(searchQuery, 5);
+        Album? externalAlbum = null;
         
-        // Find matching album on Deezer (exact match first)
-        foreach (var candidate in deezerAlbums)
+        // Find matching album on external service (exact match first)
+        foreach (var candidate in externalAlbumsSearch)
         {
             if (candidate.Artist != null && 
                 candidate.Artist.Equals(artistName, StringComparison.OrdinalIgnoreCase) &&
                 candidate.Title.Equals(albumName, StringComparison.OrdinalIgnoreCase))
             {
-                deezerAlbum = await _metadataService.GetAlbumAsync("deezer", candidate.ExternalId!);
+                externalAlbum = await _metadataService.GetAlbumAsync(candidate.ExternalProvider!, candidate.ExternalId!);
                 break;
             }
         }
 
         // Fallback to fuzzy match
-        if (deezerAlbum == null)
+        if (externalAlbum == null)
         {
-            foreach (var candidate in deezerAlbums)
+            foreach (var candidate in externalAlbumsSearch)
             {
                 if (candidate.Artist != null && 
                     candidate.Artist.Contains(artistName, StringComparison.OrdinalIgnoreCase) &&
                     (candidate.Title.Contains(albumName, StringComparison.OrdinalIgnoreCase) ||
                      albumName.Contains(candidate.Title, StringComparison.OrdinalIgnoreCase)))
                 {
-                    deezerAlbum = await _metadataService.GetAlbumAsync("deezer", candidate.ExternalId!);
+                    externalAlbum = await _metadataService.GetAlbumAsync(candidate.ExternalProvider!, candidate.ExternalId!);
                     break;
                 }
             }
         }
 
-        if (deezerAlbum != null && deezerAlbum.Songs.Count > 0)
+        if (externalAlbum != null && externalAlbum.Songs.Count > 0)
         {
             var localSongTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var song in localSongs)
@@ -482,11 +490,11 @@ public class SubsonicController : ControllerBase
             }
 
             var mergedSongs = localSongs.ToList();
-            foreach (var deezerSong in deezerAlbum.Songs)
+            foreach (var externalSong in externalAlbum.Songs)
             {
-                if (!localSongTitles.Contains(deezerSong.Title))
+                if (!localSongTitles.Contains(externalSong.Title))
                 {
-                    mergedSongs.Add(_responseBuilder.ConvertSongToJson(deezerSong));
+                    mergedSongs.Add(_responseBuilder.ConvertSongToJson(externalSong));
                 }
             }
 
@@ -702,7 +710,7 @@ public class SubsonicController : ControllerBase
                 )
             );
 
-            return Content(doc.ToString(), "application/xml");
+            return Content(doc.ToString(), "application/xml; charset=utf-8");
         }
     }
 
@@ -790,7 +798,7 @@ public class SubsonicController : ControllerBase
                 return StatusCode(result.StatusCode);
             }
             
-            var contentType = result.ContentType ?? "application/xml";
+            var contentType = result.ContentType ?? "application/xml; charset=utf-8";
             return File(result.Body, contentType);
         }
         catch (HttpRequestException ex)

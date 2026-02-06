@@ -98,6 +98,31 @@ public class PlaylistIdHelperTests
         Assert.False(result);
     }
 
+    [Fact]
+    public void IsExternalPlaylist_WithNavidromePlaylistId_ReturnsFalse()
+    {
+        // Arrange - Navidrome playlist IDs start with "pl-" but have a different format
+        var id = "pl-vpF9RQkDvQJicUQFTYlOJS_697738a2";
+
+        // Act
+        var result = PlaylistIdHelper.IsExternalPlaylist(id);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void IsExternalPlaylist_WithSquidWTFPlaylistId_ReturnsTrue()
+    {
+        var id = "pl-squidwtf-12345678";
+
+        // Act
+        var result = PlaylistIdHelper.IsExternalPlaylist(id);
+
+        // Assert
+        Assert.True(result);
+    }
+
     #endregion
 
     #region ParsePlaylistId Tests
