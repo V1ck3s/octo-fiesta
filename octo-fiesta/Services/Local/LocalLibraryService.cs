@@ -26,6 +26,9 @@ public class LocalLibraryService : ILocalLibraryService
     // Debounce to avoid triggering too many scans
     private DateTime _lastScanTrigger = DateTime.MinValue;
     private readonly TimeSpan _scanDebounceInterval = TimeSpan.FromSeconds(30);
+    
+    // Stored Subsonic auth parameters for server-to-server calls
+    private Dictionary<string, string>? _subsonicCredentials;
 
     public LocalLibraryService(
         IConfiguration configuration,
@@ -192,7 +195,39 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         await File.WriteAllTextAsync(_mappingFilePath, json);
     }
 
+    private string BuildAuthQuery()
+    {
+        if (_subsonicCredentials == null || _subsonicCredentials.Count == 0)
+            return string.Empty;
+        
+        var query = string.Join("&", _subsonicCredentials.Select(kv => 
+            $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+        return $"&{query}";
+    }
+
     public string GetDownloadDirectory() => _downloadDirectory;
+
+    public void SetSubsonicCredentials(Dictionary<string, string> parameters)
+    {
+        if (_subsonicCredentials != null) return;
+        
+        var authParams = new[] { "u", "t", "s", "v", "c" };
+        var credentials = new Dictionary<string, string>();
+        
+        foreach (var key in authParams)
+        {
+            if (parameters.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+            {
+                credentials[key] = value;
+            }
+        }
+        
+        if (credentials.ContainsKey("u"))
+        {
+            _subsonicCredentials = credentials;
+            _logger.LogInformation("Subsonic credentials captured for user '{User}'", credentials["u"]);
+        }
+    }
 
     public async Task<bool> TriggerLibraryScanAsync()
     {
@@ -209,11 +244,8 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         
         try
         {
-            // Call Subsonic API to trigger a scan
-            // Note: This endpoint works without authentication on most Subsonic/Navidrome servers
-            // when called from localhost. For remote servers requiring auth, this would need
-            // to be refactored to accept credentials from the controller layer.
-            var url = $"{_subsonicSettings.Url}/rest/startScan?f=json";
+            var authQuery = BuildAuthQuery();
+            var url = $"{_subsonicSettings.Url}/rest/startScan?f=json{authQuery}";
             
             _logger.LogInformation("Triggering Subsonic library scan...");
             
@@ -244,7 +276,8 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         {
             // Note: This endpoint works without authentication on most Subsonic/Navidrome servers
             // when called from localhost.
-            var url = $"{_subsonicSettings.Url}/rest/getScanStatus?f=json";
+            var authQuery = BuildAuthQuery();
+            var url = $"{_subsonicSettings.Url}/rest/getScanStatus?f=json{authQuery}";
             
             var response = await _httpClient.GetAsync(url);
             

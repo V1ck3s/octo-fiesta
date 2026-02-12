@@ -44,6 +44,13 @@ public interface ILocalLibraryService
     (bool isExternal, string? provider, string? type, string? externalId) ParseExternalId(string id);
     
     /// <summary>
+    /// Stores Subsonic authentication parameters captured from a client request.
+    /// These credentials are reused for server-to-server calls (e.g., triggering library scans).
+    /// Only stores credentials on the first call, subsequent calls are ignored.
+    /// </summary>
+    void SetSubsonicCredentials(Dictionary<string, string> parameters);
+    
+    /// <summary>
     /// Triggers a Subsonic library scan
     /// </summary>
     Task<bool> TriggerLibraryScanAsync();
