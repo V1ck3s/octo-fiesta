@@ -798,11 +798,14 @@ public class SquidWTFMetadataService : IMusicMetadataService
             contributors.Add(track.Composer.Name);
         }
         
+        var performerName = track.Performer?.Name ?? "";
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
-            Artist = track.Performer?.Name ?? "",
+            Artist = performerName,
+            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
             ArtistId = track.Performer != null ? $"ext-squidwtf-artist-{track.Performer.Id}" : null,
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
@@ -886,11 +889,23 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
+        var artistNames = track.Artists?
+            .Where(a => !string.IsNullOrEmpty(a.Name))
+            .Select(a => a.Name!)
+            .ToList() ?? new List<string>();
+        
+        var mainArtistName = track.Artist?.Name ?? (artistNames.FirstOrDefault() ?? "");
+        
+        // Ensure main artist is first in the list
+        if (artistNames.Count == 0 && !string.IsNullOrEmpty(mainArtistName))
+            artistNames.Add(mainArtistName);
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
-            Artist = track.Artist?.Name ?? (track.Artists?.FirstOrDefault()?.Name ?? ""),
+            Artist = mainArtistName,
+            Artists = artistNames,
             ArtistId = track.Artist != null 
                 ? $"ext-squidwtf-artist-{track.Artist.Id}" 
                 : (track.Artists?.FirstOrDefault() is { } firstArtist 
@@ -929,11 +944,23 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
+        var artistNames = track.Artists?
+            .Where(a => !string.IsNullOrEmpty(a.Name))
+            .Select(a => a.Name!)
+            .ToList() ?? new List<string>();
+        
+        var mainArtistName = track.Artist?.Name ?? (artistNames.FirstOrDefault() ?? "");
+        
+        // Ensure main artist is first in the list
+        if (artistNames.Count == 0 && !string.IsNullOrEmpty(mainArtistName))
+            artistNames.Add(mainArtistName);
+        
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
-            Artist = track.Artist?.Name ?? (track.Artists?.FirstOrDefault()?.Name ?? ""),
+            Artist = mainArtistName,
+            Artists = artistNames,
             ArtistId = track.Artist != null 
                 ? $"ext-squidwtf-artist-{track.Artist.Id}" 
                 : (track.Artists?.FirstOrDefault() is { } firstTrackInfoArtist 

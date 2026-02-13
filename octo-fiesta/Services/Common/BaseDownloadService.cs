@@ -561,7 +561,9 @@ public abstract class BaseDownloadService : IDownloadService
 
             // Basic metadata
             tagFile.Tag.Title = song.Title;
-            tagFile.Tag.Performers = new[] { song.Artist };
+            tagFile.Tag.Performers = song.Artists.Count > 0 
+                ? song.Artists.ToArray() 
+                : new[] { song.Artist };
             tagFile.Tag.Album = song.Album;
             tagFile.Tag.AlbumArtists = new[] { !string.IsNullOrEmpty(song.AlbumArtist) ? song.AlbumArtist : song.Artist };
 

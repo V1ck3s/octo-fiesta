@@ -565,6 +565,7 @@ public class QobuzMetadataService : IMusicMetadataService
             Id = $"ext-qobuz-song-{externalId}",
             Title = title,
             Artist = performerName,
+            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
             ArtistId = track.TryGetProperty("performer", out var performerForId)
                 ? $"ext-qobuz-artist-{GetIdAsString(performerForId.GetProperty("id"))}"
                 : null,

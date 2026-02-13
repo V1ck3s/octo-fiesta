@@ -65,6 +65,12 @@ public class Song
     public string? Copyright { get; set; }
     
     /// <summary>
+    /// All performing artists (for multi-artist tracks).
+    /// First entry should match Artist. Used for file tagging (Performers field).
+    /// </summary>
+    public List<string> Artists { get; set; } = new();
+    
+    /// <summary>
     /// Contributing artists (features, etc.)
     /// </summary>
     public List<string> Contributors { get; set; } = new();
