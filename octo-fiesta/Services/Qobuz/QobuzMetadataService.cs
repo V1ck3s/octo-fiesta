@@ -727,7 +727,8 @@ public class QobuzMetadataService : IMusicMetadataService
             element = album;
         }
         
-        if (element.TryGetProperty("image", out var image))
+        if (element.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object)
         {
             // Prefer thumbnail (230x230), fallback to small
             if (image.TryGetProperty("thumbnail", out var thumbnail))
@@ -749,6 +750,7 @@ public class QobuzMetadataService : IMusicMetadataService
     private string? GetLargeCoverArtUrl(JsonElement album)
     {
         if (album.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object &&
             image.TryGetProperty("large", out var large))
         {
             var url = large.GetString();
@@ -765,6 +767,7 @@ public class QobuzMetadataService : IMusicMetadataService
     private string? GetArtistImageUrl(JsonElement artist)
     {
         if (artist.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object &&
             image.TryGetProperty("large", out var large))
         {
             return large.GetString();
