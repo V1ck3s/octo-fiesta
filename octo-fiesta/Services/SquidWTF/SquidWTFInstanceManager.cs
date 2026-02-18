@@ -15,7 +15,7 @@ public class SquidWTFInstanceManager
     private readonly SquidWTFSettings _settings;
     private readonly ILogger<SquidWTFInstanceManager> _logger;
     
-    private const string InstancesJsonUrl = "https://raw.githubusercontent.com/SamidyFR/monochrome/main/public/instances.json";
+    private const string InstancesJsonUrl = "https://monochrome.tf/instances.json";
     private const int DefaultTimeoutSeconds = 5;
     
     // Static Qobuz API (no failover needed as there's only one)
