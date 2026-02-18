@@ -275,6 +275,13 @@ public class DeezerDownloadService : BaseDownloadService
 
             var trackToken = trackTokenElement.GetString();
 
+            var pageData = await GetTrackPageDataAsync(decryptionTrackId, arl, cancellationToken);
+            if (!string.IsNullOrEmpty(pageData?.TrackToken))
+            {
+                Logger.LogInformation("Using session-bound TRACK_TOKEN from private API for track {TrackId}", decryptionTrackId);
+                trackToken = pageData.TrackToken;
+            }
+
             // Get download URL via media API
             // Build format list based on preferred quality
             var formatsList = BuildFormatsList(_preferredQuality);
