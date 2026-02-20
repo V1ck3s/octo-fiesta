@@ -321,33 +321,38 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
             // Get metadata
-            // In Album mode, fetch the full album first to ensure AlbumArtist is correctly set
+            // Always fetch the full album to ensure AlbumArtist is correctly set.
+            // Without this, tracks with featured artists get filed under the track artist instead of the album artist
+            // Exception: playlists are represented as albums but should use track artist.
             Song? song = null;
 
-            if (SubsonicSettings.DownloadMode == DownloadMode.Album)
+            var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
+            if (tempSong != null && !string.IsNullOrEmpty(tempSong.AlbumId)
+                && !PlaylistIdHelper.IsExternalPlaylist(tempSong.AlbumId))
             {
-                // First try to get the song to extract album ID
-                var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
-                if (tempSong != null && !string.IsNullOrEmpty(tempSong.AlbumId))
+                var albumExternalId = ExtractExternalIdFromAlbumId(tempSong.AlbumId);
+                if (!string.IsNullOrEmpty(albumExternalId))
                 {
-                    var albumExternalId = ExtractExternalIdFromAlbumId(tempSong.AlbumId);
-                    if (!string.IsNullOrEmpty(albumExternalId))
+                    // Get full album with correct AlbumArtist
+                    var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
+                    if (album != null)
                     {
-                        // Get full album with correct AlbumArtist
-                        var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
-                        if (album != null)
+                        // Find the track in the album to get full metadata including AlbumArtist
+                        song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
+
+                        // If track not found in album (e.g., bonus track), use tempSong with album artist
+                        if (song == null && !string.IsNullOrEmpty(album.Artist))
                         {
-                            // Find the track in the album
-                            song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
+                            tempSong.AlbumArtist = album.Artist;
                         }
                     }
                 }
             }
 
-            // Fallback to individual song fetch if not in Album mode or album fetch failed
+            // Use individual song if album fetch didn't find it
             if (song == null)
             {
-                song = await MetadataService.GetSongAsync(externalProvider, externalId);
+                song = tempSong ?? await MetadataService.GetSongAsync(externalProvider, externalId);
             }
 
             if (song == null)
