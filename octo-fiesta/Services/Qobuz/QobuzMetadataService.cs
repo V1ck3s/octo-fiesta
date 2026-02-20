@@ -689,6 +689,7 @@ public class QobuzMetadataService : IMusicMetadataService
                 ? tracksCount.GetInt32()
                 : null,
             CoverArtUrl = GetCoverArtUrl(album),
+            CoverArtUrlLarge = GetLargeCoverArtUrl(album),
             Genre = album.TryGetProperty("genres_list", out var genres)
                 ? FormatGenres(genres)
                 : null,
@@ -730,7 +731,11 @@ public class QobuzMetadataService : IMusicMetadataService
         if (element.TryGetProperty("image", out var image) &&
             image.ValueKind == JsonValueKind.Object)
         {
-            // Prefer thumbnail (230x230), fallback to small
+            // Prefer large (600x600), fallback to thumbnail, then small
+            if (image.TryGetProperty("large", out var large))
+            {
+                return large.GetString();
+            }
             if (image.TryGetProperty("thumbnail", out var thumbnail))
             {
                 return thumbnail.GetString();
