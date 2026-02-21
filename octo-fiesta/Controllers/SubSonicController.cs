@@ -612,7 +612,7 @@ public class SubsonicController : ControllerBase
                 var album = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                 if (album?.CoverArtUrl != null)
                 {
-                    coverUrl = album.CoverArtUrl;
+                    coverUrl = album.CoverArtUrlLarge ?? album.CoverArtUrl;
                 }
                 break;
                 
@@ -622,7 +622,7 @@ public class SubsonicController : ControllerBase
                 var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
                 if (song?.CoverArtUrl != null)
                 {
-                    coverUrl = song.CoverArtUrl;
+                    coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
                 }
                 else
                 {
@@ -630,7 +630,7 @@ public class SubsonicController : ControllerBase
                     var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                     if (albumFallback?.CoverArtUrl != null)
                     {
-                        coverUrl = albumFallback.CoverArtUrl;
+                        coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
                     }
                 }
                 break;
