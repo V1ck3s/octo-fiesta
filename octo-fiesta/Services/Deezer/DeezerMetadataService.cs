@@ -331,12 +331,12 @@ public class DeezerMetadataService : IMusicMetadataService
                 ? cover.GetString()
                 : null,
             CoverArtUrlLarge = track.TryGetProperty("album", out var albumForCoverXL) && 
-                          albumForCoverXL.TryGetProperty("cover_xl", out var coverxl)
+                            albumForCoverXL.TryGetProperty("cover_xl", out var coverxl)
                 ? coverxl.GetString()
-                :(track.TryGetProperty("album", out var albumForCoverBig) &&
+                : (track.TryGetProperty("album", out var albumForCoverBig) &&
                    albumForCoverBig.TryGetProperty("cover_big", out var coverBig)
                     ? coverBig.GetString()
-                : null),
+                    : null),
             AlbumArtist = albumArtist,
             IsLocal = false,
             ExternalProvider = "deezer",
@@ -526,8 +526,8 @@ public class DeezerMetadataService : IMusicMetadataService
             ImageUrl = artist.TryGetProperty("picture_big", out var pictureBig) 
                 ? pictureBig.GetString() 
                 : (artist.TryGetProperty("picture_medium", out var picture) 
-                ? picture.GetString()
-                : null),
+                    ? picture.GetString()
+                    : null),
             AlbumCount = artist.TryGetProperty("nb_album", out var nbAlbum) 
                 ? nbAlbum.GetInt32() 
                 : null,
