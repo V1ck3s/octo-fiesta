@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using IOFile = System.IO.File;
 
 namespace octo_fiesta.Services.Common;
@@ -8,6 +9,52 @@ namespace octo_fiesta.Services.Common;
 /// </summary>
 public static class PathHelper
 {
+    private static char[] InvalidFileNameCharsWindows =>
+    [
+        '\"', '<', '>', '|', '\0',
+        (char)1, (char)2, (char)3, (char)4, (char)5, (char)6, (char)7, (char)8, (char)9, (char)10,
+        (char)11, (char)12, (char)13, (char)14, (char)15, (char)16, (char)17, (char)18, (char)19, (char)20,
+        (char)21, (char)22, (char)23, (char)24, (char)25, (char)26, (char)27, (char)28, (char)29, (char)30,
+        (char)31, ':', '*', '?', '\\', '/'
+    ];
+
+    private static char[] InvalidPathCharsWindows =>
+    [
+        '|', '\0',
+        (char)1, (char)2, (char)3, (char)4, (char)5, (char)6, (char)7, (char)8, (char)9, (char)10,
+        (char)11, (char)12, (char)13, (char)14, (char)15, (char)16, (char)17, (char)18, (char)19, (char)20,
+        (char)21, (char)22, (char)23, (char)24, (char)25, (char)26, (char)27, (char)28, (char)29, (char)30,
+        (char)31
+    ];
+
+
+    private static char[] InvalidFileNameCharsUnix => new char[] { '\0', '/' };
+
+    private static char[] InvalidPathCharsUnix => new char[] { '\0' };
+
+    public static char[] GetInvalidFileNameChars()
+    {
+        return Environment.GetEnvironmentVariable("FORMATTING_FILENAME_OS") switch
+        {
+            "Windows" => InvalidFileNameCharsWindows,
+            "Unix" => InvalidFileNameCharsUnix,
+            _ => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? InvalidFileNameCharsWindows : InvalidFileNameCharsUnix
+        };
+    }
+
+    public static char[] GetInvalidPathChars()
+    {
+        return Environment.GetEnvironmentVariable("FORMATTING_FILENAME_OS") switch
+        {
+            "Windows" => InvalidPathCharsWindows,
+            "Unix" => InvalidPathCharsUnix,
+            _ => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? InvalidPathCharsWindows : InvalidPathCharsUnix
+        };
+    }
+
+
+
+
     /// <summary>
     /// Gets the cache directory path for temporary file storage.
     /// Uses system temp directory combined with octo-fiesta-cache subfolder.
@@ -18,7 +65,7 @@ public static class PathHelper
     {
         return Path.Combine(Path.GetTempPath(), "octo-fiesta-cache");
     }
-    
+
     /// <summary>
     /// Builds the output path for a downloaded track following the Artist/Album/Track structure.
     /// </summary>
@@ -34,13 +81,13 @@ public static class PathHelper
         var safeArtist = SanitizeFolderName(artist);
         var safeAlbum = SanitizeFolderName(album);
         var safeTitle = SanitizeFileName(title);
-        
+
         var artistFolder = Path.Combine(downloadPath, safeArtist);
         var albumFolder = Path.Combine(artistFolder, safeAlbum);
-        
+
         var trackPrefix = trackNumber.HasValue ? $"{trackNumber:D2} - " : "";
         var fileName = $"{trackPrefix}{safeTitle}{extension}";
-        
+
         return Path.Combine(albumFolder, fileName);
     }
 
@@ -55,17 +102,17 @@ public static class PathHelper
         {
             return "Unknown";
         }
-        
-        var invalidChars = Path.GetInvalidFileNameChars();
+
+        var invalidChars = PathHelper.GetInvalidFileNameChars();
         var sanitized = new string(fileName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
             .ToArray());
-        
+
         if (sanitized.Length > 100)
         {
             sanitized = sanitized[..100];
         }
-        
+
         return sanitized.Trim();
     }
 
@@ -80,30 +127,30 @@ public static class PathHelper
         {
             return "Unknown";
         }
-        
-        var invalidChars = Path.GetInvalidFileNameChars()
-            .Concat(Path.GetInvalidPathChars())
+
+        var invalidChars = PathHelper.GetInvalidFileNameChars()
+            .Concat(PathHelper.GetInvalidPathChars())
             .Distinct()
             .ToArray();
-            
+
         var sanitized = new string(folderName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
             .ToArray());
-        
+
         // Remove leading/trailing dots and spaces (Windows folder restrictions)
         sanitized = sanitized.Trim().TrimEnd('.');
-        
+
         if (sanitized.Length > 100)
         {
             sanitized = sanitized[..100].TrimEnd('.');
         }
-        
+
         // Ensure we have a valid name
         if (string.IsNullOrWhiteSpace(sanitized))
         {
             return "Unknown";
         }
-        
+
         return sanitized;
     }
 
@@ -118,11 +165,11 @@ public static class PathHelper
         {
             return basePath;
         }
-        
+
         var directory = Path.GetDirectoryName(basePath)!;
         var extension = Path.GetExtension(basePath);
         var fileNameWithoutExt = Path.GetFileNameWithoutExtension(basePath);
-        
+
         var counter = 1;
         string uniquePath;
         do
@@ -130,7 +177,7 @@ public static class PathHelper
             uniquePath = Path.Combine(directory, $"{fileNameWithoutExt} ({counter}){extension}");
             counter++;
         } while (IOFile.Exists(uniquePath));
-        
+
         return uniquePath;
     }
 }
