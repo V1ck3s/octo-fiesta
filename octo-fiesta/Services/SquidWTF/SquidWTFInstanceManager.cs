@@ -92,22 +92,19 @@ public class SquidWTFInstanceManager
                 var request = createRequest(currentUrl);
                 var response = await _httpClient.SendAsync(request, cts.Token);
                 
-                // Check for error status codes that indicate the instance is broken/blocked
-                if (response.StatusCode is System.Net.HttpStatusCode.Forbidden
-                    or System.Net.HttpStatusCode.TooManyRequests
-                    or System.Net.HttpStatusCode.InternalServerError
-                    or System.Net.HttpStatusCode.BadGateway
-                    or System.Net.HttpStatusCode.ServiceUnavailable)
+                // Accept successful responses and 404 (resource genuinely not found)
+                if (response.IsSuccessStatusCode 
+                    || response.StatusCode is System.Net.HttpStatusCode.NotFound)
                 {
-                    _logger.LogWarning("Tidal instance {Instance} returned {StatusCode}, switching to next...", 
-                        currentUrl, (int)response.StatusCode);
-                    response.Dispose();
-                    SwitchToNextInstance();
-                    continue;
+                    return response;
                 }
                 
-                // Success - this instance works
-                return response;
+                // Any other status code — instance is broken/blocked/overloaded
+                _logger.LogWarning("Tidal instance {Instance} returned {StatusCode}, switching to next...", 
+                    currentUrl, (int)response.StatusCode);
+                response.Dispose();
+                SwitchToNextInstance();
+                continue;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
