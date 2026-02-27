@@ -75,12 +75,13 @@ public static class PathHelper
     /// <param name="title">Track title (will be sanitized).</param>
     /// <param name="trackNumber">Optional track number for prefix.</param>
     /// <param name="extension">File extension (e.g., ".flac", ".mp3").</param>
+    /// <param name="OsFormat">The operating system format to use. If null, the current operating system is used.</param>
     /// <returns>Full path for the track file.</returns>
-    public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension)
+    public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension, string? OsFormat = null)
     {
-        var safeArtist = SanitizeFolderName(artist);
-        var safeAlbum = SanitizeFolderName(album);
-        var safeTitle = SanitizeFileName(title);
+        var safeArtist = SanitizeFolderName(artist, OsFormat);
+        var safeAlbum = SanitizeFolderName(album, OsFormat);
+        var safeTitle = SanitizeFileName(title, OsFormat);
 
         var artistFolder = Path.Combine(downloadPath, safeArtist);
         var albumFolder = Path.Combine(artistFolder, safeAlbum);
