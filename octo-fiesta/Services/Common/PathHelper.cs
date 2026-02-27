@@ -32,9 +32,9 @@ public static class PathHelper
 
     private static char[] InvalidPathCharsUnix => new char[] { '\0' };
 
-    public static char[] GetInvalidFileNameChars()
+    public static char[] GetInvalidFileNameChars(string? OsFormat = null)
     {
-        return Environment.GetEnvironmentVariable("FORMATTING_FILENAME_OS") switch
+        return OsFormat switch
         {
             "Windows" => InvalidFileNameCharsWindows,
             "Unix" => InvalidFileNameCharsUnix,
@@ -42,9 +42,9 @@ public static class PathHelper
         };
     }
 
-    public static char[] GetInvalidPathChars()
+    public static char[] GetInvalidPathChars(string? OsFormat = null)
     {
-        return Environment.GetEnvironmentVariable("FORMATTING_FILENAME_OS") switch
+        return OsFormat switch
         {
             "Windows" => InvalidPathCharsWindows,
             "Unix" => InvalidPathCharsUnix,
@@ -95,15 +95,16 @@ public static class PathHelper
     /// Sanitizes a file name by removing invalid characters.
     /// </summary>
     /// <param name="fileName">Original file name.</param>
+    /// <param name="OsFormat">The operating system format to use. If null, the current operating system is used.</param>
     /// <returns>Sanitized file name safe for all file systems.</returns>
-    public static string SanitizeFileName(string fileName)
+    public static string SanitizeFileName(string fileName, string? OsFormat = null)
     {
         if (string.IsNullOrWhiteSpace(fileName))
         {
             return "Unknown";
         }
 
-        var invalidChars = PathHelper.GetInvalidFileNameChars();
+        var invalidChars = PathHelper.GetInvalidFileNameChars(OsFormat);
         var sanitized = new string(fileName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
             .ToArray());
@@ -120,16 +121,17 @@ public static class PathHelper
     /// Sanitizes a folder name by removing invalid path characters.
     /// </summary>
     /// <param name="folderName">Original folder name.</param>
+    /// <param name="OsFormat">The operating system format to use. If null, the current operating system is used.</param>
     /// <returns>Sanitized folder name safe for all file systems.</returns>
-    public static string SanitizeFolderName(string folderName)
+    public static string SanitizeFolderName(string folderName, string? OsFormat = null)
     {
         if (string.IsNullOrWhiteSpace(folderName))
         {
             return "Unknown";
         }
 
-        var invalidChars = PathHelper.GetInvalidFileNameChars()
-            .Concat(PathHelper.GetInvalidPathChars())
+        var invalidChars = PathHelper.GetInvalidFileNameChars(OsFormat)
+            .Concat(PathHelper.GetInvalidPathChars(OsFormat))
             .Distinct()
             .ToArray();
 

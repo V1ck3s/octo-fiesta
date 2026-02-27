@@ -27,6 +27,7 @@ public abstract class BaseDownloadService : IDownloadService
 
     protected readonly string DownloadPath;
     protected readonly string CachePath;
+    protected readonly string? FormattingFilenameOS;
 
     protected readonly Dictionary<string, DownloadInfo> ActiveDownloads = new();
     protected readonly SemaphoreSlim DownloadLock = new(1, 1);
@@ -81,6 +82,7 @@ public abstract class BaseDownloadService : IDownloadService
         Logger = logger;
 
         DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
+        FormattingFilenameOS = configuration["Library:FormattingFilenameOS"];
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(DownloadPath))
@@ -829,9 +831,9 @@ public abstract class BaseDownloadService : IDownloadService
             }
 
             var artistForPath = song.AlbumArtist ?? song.Artist;
-            var safeArtist = PathHelper.SanitizeFolderName(artistForPath);
-            var safeAlbum = PathHelper.SanitizeFolderName(song.Album);
-            var safeTitle = PathHelper.SanitizeFileName(song.Title);
+            var safeArtist = PathHelper.SanitizeFolderName(artistForPath, FormattingFilenameOS);
+            var safeAlbum = PathHelper.SanitizeFolderName(song.Album, FormattingFilenameOS);
+            var safeTitle = PathHelper.SanitizeFileName(song.Title, FormattingFilenameOS);
 
             var albumFolder = Path.Combine(CachePath, safeArtist, safeAlbum);
             if (!Directory.Exists(albumFolder))
