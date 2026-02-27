@@ -9,6 +9,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       # Download path inside container
       - Library__DownloadPath=/app/downloads
+      # OS format for filename sanitization: Windows, Unix, or empty (default: container OS)
+      - Library__FormattingFilenameOS=${LIBRARY_FORMATTING_FILENAME_OS:-}
       
       # ===== SUBSONIC SETTINGS =====
       # Navidrome/Subsonic server URL
