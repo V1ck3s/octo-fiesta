@@ -179,7 +179,11 @@ public class SubsonicResponseBuilder
                     genre = "Playlist",
                     isCompilation = false,
                     created = playlist.CreatedDate.HasValue ? playlist.CreatedDate.Value.ToUniversalTime().ToString("o") : System.DateTime.UtcNow.ToString("o"),
-                    song = tracks.Select(s => ConvertSongToJson(s)).ToList()
+                    song = tracks.Select(s => {
+                        var songJson = ConvertSongToJson(s);
+                        songJson["albumId"] = playlist.Id;
+                        return songJson;
+                    }).ToList()
                 }
             });
         }
