@@ -182,6 +182,7 @@ public class SubsonicResponseBuilder
                     song = tracks.Select(s => {
                         var songJson = ConvertSongToJson(s);
                         songJson["albumId"] = playlist.Id;
+                        songJson["parent"] = playlist.Id;
                         return songJson;
                     }).ToList()
                 }
@@ -209,7 +210,10 @@ public class SubsonicResponseBuilder
         // Add songs
         foreach (var song in tracks)
         {
-            albumElement.Add(ConvertSongToXml(song, ns, playlist.Id));
+            var songXml = ConvertSongToXml(song, ns, playlist.Id);
+            songXml.SetAttributeValue("albumId", playlist.Id);
+            songXml.SetAttributeValue("parent", playlist.Id);
+            albumElement.Add(songXml);
         }
         
         var doc = new XDocument(
