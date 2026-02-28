@@ -565,6 +565,7 @@ public class QobuzMetadataService : IMusicMetadataService
             Id = $"ext-qobuz-song-{externalId}",
             Title = title,
             Artist = performerName,
+            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
             ArtistId = track.TryGetProperty("performer", out var performerForId)
                 ? $"ext-qobuz-artist-{GetIdAsString(performerForId.GetProperty("id"))}"
                 : null,
@@ -688,6 +689,7 @@ public class QobuzMetadataService : IMusicMetadataService
                 ? tracksCount.GetInt32()
                 : null,
             CoverArtUrl = GetCoverArtUrl(album),
+            CoverArtUrlLarge = GetLargeCoverArtUrl(album),
             Genre = album.TryGetProperty("genres_list", out var genres)
                 ? FormatGenres(genres)
                 : null,
@@ -726,9 +728,14 @@ public class QobuzMetadataService : IMusicMetadataService
             element = album;
         }
         
-        if (element.TryGetProperty("image", out var image))
+        if (element.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object)
         {
-            // Prefer thumbnail (230x230), fallback to small
+            // Prefer large (600x600), fallback to thumbnail, then small
+            if (image.TryGetProperty("large", out var large))
+            {
+                return large.GetString();
+            }
             if (image.TryGetProperty("thumbnail", out var thumbnail))
             {
                 return thumbnail.GetString();
@@ -748,6 +755,7 @@ public class QobuzMetadataService : IMusicMetadataService
     private string? GetLargeCoverArtUrl(JsonElement album)
     {
         if (album.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object &&
             image.TryGetProperty("large", out var large))
         {
             var url = large.GetString();
@@ -764,6 +772,7 @@ public class QobuzMetadataService : IMusicMetadataService
     private string? GetArtistImageUrl(JsonElement artist)
     {
         if (artist.TryGetProperty("image", out var image) &&
+            image.ValueKind == JsonValueKind.Object &&
             image.TryGetProperty("large", out var large))
         {
             return large.GetString();

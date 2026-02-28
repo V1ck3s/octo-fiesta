@@ -67,10 +67,12 @@ public class SubsonicController : ControllerBase
     {
         return Ok(new { status = "ok" });
     }
-    // Extract all parameters (query + body)
+    // Extract all parameters (query + body) and capture credentials for server-to-server calls
     private async Task<Dictionary<string, string>> ExtractAllParameters()
     {
-        return await _requestParser.ExtractAllParametersAsync(Request);
+        var parameters = await _requestParser.ExtractAllParametersAsync(Request);
+        _localLibraryService.SetSubsonicCredentials(parameters);
+        return parameters;
     }
 
     /// <summary>
@@ -610,7 +612,7 @@ public class SubsonicController : ControllerBase
                 var album = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                 if (album?.CoverArtUrl != null)
                 {
-                    coverUrl = album.CoverArtUrl;
+                    coverUrl = album.CoverArtUrlLarge ?? album.CoverArtUrl;
                 }
                 break;
                 
@@ -620,7 +622,7 @@ public class SubsonicController : ControllerBase
                 var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
                 if (song?.CoverArtUrl != null)
                 {
-                    coverUrl = song.CoverArtUrl;
+                    coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
                 }
                 else
                 {
@@ -628,7 +630,7 @@ public class SubsonicController : ControllerBase
                     var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
                     if (albumFallback?.CoverArtUrl != null)
                     {
-                        coverUrl = albumFallback.CoverArtUrl;
+                        coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
                     }
                 }
                 break;
@@ -789,6 +791,9 @@ public class SubsonicController : ControllerBase
     [Route("{**endpoint}")]
     public async Task<IActionResult> GenericEndpoint(string endpoint)
     {
+        // Capture credentials from any request (including catch-all)
+        var parameters = await ExtractAllParameters();
+        
         try
         {
             var result = await _proxyService.RelayRequestAsync(endpoint, Request, HttpContext.RequestAborted);
@@ -803,7 +808,6 @@ public class SubsonicController : ControllerBase
         }
         catch (HttpRequestException ex)
         {
-            var parameters = await ExtractAllParameters();
             var format = parameters.GetValueOrDefault("f", "xml");
             return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }

@@ -15,7 +15,7 @@ public class SquidWTFInstanceManager
     private readonly SquidWTFSettings _settings;
     private readonly ILogger<SquidWTFInstanceManager> _logger;
     
-    private const string InstancesJsonUrl = "https://raw.githubusercontent.com/SamidyFR/monochrome/main/public/instances.json";
+    private const string InstancesJsonUrl = "https://monochrome.tf/instances.json";
     private const int DefaultTimeoutSeconds = 5;
     
     // Static Qobuz API (no failover needed as there's only one)
@@ -92,8 +92,19 @@ public class SquidWTFInstanceManager
                 var request = createRequest(currentUrl);
                 var response = await _httpClient.SendAsync(request, cts.Token);
                 
-                // Success - this instance works
-                return response;
+                // Accept successful responses and 404 (resource genuinely not found)
+                if (response.IsSuccessStatusCode 
+                    || response.StatusCode is System.Net.HttpStatusCode.NotFound)
+                {
+                    return response;
+                }
+                
+                // Any other status code — instance is broken/blocked/overloaded
+                _logger.LogWarning("Tidal instance {Instance} returned {StatusCode}, switching to next...", 
+                    currentUrl, (int)response.StatusCode);
+                response.Dispose();
+                SwitchToNextInstance();
+                continue;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {

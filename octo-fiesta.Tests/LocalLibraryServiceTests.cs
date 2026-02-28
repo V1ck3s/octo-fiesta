@@ -18,6 +18,7 @@ public class LocalLibraryServiceTests : IDisposable
     private readonly LocalLibraryService _service;
     private readonly string _testDownloadPath;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
+    private readonly Mock<HttpMessageHandler> _mockHandler;
 
     public LocalLibraryServiceTests()
     {
@@ -32,8 +33,8 @@ public class LocalLibraryServiceTests : IDisposable
             .Build();
 
         // Mock HttpClient
-        var mockHandler = new Mock<HttpMessageHandler>();
-        mockHandler.Protected()
+        _mockHandler = new Mock<HttpMessageHandler>();
+        _mockHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", 
                 ItExpr.IsAny<HttpRequestMessage>(), 
                 ItExpr.IsAny<CancellationToken>())
@@ -42,7 +43,7 @@ public class LocalLibraryServiceTests : IDisposable
                 Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":false,\"count\":100}}}")
             });
         
-        var httpClient = new HttpClient(mockHandler.Object);
+        var httpClient = new HttpClient(_mockHandler.Object);
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
@@ -244,5 +245,171 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.Equal(expectedProvider, provider);
         Assert.Equal(expectedType, type);
         Assert.Equal(expectedExternalId, externalId);
+    }
+
+    [Fact]
+    public void SetSubsonicCredentials_StoresCredentialsOnFirstCall()
+    {
+        // Arrange
+        var parameters = new Dictionary<string, string>
+        {
+            ["u"] = "testuser",
+            ["t"] = "token123",
+            ["s"] = "salt456",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        };
+
+        // Act - should not throw
+        _service.SetSubsonicCredentials(parameters);
+
+        // Assert - credentials are stored (verified indirectly through scan URL)
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WithCredentials_IncludesAuthInRequest()
+    {
+        // Arrange
+        Uri? capturedUri = null;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+            });
+
+        _service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "admin",
+            ["t"] = "abc123",
+            ["s"] = "xyz789",
+            ["v"] = "1.16.1",
+            ["c"] = "feishin"
+        });
+
+        // Act
+        await _service.TriggerLibraryScanAsync();
+
+        // Assert
+        Assert.NotNull(capturedUri);
+        var query = capturedUri!.Query;
+        Assert.Contains("u=admin", query);
+        Assert.Contains("t=abc123", query);
+        Assert.Contains("s=xyz789", query);
+        Assert.Contains("v=1.16.1", query);
+        Assert.Contains("c=feishin", query);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WithoutCredentials_SendsRequestWithoutAuth()
+    {
+        // Arrange
+        Uri? capturedUri = null;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+            });
+
+        // Act - no credentials set
+        await _service.TriggerLibraryScanAsync();
+
+        // Assert
+        Assert.NotNull(capturedUri);
+        var query = capturedUri!.Query;
+        Assert.DoesNotContain("u=", query);
+        Assert.DoesNotContain("t=", query);
+    }
+
+    [Fact]
+    public async Task SetSubsonicCredentials_IgnoresSecondCall()
+    {
+        // Arrange
+        var firstParams = new Dictionary<string, string>
+        {
+            ["u"] = "firstuser",
+            ["t"] = "token1",
+            ["s"] = "salt1",
+            ["v"] = "1.16.1",
+            ["c"] = "client1"
+        };
+        var secondParams = new Dictionary<string, string>
+        {
+            ["u"] = "seconduser",
+            ["t"] = "token2",
+            ["s"] = "salt2",
+            ["v"] = "1.16.1",
+            ["c"] = "client2"
+        };
+
+        // Act
+        _service.SetSubsonicCredentials(firstParams);
+        _service.SetSubsonicCredentials(secondParams);
+
+        // Assert - verified indirectly: scan should use first user's credentials
+        Uri? capturedUri = null;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+            });
+
+        await _service.TriggerLibraryScanAsync();
+
+        Assert.NotNull(capturedUri);
+        Assert.Contains("u=firstuser", capturedUri!.Query);
+        Assert.DoesNotContain("seconduser", capturedUri.Query);
+    }
+
+    [Fact]
+    public async Task SetSubsonicCredentials_WithoutUsername_DoesNotStore()
+    {
+        // Arrange - params without 'u'
+        var parameters = new Dictionary<string, string>
+        {
+            ["t"] = "token123",
+            ["s"] = "salt456"
+        };
+
+        // Act
+        _service.SetSubsonicCredentials(parameters);
+
+        // Assert - a second call with valid params should be accepted (first was ignored)
+        var validParams = new Dictionary<string, string>
+        {
+            ["u"] = "realuser",
+            ["t"] = "realtoken",
+            ["s"] = "realsalt",
+            ["v"] = "1.16.1",
+            ["c"] = "client"
+        };
+        _service.SetSubsonicCredentials(validParams);
+
+        Uri? capturedUri = null;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+            });
+
+        await _service.TriggerLibraryScanAsync();
+
+        Assert.NotNull(capturedUri);
+        Assert.Contains("u=realuser", capturedUri!.Query);
     }
 }

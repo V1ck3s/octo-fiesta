@@ -5,9 +5,24 @@ namespace octo_fiesta.Services.Common;
 /// <summary>
 /// Helper class for path building and sanitization.
 /// Provides utilities for creating safe file and folder paths for downloaded music files.
+/// Always uses Windows-compatible invalid characters since they are a superset of Unix ones.
+/// This ensures filenames created in Docker (Linux) are also valid on Windows (e.g. via SMB).
 /// </summary>
 public static class PathHelper
 {
+    /// <summary>
+    /// Characters invalid in Windows file names. This is a superset of Unix invalid chars,
+    /// so using these everywhere ensures cross-platform compatibility.
+    /// </summary>
+    private static readonly char[] InvalidFileNameChars =
+    [
+        '"', '<', '>', '|', '\0',
+        (char)1, (char)2, (char)3, (char)4, (char)5, (char)6, (char)7, (char)8, (char)9, (char)10,
+        (char)11, (char)12, (char)13, (char)14, (char)15, (char)16, (char)17, (char)18, (char)19, (char)20,
+        (char)21, (char)22, (char)23, (char)24, (char)25, (char)26, (char)27, (char)28, (char)29, (char)30,
+        (char)31, ':', '*', '?', '\\', '/'
+    ];
+    
     /// <summary>
     /// Gets the cache directory path for temporary file storage.
     /// Uses system temp directory combined with octo-fiesta-cache subfolder.
@@ -56,7 +71,7 @@ public static class PathHelper
             return "Unknown";
         }
         
-        var invalidChars = Path.GetInvalidFileNameChars();
+        var invalidChars = InvalidFileNameChars;
         var sanitized = new string(fileName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
             .ToArray());
@@ -81,10 +96,7 @@ public static class PathHelper
             return "Unknown";
         }
         
-        var invalidChars = Path.GetInvalidFileNameChars()
-            .Concat(Path.GetInvalidPathChars())
-            .Distinct()
-            .ToArray();
+        var invalidChars = InvalidFileNameChars;
             
         var sanitized = new string(folderName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
