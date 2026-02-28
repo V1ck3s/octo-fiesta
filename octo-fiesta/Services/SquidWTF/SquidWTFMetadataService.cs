@@ -390,6 +390,9 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 song.Album = album.Title;
                 song.AlbumId = album.Id;
                 song.AlbumArtist = album.Artist;
+                song.Year ??= album.Year;
+                song.Genre ??= album.Genre;
+                song.TotalTracks ??= album.SongCount;
                 
                 // Use album cover for tracks if track doesn't have one (common for tracks from /api/get-album)
                 if (string.IsNullOrEmpty(song.CoverArtUrl))
@@ -599,6 +602,9 @@ public class SquidWTFMetadataService : IMusicMetadataService
                     song.Album = album.Title;
                     song.AlbumId = album.Id;
                     song.AlbumArtist = album.Artist;
+                    song.Year ??= album.Year;
+                    song.Genre ??= album.Genre;
+                    song.TotalTracks ??= album.SongCount;
                     // Use album cover for tracks if track doesn't have one
                     if (string.IsNullOrEmpty(song.CoverArtUrl))
                     {
