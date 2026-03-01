@@ -160,6 +160,21 @@ public class TidalArtist
     public string? Picture { get; set; }
 }
 
+/// <summary>
+/// Wrapper for items in an Artist Albums response (/artist/?f={artistId}&skip_tracks)
+/// </summary>
+public class TidalArtistAlbumsResponseWrapper
+{
+    [JsonPropertyName("albums")]
+    public TidalArtistAlbumsResponse? Albums { get; set; }
+}
+
+public class TidalArtistAlbumsResponse
+{
+    [JsonPropertyName("items")]
+    public List<TidalAlbum>? Items { get; set; }
+}
+
 public class TidalPlaylist
 {
     [JsonPropertyName("uuid")]
