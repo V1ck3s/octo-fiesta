@@ -9,6 +9,8 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       # Download path inside container
       - Library__DownloadPath=/app/downloads
+      # Per-user download subfolders (only applies to Permanent storage mode)
+      - Library__UserSubfolders=${LIBRARY_USER_SUBFOLDERS:-false}
       
       # ===== SUBSONIC SETTINGS =====
       # Navidrome/Subsonic server URL

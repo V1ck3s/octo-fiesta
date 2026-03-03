@@ -43,14 +43,32 @@ public static class PathHelper
     /// <param name="title">Track title (will be sanitized).</param>
     /// <param name="trackNumber">Optional track number for prefix.</param>
     /// <param name="extension">File extension (e.g., ".flac", ".mp3").</param>
+    /// <param name="userSubfolders">
+    /// When true and username is provided, prepends a user folder under downloadPath.
+    /// </param>
+    /// <param name="username">Optional username used when userSubfolders is enabled.</param>
     /// <returns>Full path for the track file.</returns>
-    public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension)
+    public static string BuildTrackPath(
+        string downloadPath,
+        string artist,
+        string album,
+        string title,
+        int? trackNumber,
+        string extension,
+        bool userSubfolders = false,
+        string? username = null)
     {
+        var effectiveBasePath = downloadPath;
+        if (userSubfolders && !string.IsNullOrWhiteSpace(username))
+        {
+            effectiveBasePath = Path.Combine(downloadPath, SanitizeFolderName(username));
+        }
+
         var safeArtist = SanitizeFolderName(artist);
         var safeAlbum = SanitizeFolderName(album);
         var safeTitle = SanitizeFileName(title);
         
-        var artistFolder = Path.Combine(downloadPath, safeArtist);
+        var artistFolder = Path.Combine(effectiveBasePath, safeArtist);
         var albumFolder = Path.Combine(artistFolder, safeAlbum);
         
         var trackPrefix = trackNumber.HasValue ? $"{trackNumber:D2} - " : "";
@@ -101,9 +119,15 @@ public static class PathHelper
         var sanitized = new string(folderName
             .Select(c => invalidChars.Contains(c) ? '_' : c)
             .ToArray());
+
+        // Avoid relative path segments such as "..".
+        while (sanitized.Contains("..", StringComparison.Ordinal))
+        {
+            sanitized = sanitized.Replace("..", "", StringComparison.Ordinal);
+        }
         
         // Remove leading/trailing dots and spaces (Windows folder restrictions)
-        sanitized = sanitized.Trim().TrimEnd('.');
+        sanitized = sanitized.Trim().Trim('.');
         
         if (sanitized.Length > 100)
         {

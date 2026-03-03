@@ -5,6 +5,7 @@ using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Subsonic;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -78,6 +79,11 @@ public class QobuzDownloadServiceTests : IDisposable
         { 
             DownloadMode = downloadMode 
         });
+        var librarySettings = Options.Create(new LibrarySettings
+        {
+            DownloadPath = _testDownloadPath,
+            UserSubfolders = false
+        });
         
         var qobuzSettings = Options.Create(new QobuzSettings
         {
@@ -90,14 +96,18 @@ public class QobuzDownloadServiceTests : IDisposable
         serviceProviderMock.Setup(sp => sp.GetService(typeof(octo_fiesta.Services.Subsonic.PlaylistSyncService)))
             .Returns(null);
 
+        var httpContextAccessor = new HttpContextAccessor();
+
         return new QobuzDownloadService(
             _httpClientFactoryMock.Object,
             config,
             _localLibraryServiceMock.Object,
             _metadataServiceMock.Object,
             _bundleService,
+            librarySettings,
             subsonicSettings,
             qobuzSettings,
+            httpContextAccessor,
             serviceProviderMock.Object,
             _loggerMock.Object);
     }

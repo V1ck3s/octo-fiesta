@@ -9,6 +9,7 @@ using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Subsonic;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using IOFile = System.IO.File;
 
@@ -42,11 +43,13 @@ public class QobuzDownloadService : BaseDownloadService
         ILocalLibraryService localLibraryService,
         IMusicMetadataService metadataService,
         QobuzBundleService bundleService,
+        IOptions<LibrarySettings> librarySettings,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<QobuzSettings> qobuzSettings,
+        IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
         ILogger<QobuzDownloadService> logger)
-        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, librarySettings, subsonicSettings.Value, httpContextAccessor, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _bundleService = bundleService;
@@ -123,7 +126,15 @@ public class QobuzDownloadService : BaseDownloadService
         // Build organized folder structure using AlbumArtist (fallback to Artist for singles)
         var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(
+            basePath,
+            artistForPath,
+            song.Album,
+            song.Title,
+            song.Track,
+            extension,
+            ShouldUseUserSubfolders(),
+            GetCurrentRequestUsername());
         
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);

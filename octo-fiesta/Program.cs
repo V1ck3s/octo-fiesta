@@ -26,6 +26,8 @@ builder.Services.AddProblemDetails();
 // Configuration
 builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
+builder.Services.Configure<LibrarySettings>(
+    builder.Configuration.GetSection("Library"));
 builder.Services.Configure<DeezerSettings>(
     builder.Configuration.GetSection("Deezer"));
 builder.Services.Configure<QobuzSettings>(

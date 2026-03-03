@@ -5,6 +5,7 @@ using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.SquidWTF;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Common;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using IOFile = System.IO.File;
 
@@ -43,12 +44,14 @@ public class SquidWTFDownloadService : BaseDownloadService
         IConfiguration configuration,
         ILocalLibraryService localLibraryService,
         IMusicMetadataService metadataService,
+        IOptions<LibrarySettings> librarySettings,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<SquidWTFSettings> squidWTFSettings,
         SquidWTFInstanceManager instanceManager,
+        IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
-        : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
+        : base(httpClientFactory, configuration, localLibraryService, metadataService, librarySettings, subsonicSettings.Value, httpContextAccessor, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
@@ -164,7 +167,15 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Build output path
         var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(
+            basePath,
+            artistForPath,
+            song.Album,
+            song.Title,
+            song.Track,
+            extension,
+            ShouldUseUserSubfolders(),
+            GetCurrentRequestUsername());
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;
@@ -227,7 +238,15 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Build output path
         var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(
+            basePath,
+            artistForPath,
+            song.Album,
+            song.Title,
+            song.Track,
+            extension,
+            ShouldUseUserSubfolders(),
+            GetCurrentRequestUsername());
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;

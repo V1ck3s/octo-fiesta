@@ -5,6 +5,8 @@ using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Subsonic;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 using TagLib;
 using IOFile = System.IO.File;
 using System.Collections.Concurrent;
@@ -22,8 +24,10 @@ public abstract class BaseDownloadService : IDownloadService
     protected readonly ILocalLibraryService LocalLibraryService;
     protected readonly IMusicMetadataService MetadataService;
     protected readonly SubsonicSettings SubsonicSettings;
+    protected readonly LibrarySettings LibrarySettings;
     protected readonly ILogger Logger;
     private readonly IServiceProvider _serviceProvider;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     protected readonly string DownloadPath;
     protected readonly string CachePath;
@@ -68,7 +72,9 @@ public abstract class BaseDownloadService : IDownloadService
         IConfiguration configuration,
         ILocalLibraryService localLibraryService,
         IMusicMetadataService metadataService,
+        IOptions<LibrarySettings> librarySettings,
         SubsonicSettings subsonicSettings,
+        IHttpContextAccessor httpContextAccessor,
         IServiceProvider serviceProvider,
         ILogger logger)
     {
@@ -76,7 +82,9 @@ public abstract class BaseDownloadService : IDownloadService
         Configuration = configuration;
         LocalLibraryService = localLibraryService;
         MetadataService = metadataService;
+        LibrarySettings = librarySettings.Value;
         SubsonicSettings = subsonicSettings;
+        _httpContextAccessor = httpContextAccessor;
         _serviceProvider = serviceProvider;
         Logger = logger;
 
@@ -92,6 +100,29 @@ public abstract class BaseDownloadService : IDownloadService
         {
             Directory.CreateDirectory(CachePath);
         }
+    }
+
+    /// <summary>
+    /// Returns true when per-user subfolders should be applied to paths.
+    /// This only applies to permanent storage mode.
+    /// </summary>
+    protected bool ShouldUseUserSubfolders()
+        => LibrarySettings.UserSubfolders && SubsonicSettings.StorageMode != StorageMode.Cache;
+
+    /// <summary>
+    /// Gets the Subsonic username from the current HTTP request.
+    /// Returns null when there is no active HTTP context or no username parameter.
+    /// </summary>
+    protected string? GetCurrentRequestUsername()
+    {
+        var request = _httpContextAccessor.HttpContext?.Request;
+        if (request == null)
+        {
+            return null;
+        }
+
+        var username = request.Query["u"].ToString();
+        return string.IsNullOrWhiteSpace(username) ? null : username;
     }
 
     #region IDownloadService Implementation
