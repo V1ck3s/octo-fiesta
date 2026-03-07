@@ -4,9 +4,11 @@ services:
     container_name: octo-fiesta
     restart: unless-stopped
     ports:
-      - "5274:8080"
+      - "5274:${INTERNAL_PORT:-8080}"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # Internal listening port (must match the port in "ports" mapping above)
+      - ASPNETCORE_URLS=http://+:${INTERNAL_PORT:-8080}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
       
