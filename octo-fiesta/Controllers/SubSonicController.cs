@@ -749,7 +749,13 @@ public class SubsonicController : ControllerBase
         var format = parameters.GetValueOrDefault("f", "xml");
         
         // Check if this is a playlist
+        // Clients may send the playlist ID as "id" or "albumId" depending on the client
+        // (playlists are presented as albums, so most clients use "albumId")
         var playlistId = parameters.GetValueOrDefault("id", "");
+        if (string.IsNullOrEmpty(playlistId) || !PlaylistIdHelper.IsExternalPlaylist(playlistId))
+        {
+            playlistId = parameters.GetValueOrDefault("albumId", "");
+        }
         
         if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
         {
