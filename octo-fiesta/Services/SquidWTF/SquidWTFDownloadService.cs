@@ -162,9 +162,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         };
         
         // Build output path
-        var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;
@@ -225,9 +224,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         var downloadedQuality = GetDownloadedQuality(actualQuality, manifest.MimeType);
         
         // Build output path
-        var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;

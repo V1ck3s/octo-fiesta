@@ -120,10 +120,9 @@ public class QobuzDownloadService : BaseDownloadService
             _ => downloadInfo.MimeType?.Contains("flac") == true ? "FLAC" : "MP3_320"
         };
 
-        // Build organized folder structure using AlbumArtist (fallback to Artist for singles)
-        var artistForPath = song.AlbumArtist ?? song.Artist;
+        // Build organized folder structure using configured template
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);

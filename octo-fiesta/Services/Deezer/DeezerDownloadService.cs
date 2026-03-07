@@ -120,10 +120,9 @@ public class DeezerDownloadService : BaseDownloadService
             _ => downloadInfo.Format
         };
 
-        // Build organized folder structure: Artist/Album/Track using AlbumArtist (fallback to Artist for singles)
-        var artistForPath = song.AlbumArtist ?? song.Artist;
+        // Build organized folder structure using configured template
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories if they don't exist
         var albumFolder = Path.GetDirectoryName(outputPath)!;

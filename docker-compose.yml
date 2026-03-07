@@ -31,6 +31,9 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
+      # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
+      - Subsonic__FolderTemplate=${FOLDER_TEMPLATE:-{artist}/{album}/{track} - {title}}
       
       # ===== DEEZER SETTINGS =====
       # Deezer ARL token (required if using Deezer)
