@@ -160,6 +160,27 @@ public abstract class BaseDownloadService : IDownloadService
         });
     }
 
+    public void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId)
+    {
+        if (externalProvider != ProviderName)
+        {
+            Logger.LogWarning("Provider '{Provider}' is not supported for album download", externalProvider);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadFullAlbumAsync(albumExternalId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to download full album {AlbumId}", albumExternalId);
+            }
+        });
+    }
+
     #endregion
 
     #region Template Methods (to be implemented by subclasses)
@@ -492,21 +513,38 @@ public abstract class BaseDownloadService : IDownloadService
 
     protected async Task DownloadRemainingAlbumTracksAsync(string albumExternalId, string excludeTrackExternalId, CancellationToken cancellationToken = default)
     {
-        Logger.LogInformation("Starting background download for album {AlbumId} (excluding track {TrackId})",
-            albumExternalId, excludeTrackExternalId);
+        await DownloadAlbumTracksAsync(albumExternalId, excludeTrackExternalId, cancellationToken);
+    }
+
+    protected async Task DownloadFullAlbumAsync(string albumExternalId, CancellationToken cancellationToken = default)
+    {
+        await DownloadAlbumTracksAsync(albumExternalId, excludeTrackExternalId: null, cancellationToken);
+    }
+
+    private async Task DownloadAlbumTracksAsync(string albumExternalId, string? excludeTrackExternalId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(excludeTrackExternalId))
+        {
+            Logger.LogInformation("Starting background full album download for album {AlbumId}", albumExternalId);
+        }
+        else
+        {
+            Logger.LogInformation("Starting background download for album {AlbumId} (excluding track {TrackId})",
+                albumExternalId, excludeTrackExternalId);
+        }
 
         var album = await MetadataService.GetAlbumAsync(ProviderName, albumExternalId);
         if (album == null)
         {
-            Logger.LogWarning("Album {AlbumId} not found, cannot download remaining tracks", albumExternalId);
+            Logger.LogWarning("Album {AlbumId} not found, cannot download tracks", albumExternalId);
             return;
         }
 
         var tracksToDownload = album.Songs
-            .Where(s => s.ExternalId != excludeTrackExternalId && !string.IsNullOrEmpty(s.ExternalId))
+            .Where(s => !string.IsNullOrEmpty(s.ExternalId) && (string.IsNullOrEmpty(excludeTrackExternalId) || s.ExternalId != excludeTrackExternalId))
             .ToList();
 
-        Logger.LogInformation("Found {Count} additional tracks to download for album '{AlbumTitle}'",
+        Logger.LogInformation("Found {Count} tracks to download for album '{AlbumTitle}'",
             tracksToDownload.Count, album.Title);
 
         foreach (var track in tracksToDownload)
