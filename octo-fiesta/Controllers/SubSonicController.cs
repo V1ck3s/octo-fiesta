@@ -738,7 +738,7 @@ public class SubsonicController : ControllerBase
     #endregion
 
     /// <summary>
-    /// Stars (favorites) an item. For playlists, this triggers a full download.
+    /// Stars (favorites) an item. For external playlists and albums, this triggers a full download.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/star")]
@@ -747,16 +747,9 @@ public class SubsonicController : ControllerBase
     {
         var parameters = await ExtractAllParameters();
         var format = parameters.GetValueOrDefault("f", "xml");
-        
+
         // Check if this is a playlist
-        // Clients may send the playlist ID as "id" or "albumId" depending on the client
-        // (playlists are presented as albums, so most clients use "albumId")
-        var playlistId = parameters.GetValueOrDefault("id", "");
-        if (string.IsNullOrEmpty(playlistId) || !PlaylistIdHelper.IsExternalPlaylist(playlistId))
-        {
-            playlistId = parameters.GetValueOrDefault("albumId", "");
-        }
-        
+        var playlistId = GetExternalPlaylistIdFromStarParameters(parameters);
         if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
         {
             if (_playlistSyncService == null)
@@ -782,6 +775,14 @@ public class SubsonicController : ControllerBase
             // Return success response immediately
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
+
+        var (isExternalAlbum, albumProvider, albumExternalId, rawAlbumId) = GetExternalAlbumFromStarParameters(parameters);
+        if (isExternalAlbum)
+        {
+            _logger.LogInformation("Starring external album {AlbumId}, triggering full download", rawAlbumId);
+            _downloadService.DownloadFullAlbumInBackground(albumProvider!, albumExternalId!);
+            return _responseBuilder.CreateResponse(format, "starred", new { });
+        }
         
         // For non-playlist items, relay to real Subsonic server
         try
@@ -794,6 +795,68 @@ public class SubsonicController : ControllerBase
         {
             return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }
+    }
+
+    private string GetExternalPlaylistIdFromStarParameters(Dictionary<string, string> parameters)
+    {
+        // Clients may send the playlist ID as "id" or "albumId" depending on the client
+        // (playlists are presented as albums, so most clients use "albumId")
+        var id = parameters.GetValueOrDefault("id", "");
+        if (!string.IsNullOrEmpty(id) && PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            return id;
+        }
+
+        var albumId = parameters.GetValueOrDefault("albumId", "");
+        if (!string.IsNullOrEmpty(albumId) && PlaylistIdHelper.IsExternalPlaylist(albumId))
+        {
+            return albumId;
+        }
+
+        return string.Empty;
+    }
+
+    private (bool IsExternalAlbum, string? Provider, string? ExternalId, string RawAlbumId) GetExternalAlbumFromStarParameters(Dictionary<string, string> parameters)
+    {
+        var id = parameters.GetValueOrDefault("id", "");
+        if (TryParseExternalAlbumId(id, out var provider, out var externalId))
+        {
+            return (true, provider, externalId, id);
+        }
+
+        var albumId = parameters.GetValueOrDefault("albumId", "");
+        if (TryParseExternalAlbumId(albumId, out provider, out externalId))
+        {
+            return (true, provider, externalId, albumId);
+        }
+
+        return (false, null, null, string.Empty);
+    }
+
+    private bool TryParseExternalAlbumId(string id, out string? provider, out string? externalId)
+    {
+        provider = null;
+        externalId = null;
+
+        if (string.IsNullOrWhiteSpace(id) || PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            return false;
+        }
+
+        var (isExternal, parsedProvider, type, parsedExternalId) = _localLibraryService.ParseExternalId(id);
+        if (!isExternal || !string.Equals(type, "album", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(parsedProvider) || string.IsNullOrEmpty(parsedExternalId))
+        {
+            return false;
+        }
+
+        provider = parsedProvider;
+        externalId = parsedExternalId;
+        return true;
     }
 
     // Generic endpoint to handle all subsonic API calls

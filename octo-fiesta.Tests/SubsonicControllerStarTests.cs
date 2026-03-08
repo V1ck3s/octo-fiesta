@@ -30,6 +30,10 @@ public class SubsonicControllerStarTests
         _mockLocalLibraryService = new Mock<ILocalLibraryService>();
         _mockDownloadService = new Mock<IDownloadService>();
         _mockLogger = new Mock<ILogger<SubsonicController>>();
+
+        _mockLocalLibraryService
+            .Setup(x => x.ParseExternalId(It.IsAny<string>()))
+            .Returns((string id) => ParseExternalIdForTests(id));
         
         _requestParser = new SubsonicRequestParser();
         _responseBuilder = new SubsonicResponseBuilder();
@@ -42,6 +46,25 @@ public class SubsonicControllerStarTests
             Url = "http://localhost:4533",
             EnableExternalPlaylists = true
         });
+    }
+
+    private static (bool isExternal, string? provider, string? type, string? externalId) ParseExternalIdForTests(string id)
+    {
+        if (!id.StartsWith("ext-", StringComparison.Ordinal))
+        {
+            return (false, null, null, null);
+        }
+
+        var parts = id.Split('-');
+        if (parts.Length >= 4)
+        {
+            var provider = parts[1];
+            var type = parts[2];
+            var externalId = string.Join("-", parts.Skip(3));
+            return (true, provider, type, externalId);
+        }
+
+        return (false, null, null, null);
     }
 
     private SubsonicController CreateController(
@@ -119,6 +142,47 @@ public class SubsonicControllerStarTests
     }
 
     #region Star() albumId Fallback Tests
+
+    [Fact]
+    public async Task Star_WithExternalAlbumIdInId_TriggersFullAlbumDownload()
+    {
+        // Arrange
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "ext-deezer-album-12345" }
+            });
+
+        // Act
+        var result = await controller.Star();
+
+        // Assert - should return success & trigger download based on id
+        Assert.IsType<ContentResult>(result);
+        var contentResult = (ContentResult)result;
+        Assert.Contains("starred", contentResult.Content ?? "");
+        _mockDownloadService.Verify(x => x.DownloadFullAlbumInBackground("deezer", "12345"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Star_WithExternalAlbumIdInAlbumId_AndNonAlbumInId_UsesAlbumIdFallback()
+    {
+        // Arrange
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "some-regular-id" },
+                { "albumId", "ext-qobuz-album-abc-123" }
+            });
+
+        // Act
+        var result = await controller.Star();
+
+        // Assert - should return success & trigger download based on albumId, not id
+        Assert.IsType<ContentResult>(result);
+        var contentResult = (ContentResult)result;
+        Assert.Contains("starred", contentResult.Content ?? "");
+        _mockDownloadService.Verify(x => x.DownloadFullAlbumInBackground("qobuz", "abc-123"), Times.Once);
+    }
 
     [Fact]
     public async Task Star_WithPlaylistIdInAlbumId_DetectsPlaylistAndTriggersDownload()
