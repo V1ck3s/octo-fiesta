@@ -30,24 +30,16 @@ public class SquidWTFStartupValidator : BaseStartupValidator
         Console.WriteLine();
 
         var source = _settings.Source ?? "Qobuz";
-        var quality = _settings.Quality?.ToUpperInvariant() switch
-        {
-            "FLAC" => "LOSSLESS",
-            "HI_RES" => "HI_RES_LOSSLESS",
-            "LOSSLESS" => "LOSSLESS",
-            "HIGH" => "HIGH",
-            "LOW" => "LOW",
-            "27" => "FLAC 24-bit/192kHz",
-            "7" => "FLAC 24-bit/96kHz",
-            "6" => "FLAC 16-bit",
-            "5" => "MP3 320kbps",
-            _ => source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase) 
-                ? "FLAC 24-bit/192kHz (default)" 
-                : "LOSSLESS (default)"
-        };
+        var configuredQuality = _settings.Quality;
+        var (quality, usedDefaultFallback) = GetEffectiveQualityLabel(source, configuredQuality);
 
         WriteStatus("SquidWTF Source", source, ConsoleColor.Cyan);
         WriteStatus("SquidWTF Quality", quality, ConsoleColor.Cyan);
+        if (usedDefaultFallback && !string.IsNullOrWhiteSpace(configuredQuality))
+        {
+            WriteStatus("SquidWTF Quality Warning", "INCOMPATIBLE CONFIG", ConsoleColor.Yellow);
+            WriteDetail($"Quality '{configuredQuality}' is not valid for source '{source}'. Falling back to default quality.");
+        }
         
         if (_settings.InstanceTimeoutSeconds > 0)
         {
@@ -192,5 +184,32 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteStatus("Search Functionality", "ERROR", ConsoleColor.Yellow);
             WriteDetail($"Could not verify search: {ex.Message}");
         }
+    }
+
+    private static (string Label, bool UsedDefaultFallback) GetEffectiveQualityLabel(string source, string? configuredQuality)
+    {
+        var sourceIsQobuz = source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
+        var quality = configuredQuality?.ToUpperInvariant();
+
+        if (sourceIsQobuz)
+        {
+            return quality switch
+            {
+                "27" => ("FLAC 24-bit/192kHz", false),
+                "7" => ("FLAC 24-bit/96kHz", false),
+                "6" => ("FLAC 16-bit", false),
+                "5" => ("MP3 320kbps", false),
+                _ => ("FLAC 24-bit/192kHz (default)", true)
+            };
+        }
+
+        return quality switch
+        {
+            "FLAC" or "LOSSLESS" => ("LOSSLESS", false),
+            "HI_RES" => ("HI_RES_LOSSLESS", false),
+            "HIGH" => ("HIGH", false),
+            "LOW" => ("LOW", false),
+            _ => ("LOSSLESS (default)", true)
+        };
     }
 }
