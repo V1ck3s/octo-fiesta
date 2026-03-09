@@ -36,6 +36,21 @@ public class Error(string message, Error? reason = null)
 
         return errors;
     }
+    /// <summary>
+    /// Overrides ToString()
+    /// </summary>
+    /// <returns>Error message prefixed by Error type name.</returns>
+    public override string ToString()
+    {
+        var type = GetType();
+        string? fullName = type.FullName;
+        string name = fullName?
+                    .Split(".")?[^1]?
+                    .Replace("+",".")
+                    ?? type.Name;
+
+        return $"{name}: {Message}";
+    }
 }
 #endregion Error Definition
 
@@ -78,13 +93,13 @@ public class HttpError(string message, Error? reason = null) : Error(message, re
 /// <summary>
 /// Silly demo of possible typed error usage
 /// </summary>
-public class Demo
+public static class Demo
 {
     /// <summary>
     /// Returning different implicitly converted Results
     /// with different Error subtypes
     /// </summary>
-    public Result<string> GetSongResponse(string url)
+    public static Result<string> GetSongResponse(string url)
     {
         bool responseIsSuccess = false;
         int responseCode = 404;
@@ -102,7 +117,7 @@ public class Demo
     /// <summary>
     /// Returning Error with reason. May be useful for logging and tracing.
     /// </summary>
-    public Result DownloadSong(int id)
+    public static Result DownloadSong(int id)
     {
         var res = GetSongResponse($"https://monochrome.tf/song/{id}");
         if (res.IsFailure){
@@ -114,9 +129,10 @@ public class Demo
 
     /// <summary>
     /// Checking Error Type.
+    /// Printing Error trace.
     /// </summary>
     /// <param name="ids"></param>
-    public void DownloadSongs(List<int> ids)
+    public static void DownloadSongs(List<int> ids)
     {
         foreach (int id in ids)
         {
@@ -126,9 +142,9 @@ public class Demo
                 ///
             }
 
-            if (result.Error is SquidWTFSongNotDownloaded e)
+            if (result.Error is SquidWTFSongNotDownloaded error)
             {
-                // do something with e.SongId; or with e.GetTrace()
+                error.GetTrace().ForEach(e => Console.WriteLine(e));
             }
         }
     }
