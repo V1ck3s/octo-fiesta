@@ -152,7 +152,9 @@ public class SubsonicController : ControllerBase
         // This ensures quality upgrade logic is applied
         try
         {
-            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, HttpContext.RequestAborted);
+            // Intentionally decouple external downloads from RequestAborted.
+            // If the client disconnects, the download should still complete, so we don't end up with broken files (partial downloads, missing metadata, missing cover)
+            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, CancellationToken.None);
             return File(downloadStream, "audio/mpeg", enableRangeProcessing: true);
         }
         catch (Exception ex)
