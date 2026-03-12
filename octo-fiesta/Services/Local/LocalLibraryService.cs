@@ -6,6 +6,7 @@ using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services;
+using octo_fiesta.Services.Common;
 
 namespace octo_fiesta.Services.Local;
 
@@ -108,10 +109,121 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     public async Task<string?> GetLocalIdForExternalSongAsync(string externalProvider, string externalId)
     {
-        // For now, return null as we don't yet have integration
-        // with the Subsonic server to retrieve local ID after scan
-        await Task.CompletedTask;
-        return null;
+        var mappings = await LoadMappingsAsync();
+        var key = $"{externalProvider}:{externalId}";
+
+        if (!mappings.TryGetValue(key, out var mapping) || !File.Exists(mapping.LocalPath))
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(mapping.LocalSubsonicId))
+        {
+            return mapping.LocalSubsonicId;
+        }
+
+        try
+        {
+            var queryText = string.Join(" ", new[] { mapping.Artist, mapping.Title }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(queryText))
+            {
+                return null;
+            }
+
+            var authQuery = BuildAuthQuery();
+            var searchUrl = $"{_subsonicSettings.Url}/rest/search3?f=json&songCount=10&albumCount=0&artistCount=0&query={Uri.EscapeDataString(queryText)}{authQuery}";
+
+            var response = await _httpClient.GetAsync(searchUrl);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Could not resolve local Subsonic ID for {Provider}:{ExternalId}. search3 returned {StatusCode}",
+                    externalProvider, externalId, response.StatusCode);
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) ||
+                !subsonicResponse.TryGetProperty("searchResult3", out var searchResult) ||
+                !searchResult.TryGetProperty("song", out var songNode))
+            {
+                return null;
+            }
+
+            var titleKey = StringNormalizer.CreateComparisonKey(mapping.Title);
+            var artistKey = StringNormalizer.CreateComparisonKey(mapping.Artist);
+            var albumKey = StringNormalizer.CreateComparisonKey(mapping.Album);
+
+            string? matchedId = null;
+
+            foreach (var songElement in EnumerateSongs(songNode))
+            {
+                var candidateId = songElement.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+                if (string.IsNullOrEmpty(candidateId))
+                {
+                    continue;
+                }
+
+                var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
+                var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
+                var candidateAlbumKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("album", out var albumEl) ? albumEl.GetString() : null);
+
+                var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
+                var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
+                var albumMatches = !string.IsNullOrEmpty(albumKey) && albumKey == candidateAlbumKey;
+
+                if ((titleMatches && artistMatches) || (titleMatches && albumMatches))
+                {
+                    matchedId = candidateId;
+                    break;
+                }
+            }
+
+            if (string.IsNullOrEmpty(matchedId))
+            {
+                return null;
+            }
+
+            await _lock.WaitAsync();
+            try
+            {
+                if (mappings.TryGetValue(key, out var mappingToUpdate))
+                {
+                    mappingToUpdate.LocalSubsonicId = matchedId;
+                    await SaveMappingsAsync(mappings);
+                }
+            }
+            finally
+            {
+                _lock.Release();
+            }
+
+            _logger.LogInformation("Resolved local Subsonic ID {LocalId} for external song {Provider}:{ExternalId}",
+                matchedId, externalProvider, externalId);
+            return matchedId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve local Subsonic ID for external song {Provider}:{ExternalId}",
+                externalProvider, externalId);
+            return null;
+        }
+    }
+
+    private static IEnumerable<JsonElement> EnumerateSongs(JsonElement songNode)
+    {
+        if (songNode.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var song in songNode.EnumerateArray())
+            {
+                yield return song;
+            }
+        }
+        else if (songNode.ValueKind == JsonValueKind.Object)
+        {
+            yield return songNode;
+        }
     }
 
     public (bool isExternal, string? provider, string? externalId) ParseSongId(string songId)
