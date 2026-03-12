@@ -195,21 +195,21 @@ public class SquidWTFStartupValidator : BaseStartupValidator
         {
             return quality switch
             {
-                "27" => ("FLAC 24-bit/192kHz", false),
-                "7" => ("FLAC 24-bit/96kHz", false),
-                "6" => ("FLAC 16-bit", false),
-                "5" => ("MP3 320kbps", false),
+                "FLAC_24_192" or "FLAC_24" or "27" => ("FLAC 24-bit/192kHz", false),
+                "FLAC_24_96" or "7" => ("FLAC 24-bit/96kHz", false),
+                "FLAC_16" or "FLAC" or "6" => ("FLAC 16-bit", false),
+                "MP3_320" or "MP3" or "5" => ("MP3 320kbps", false),
                 _ => ("FLAC 24-bit/192kHz (default)", true)
             };
         }
 
         return quality switch
         {
-            "FLAC" or "LOSSLESS" => ("LOSSLESS", false),
-            "HI_RES" => ("HI_RES_LOSSLESS", false),
-            "HIGH" => ("HIGH", false),
-            "LOW" => ("LOW", false),
-            _ => ("LOSSLESS (default)", true)
+            "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => ("HI_RES_LOSSLESS", false),
+            "LOSSLESS" or "FLAC" or "FLAC_16" => ("LOSSLESS", false),
+            "HIGH" or "AAC_320" or "AAC_HIGH" => ("HIGH", false),
+            "LOW" or "AAC_96" or "AAC_LOW" => ("LOW", false),
+            _ => ("HI_RES_LOSSLESS (default)", true)
         };
     }
 }
