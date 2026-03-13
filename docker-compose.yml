@@ -61,5 +61,25 @@ services:
       # Instance timeout in seconds for Tidal backend (default: 5)
       # Switches to next instance if current one doesn't respond in time
       - SquidWTF__InstanceTimeoutSeconds=${SQUIDWTF_INSTANCE_TIMEOUT:-5}
+
+      # ===== YANDEX MUSIC SETTINGS =====
+      # OAuth token for API access.
+      # Obtained from browser #access_token fragment after authenticating on 
+      # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
+      - Yandex__OAuthToken=${YANDEX_OAUTH_TOKEN:-}
+      # Preferred audio quality (optional)
+      # Default: FLAC (16-bit/44.1kHz)
+      # Available: AAC_64, MP3_192, AAC_192, AAC_256, MP3_320, FLAC
+      - Yandex__Quality=${YANDEX_QUALITY:-}
+      # Language for the API responses.
+      # Curated playlists and some album titles will be translated into that language.
+      # Default: ru
+      # Available: en/uz/uk/us/ru/kk/hy
+      - Yandex__Language=${YANDEX_LANGUAGE:-}
+      # Some tracks are included in the API responses but are marked unavailable for listening
+      # This setting allows to show such tracks in search results, playlists and albums
+      # Default: false
+      # Available: true, false
+      - IncludeUnavilable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
