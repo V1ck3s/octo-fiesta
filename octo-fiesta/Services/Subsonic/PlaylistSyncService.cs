@@ -17,6 +17,7 @@ public class PlaylistSyncService
     private readonly IMusicMetadataService? _deezerMetadataService;
     private readonly IMusicMetadataService? _qobuzMetadataService;
     private readonly IMusicMetadataService? _squidWTFMetadataService;
+    private readonly IMusicMetadataService? _yandexMetadataService;
     private readonly IEnumerable<IDownloadService> _downloadServices;
     private readonly IConfiguration _configuration;
     private readonly SubsonicSettings _subsonicSettings;
@@ -45,7 +46,8 @@ public class PlaylistSyncService
         // Get metadata services (optional - only the active provider(s) will be registered)
         _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"));
         _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"));
-        _squidWTFMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("SquidWTF"));;
+        _squidWTFMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("SquidWTF"));
+        _yandexMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Yandex"));
         
         _downloadServices = downloadServices;
         _configuration = configuration;
@@ -75,6 +77,7 @@ public class PlaylistSyncService
             "deezer" when _deezerMetadataService != null => _deezerMetadataService,
             "qobuz" when _qobuzMetadataService != null => _qobuzMetadataService,
             "squidwtf" when _squidWTFMetadataService != null => _squidWTFMetadataService,
+            "yandex" when _yandexMetadataService != null => _yandexMetadataService,
             _ => null
         };
     }

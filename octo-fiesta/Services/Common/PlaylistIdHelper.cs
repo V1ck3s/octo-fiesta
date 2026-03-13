@@ -10,7 +10,7 @@ public static class PlaylistIdHelper
     private const string PlaylistPrefix = "pl-";
     
     // Known external providers for playlists
-    private static readonly string[] KnownProviders = { "deezer", "qobuz", "squidwtf" };
+    private static readonly string[] KnownProviders = { "deezer", "qobuz", "squidwtf", "yandex" };
     
     /// <summary>
     /// Checks if an ID represents an external playlist.

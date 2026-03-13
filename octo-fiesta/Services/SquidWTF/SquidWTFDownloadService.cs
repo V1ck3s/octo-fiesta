@@ -99,7 +99,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         return null;
     }
 
-    protected override string? GetTargetQuality()
+    protected override async Task<string?> GetAvailableQualityForTrackAsync(string trackId, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(_squidWTFSettings.Quality))
         {
