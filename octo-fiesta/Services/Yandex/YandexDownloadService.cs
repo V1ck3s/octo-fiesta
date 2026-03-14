@@ -63,7 +63,7 @@ public class YandexDownloadService : BaseDownloadService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Coldn't get user account status for provider Yandex. "
+                "Couldn't get user account status for provider Yandex. "
                 + "Got status code {StatusCode} for request {Url}",
                 response.StatusCode, accountStatusUrl
             );
@@ -77,7 +77,7 @@ public class YandexDownloadService : BaseDownloadService
         if (accountStatusResponse?.Result?.PlusStatus?.HasPlus != true)
         {
             _logger.LogWarning(
-                "User has no active Yandex Plus subsctiption. Please renew your subscription."
+                "User has no active Yandex Plus subscription. Please renew your subscription."
             );
             return false;
         }
@@ -374,7 +374,7 @@ public class YandexDownloadService : BaseDownloadService
         };
 
 
-        // Preapre signed download URL
+        // Prepare signed download URL
         string stringToSign = MD_SIGNING_SALT + downloadInfo.Path[1..] + downloadInfo.S;
         string sign = Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(stringToSign)));
         return $"https://{downloadInfo.Host}/get-mp3/{sign}/{downloadInfo.Ts}{downloadInfo.Path}";

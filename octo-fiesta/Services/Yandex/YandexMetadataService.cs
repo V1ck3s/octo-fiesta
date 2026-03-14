@@ -12,7 +12,7 @@ using System.Text.Json.Serialization;
 namespace octo_fiesta.Services.Yandex;
 
 /// <summary>
-/// Metadata service implementation using Yndex Music API.
+/// Metadata service implementation using Yandex Music API.
 /// </summary>
 public class YandexMetadataService : IMusicMetadataService
 {
@@ -309,7 +309,7 @@ public class YandexMetadataService : IMusicMetadataService
         string? coverUri = yandexTrack.CoverUri ?? yandexTrack.OgImage;
 
         int explicitWarning;
-        bool explicitInDisclaimers = yandexTrack.Disclamers?.Contains("explicit") ?? false;
+        bool explicitInDisclaimers = yandexTrack.Disclaimers?.Contains("explicit") ?? false;
         if (yandexTrack.ContentWarning == "explicit" 
          || explicitInDisclaimers)
         {

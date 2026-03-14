@@ -62,7 +62,7 @@ public class YandexTrack
     /// Disclaimers may contain another 'explicit' tag.
     /// </summary>
     [JsonPropertyName("disclaimers")]
-    public List<string>? Disclamers { get; set; } = new();
+    public List<string>? Disclaimers { get; set; } = new();
 
     [JsonPropertyName("durationMs")]
     public int? DurationMs { get; set; }
@@ -174,6 +174,7 @@ public class YandexArtist
     public YandexArtistCounts? Counts { get; set; }
 }
 
+/// <summary>
 /// Actual YandexArtist object from /artists/ endpoint
 /// is wrapped by this wrapper.
 /// </summary>

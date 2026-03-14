@@ -1,7 +1,7 @@
 namespace octo_fiesta.Models.Settings;
 
 /// <summary>
-/// Configuration for the Deezer downloader and metadata service
+/// Configuration for the Yandex downloader and metadata service
 /// </summary>
 public class YandexSettings
 {
@@ -13,7 +13,7 @@ public class YandexSettings
     public string? OAuthToken { get; set; }
     
     /// <summary>
-    /// Preferred audio quality: FLAC, MP3_320, MP3_128
+    /// Preferred audio quality
     /// If not specified or unavailable, the highest available quality will be used.
     /// Default: FLAC
     /// Available: FLAC, MP3_320, AAC_256, AAC_192, MP3_192, AAC_64
