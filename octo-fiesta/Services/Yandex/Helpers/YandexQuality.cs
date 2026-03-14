@@ -26,7 +26,7 @@ public static class YandexQuality
 
     public static List<string> ValidQualities
     {
-        get => ValidQualities.ToList();
+        get => _validQualities.ToList();
     }
 
     private static class Codecs
