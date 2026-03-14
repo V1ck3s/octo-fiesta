@@ -209,7 +209,6 @@ public abstract class BaseDownloadService : IDownloadService
     /// <summary>
     /// Gets the target quality setting for this provider.
     /// Used for quality upgrade comparison.
-    /// Should not be higher, than quality in settings.
     /// </summary>
     protected abstract string? GetTargetQuality();
 
