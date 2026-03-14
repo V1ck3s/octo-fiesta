@@ -116,32 +116,7 @@ public class YandexDownloadService : BaseDownloadService
         return null;
     }
 
-    protected override async Task<string?> GetAvailableQualityForTrackAsync(string trackId, CancellationToken cancellationToken)
-    {
-        YandexDownloadInfo? downloadInfo = await GetYandexDownloadInfoModernAsync(trackId, cancellationToken);
-        if (downloadInfo is not null)
-        {
-            return YandexQuality.FromApiParams(downloadInfo.Codec, downloadInfo.Bitrate);
-        }
-
-        _logger.LogWarning("Failed to get available download quality for track {Id} using modern API. Trying legacy API", trackId);
-
-        YandexDownloadOptionLegacy? downloadOption = await GetDownloadOptionLegacyAsync(trackId, cancellationToken);
-        if (downloadOption is not null)
-        {
-            string availableQuality = YandexQuality.FromApiParams(downloadOption.Codec, downloadOption.BitRate);
-            int availableLevel = QualityHelper.GetQualityLevel(availableQuality);
-            int targetLevel = QualityHelper.GetQualityLevel(_preferredQuality);
-            // if target level is low, we shouldn't download higher quality track
-            return availableLevel < targetLevel ? availableQuality : _preferredQuality;
-        }
-
-        _logger.LogWarning(
-            "Failed to get available download quality for track {Id} using both modern and legacy APIs..",
-            trackId
-        );
-        return null;
-    }
+    protected override string? GetTargetQuality() => _preferredQuality;
 
     #endregion
 

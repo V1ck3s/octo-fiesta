@@ -207,11 +207,11 @@ public abstract class BaseDownloadService : IDownloadService
     protected abstract string? ExtractExternalIdFromAlbumId(string albumId);
 
     /// <summary>
-    /// Gets available download quality for specified track.
+    /// Gets the target quality setting for this provider.
     /// Used for quality upgrade comparison.
     /// Should not be higher, than quality in settings.
     /// </summary>
-    protected abstract Task<string?> GetAvailableQualityForTrackAsync(string trackId, CancellationToken cancellationToken);
+    protected abstract string? GetTargetQuality();
 
     #endregion
 
@@ -245,7 +245,7 @@ public abstract class BaseDownloadService : IDownloadService
                 if (existingMapping != null && IOFile.Exists(existingMapping.LocalPath))
                 {
                     // Check if we should upgrade quality
-                    var targetQuality = await GetAvailableQualityForTrackAsync(externalId, cancellationToken);
+                    var targetQuality = GetTargetQuality();
                     var shouldUpgrade = QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, targetQuality);
 
                     if (SubsonicSettings.AutoUpgradeQuality && shouldUpgrade)
