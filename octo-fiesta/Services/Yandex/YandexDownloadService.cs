@@ -93,7 +93,7 @@ public class YandexDownloadService : BaseDownloadService
             return downloadResult;
         }
         _logger.LogWarning(
-            "Track '{Id}: {Title}' Downloading using modern API failed. Trying legacy API.", trackId, song.Title
+            "Track '{TrackId}: {Title}' Downloading using modern API failed. Trying legacy API.", trackId, song.Title
         );
 
 
@@ -124,13 +124,13 @@ public class YandexDownloadService : BaseDownloadService
     
     private async Task<DownloadResult?> DownloadTrackModernAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Downloading track {id} with encrypted Yandex API", trackId);
+        _logger.LogInformation("Downloading track {TrackId} with encrypted Yandex API", trackId);
         
         YandexDownloadInfo? downloadInfo = await GetYandexDownloadInfoModernAsync(trackId, cancellationToken);
         if (downloadInfo is null)
         {
             _logger.LogWarning(
-                "Failed to get download info for track {Id} with encrypted Yandex API.",
+                "Failed to get download info for track {TrackId} with encrypted Yandex API.",
                 trackId
             );
             return null;
@@ -139,7 +139,7 @@ public class YandexDownloadService : BaseDownloadService
         Stream? downloadStream = await GetDecryptedDownloadStreamModernAsync(downloadInfo!, cancellationToken);
         if (downloadStream is null)
         {
-            _logger.LogWarning("Failed to get decrypted stream for track {Id}", trackId);
+            _logger.LogWarning("Failed to get decrypted stream for track {TrackId}", trackId);
             return null;
         }
 
@@ -181,7 +181,7 @@ public class YandexDownloadService : BaseDownloadService
         if (!downloadInfoResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Yandex API returned status code {Code} for track {Id} download info request {url}.",
+                "Yandex API returned status code {StatusCode} for track {TrackId} download info request {Url}.",
                 downloadInfoResponse.StatusCode, trackId, url
             );
             return null;
@@ -190,14 +190,14 @@ public class YandexDownloadService : BaseDownloadService
         string downloadInfoString = await downloadInfoResponse.Content.ReadAsStringAsync(cancellationToken);
         if (string.IsNullOrEmpty(downloadInfoString))
         {
-            _logger.LogWarning("Yandex API returned empty response for track {id} download info request", trackId);
+            _logger.LogWarning("Yandex API returned empty response for track {TrackId} download info request", trackId);
             return null;
         }
 
         var downloadInfoWrapper = JsonSerializer.Deserialize<YandexResponse<YandexDownloadInfoWrapper>>(downloadInfoString);
         if(downloadInfoWrapper is null)
         {
-            _logger.LogWarning("Unable to parse Yandex API response for track {id} download info.", trackId);
+            _logger.LogWarning("Unable to parse Yandex API response for track {TrackId} download info.", trackId);
             return null;
         }
 
@@ -217,7 +217,7 @@ public class YandexDownloadService : BaseDownloadService
         if (apiErrorCode is not null)
         {
             _logger.LogWarning(
-                "Yandex API returned Error '{Code}' with message '{Message}' for track {id} download info request.",
+                "Yandex API returned Error '{ErrorCode}' with message '{ErrorMessage}' for track {TrackId} download info request.",
                 apiErrorCode, apiErrorMessage, trackId
             );
             return null;
@@ -251,7 +251,7 @@ public class YandexDownloadService : BaseDownloadService
             }
 
             _logger.LogWarning(
-                "Yandex API returned status code {Code} for encrypted track download request",
+                "Yandex API returned status code {StatusCode} for encrypted track download request",
                 response.StatusCode
             );
         }
@@ -271,14 +271,14 @@ public class YandexDownloadService : BaseDownloadService
         YandexDownloadOptionLegacy? downloadOption = await GetDownloadOptionLegacyAsync(trackId, cancellationToken);
         if (downloadOption is null)
         {
-            _logger.LogWarning("Failed to get download option for track {id}", trackId);
+            _logger.LogWarning("Failed to get download option for track {TrackId}", trackId);
             return null;
         }
 
         string? directUrl = await GetDirectDownloadUrlLegacyAsync(downloadOption, cancellationToken);
         if (directUrl is null)
         {
-            _logger.LogWarning("Failed to get direct download URL for track {id}", trackId);
+            _logger.LogWarning("Failed to get direct download URL for track {TrackId}", trackId);
             return null;
         }
         
@@ -287,7 +287,7 @@ public class YandexDownloadService : BaseDownloadService
         if (!downloadResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Yandex API returned status code {code} for track {id} download request",
+                "Yandex API returned status code {StatusCode} for track {TrackId} download request",
                 downloadResponse.StatusCode, trackId
             );
             return null;
@@ -311,7 +311,7 @@ public class YandexDownloadService : BaseDownloadService
         if (!downloadOptionsResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Yandex API returned status code {Code} for track {Id} download options.",
+                "Yandex API returned status code {StatusCode} for track {TrackId} download options.",
                 downloadOptionsResponse.StatusCode, trackId
             );
             return null;
@@ -320,14 +320,14 @@ public class YandexDownloadService : BaseDownloadService
         var downloadOptions = JsonSerializer.Deserialize<YandexResponse<List<YandexDownloadOptionLegacy>>>(downloadOptionsString);
         if (downloadOptions is null)
         {
-            _logger.LogWarning("Couldn't parse Yandex API response for track {Id} download options.", trackId);
+            _logger.LogWarning("Couldn't parse Yandex API response for track {TrackId} download options.", trackId);
             return null;
         }
         if (downloadOptions.Error is not null)
         {
             var error = downloadOptions.Error;
             _logger.LogWarning(
-                "Yandex API returned an error ({Name}: {Message}) for track {Id} download options.",
+                "Yandex API returned an error ({ErrorName}: {ErrorMessage}) for track {TrackId} download options.",
                 error.Name, error.Message, trackId
             );
             return null;
@@ -336,7 +336,7 @@ public class YandexDownloadService : BaseDownloadService
         List<YandexDownloadOptionLegacy> options = downloadOptions.Result!;
         if (options.Count == 0)
         {
-            _logger.LogWarning("Yandex API returned no download options for track {Id}.", trackId);
+            _logger.LogWarning("Yandex API returned no download options for track {TrackId}.", trackId);
             return null;
         }
 
@@ -357,7 +357,7 @@ public class YandexDownloadService : BaseDownloadService
         if (!downloadInfoResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "Yandex Legacy API returned status code {code} for track download info request {url}.",
+                "Yandex Legacy API returned status code {StatusCode} for track download info request {Url}.",
                 downloadInfoResponse.StatusCode, downloadOption.Url
             );
             return null;

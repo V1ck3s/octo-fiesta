@@ -136,7 +136,7 @@ public class YandexMetadataService : IMusicMetadataService
         if (yandexTrack.Error is not null)
         {
             _logger.LogWarning(
-                "Yandex API returned an error ({Error}) for track {Id}",
+                "Yandex API returned an error ({Error}) for track {TrackId}",
                 yandexTrack.Error, externalId
             );
             return null;
@@ -158,7 +158,7 @@ public class YandexMetadataService : IMusicMetadataService
         if (yandexAlbum.Error is not null)
         {
             _logger.LogWarning(
-                "Yandex API returned an error ({Error}) for album {Id}",
+                "Yandex API returned an error ({Error}) for album {AlbumId}",
                 yandexAlbum.Error, externalId
             );
             return null;
@@ -180,7 +180,7 @@ public class YandexMetadataService : IMusicMetadataService
         if (yandexArtist.Error is not null)
         {
             _logger.LogWarning(
-                "Yandex API returned an error ({Error}) for artist {Id}",
+                "Yandex API returned an error ({Error}) for artist {ArtistId}",
                 yandexArtist.Error, externalId
             );
             return null;
@@ -203,7 +203,7 @@ public class YandexMetadataService : IMusicMetadataService
         if (yandexAlbumIds is null)
         {
             _logger.LogWarning(
-                "Yandex API returned invalid response for Artist {Id} Albums", externalId
+                "Yandex API returned invalid response for Artist {ArtistId} Albums", externalId
             );
             return [];
         }
@@ -466,7 +466,7 @@ public class YandexMetadataService : IMusicMetadataService
             var response = await _httpClient.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Yandex API returned {StatusCode} for {Url}", response.StatusCode, url);
+                _logger.LogWarning("Yandex API returned status code {StatausCode} for {Url}", response.StatusCode, url);
                 return null;
             }
             
@@ -486,7 +486,7 @@ public class YandexMetadataService : IMusicMetadataService
             if (parsedResponse.Error is not null)
             {
                 _logger.LogWarning(
-                    "Yandex API returned an error ({Name} {Message}) for {Url}",
+                    "Yandex API returned an error ({ErrorName} {ErrorMessage}) for {Url}",
                     parsedResponse.Error.Name, parsedResponse.Error.Message, url
                 );
                 return null;
