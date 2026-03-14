@@ -530,7 +530,7 @@ public class YandexMetadataService : IMusicMetadataService
             if (searchResults is null) break;
 
             YandexSearchBestResult? bestResult = searchResults.Best;
-            if (itemsType == YandexSearchItemsType.ALL && pageNumber == 1 && bestResult is not null)
+            if (itemsType == YandexSearchItemsType.ALL && pageNumber == 0 && bestResult is not null)
             {
                 if (bestResult.Type == "track" && bestResult.Track is not null && IsTrackAvailable(bestResult.Track))
                 {
