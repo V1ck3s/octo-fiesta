@@ -755,7 +755,7 @@ public class YandexDownloadServiceTests : IDisposable
     {
         // Arrange
         var service = CreateService(oAuthToken: "test-token");
-        var externalAlbumId = "ext-deezer-album-60253780838";
+        var albumId = "ext-deezer-album-60253780838";
         // The method is protected, so we use Reflection to test it
         var extractExternalIdFromAlbumIdMethod = service.GetType().GetMethod(
             "ExtractExternalIdFromAlbumId",
@@ -764,7 +764,7 @@ public class YandexDownloadServiceTests : IDisposable
         );
 
         // Act
-        var result = (string?) extractExternalIdFromAlbumIdMethod?.Invoke(service, [externalAlbumId]);
+        var result = (string?) extractExternalIdFromAlbumIdMethod?.Invoke(service, [albumId]);
 
         // Assert
         Assert.Null(result);
