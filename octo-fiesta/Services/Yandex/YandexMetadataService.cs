@@ -582,9 +582,7 @@ public class YandexMetadataService : IMusicMetadataService
         );
         var albums = await Task.WhenAll(tasks);
 
-        return albums
-            .Where(a => a != null)
-            .ToList() as List<Album>;
+        return albums.OfType<Album>().ToList();
     }
 
     /// <summary>
