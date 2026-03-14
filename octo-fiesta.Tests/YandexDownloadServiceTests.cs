@@ -473,6 +473,171 @@ public class YandexDownloadServiceTests : IDisposable
 
     #endregion
 
+    #region DownloadSongAsync Quality Format Tests
+
+    [Fact]
+    public async Task DownloadSongAsync_WithFlacQuality_RequestsFlac()
+    {
+        // Arrange
+        var service = CreateService(
+            oAuthToken: "test-token",
+            quality: "FLAC");
+
+        _metadataServiceMock
+            .Setup(s => s.GetSongAsync("yandex", "123456"))
+            .ReturnsAsync(new Song
+            {
+                Id = "ext-yandex-song-123456",
+                Title = "Test Song",
+                IsLocal = false,
+                ExternalProvider = "yandex",
+                ExternalId = "123456"
+            });
+
+        // Act
+        try
+        {
+            await service.DownloadSongAsync("yandex", "123456");
+        }
+        catch (System.Exception) {}
+
+        // Assert
+        // Requests flac
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.AtLeastOnce(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && req.RequestUri.Query.Contains("codecs=flac")),
+                ItExpr.IsAny<CancellationToken>()
+            );
+        // Doesn't request other formats
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.Never(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && (
+                        req.RequestUri.Query.Contains("mp3")
+                        || req.RequestUri.Query.Contains("aac-mp4")
+                    )
+                ),
+                ItExpr.IsAny<CancellationToken>()
+            );
+    }
+
+    [Fact]
+    public async Task DownloadSongAsync_WithAac64Quality_RequestsHeAac()
+    {
+        // Arrange
+        var service = CreateService(
+            oAuthToken: "test-token",
+            quality: "AAC_64");
+
+        _metadataServiceMock
+            .Setup(s => s.GetSongAsync("yandex", "123456"))
+            .ReturnsAsync(new Song
+            {
+                Id = "ext-yandex-song-123456",
+                Title = "Test Song",
+                IsLocal = false,
+                ExternalProvider = "yandex",
+                ExternalId = "123456"
+            });
+
+        // Act
+        try
+        {
+            await service.DownloadSongAsync("yandex", "123456");
+        }
+        catch (System.Exception) {}
+
+        // Assert
+        // Requests he-aac
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.AtLeastOnce(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && req.RequestUri.Query.Contains("codecs=he-aac")),
+                ItExpr.IsAny<CancellationToken>()
+            );
+        // Doesn't request other formats
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.Never(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && (
+                        req.RequestUri.Query.Contains("mp3")
+                        || req.RequestUri.Query.Contains("flac")
+                    )
+                ),
+                ItExpr.IsAny<CancellationToken>()
+            );
+    }
+
+
+    [Fact]
+    public async Task DownloadSongAsync_WithNullQuality_RequestsFlac()
+    {
+        // Arrange
+        var service = CreateService(
+            oAuthToken: "test-token",
+            quality: null);
+
+        _metadataServiceMock
+            .Setup(s => s.GetSongAsync("yandex", "123456"))
+            .ReturnsAsync(new Song
+            {
+                Id = "ext-yandex-song-123456",
+                Title = "Test Song",
+                IsLocal = false,
+                ExternalProvider = "yandex",
+                ExternalId = "123456"
+            });
+
+        // Act
+        try
+        {
+            await service.DownloadSongAsync("yandex", "123456");
+        }
+        catch (System.Exception) {}
+
+        // Assert
+        // Requests flac
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.AtLeastOnce(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && req.RequestUri.Query.Contains("codecs=flac")),
+                ItExpr.IsAny<CancellationToken>()
+            );
+        // Doesn't request other formats
+        _httpMessageHandlerMock.Protected()
+            .Verify(
+                "SendAsync",
+                Times.Never(),
+                ItExpr.Is<HttpRequestMessage>(req =>
+                    req.RequestUri != null
+                    && (
+                        req.RequestUri.Query.Contains("mp3")
+                        || req.RequestUri.Query.Contains("aac-mp4")
+                    )
+                ),
+                ItExpr.IsAny<CancellationToken>()
+            );
+    }
+
+    #endregion
+
+
     #region GetDownloadStatus Tests
 
     [Fact]
@@ -525,11 +690,40 @@ public class YandexDownloadServiceTests : IDisposable
             oAuthToken: "test-token", 
             downloadMode: DownloadMode.Album);
 
-        // Act - Should not throw (fire-and-forget)
-        service.DownloadRemainingAlbumTracksInBackground("qobuz", "123456", "111");
+        // Act
+        service.DownloadRemainingAlbumTracksInBackground(
+            "yandex",
+            "123456",
+            "111"
+        );
+
+        // Assert - Verify with timeout that background task performs a call to GetAlbumAsync
+        // Meaning that background task successfully started
+        int millisecondsTimeout = 2000;
+        int waited = 0;
+        bool expectationMet = false;
+        MockException? exception = null;
+
+        while (waited < millisecondsTimeout && !expectationMet)
+        {
+            try
+            {
+                _metadataServiceMock.Verify(mock => mock.GetAlbumAsync("yandex", "123456"), Times.AtLeastOnce);
+                expectationMet = true;
+            }
+            catch (MockException ex)
+            {
+                exception = ex;
+            }
+            waited += 50;
+            Thread.Sleep(50);
+        }
+
+        if (!expectationMet)
+        {
+            throw exception!;
+        }
         
-        // Assert - Just verify it doesn't throw, actual download is async
-        Assert.True(true);
     }
 
     #endregion
@@ -541,64 +735,41 @@ public class YandexDownloadServiceTests : IDisposable
     {
         // Arrange
         var service = CreateService(oAuthToken: "test-token");
-        var albumId = "ext-yandex-album-0060253780838";
+        var albumId = "ext-yandex-album-60253780838";
+        // The method is protected, so we use Reflection to test it
+        var extractExternalIdFromAlbumIdMethod = service.GetType().GetMethod(
+            "ExtractExternalIdFromAlbumId",
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic
+        );
 
         // Act
-        // We need to use reflection to test this protected method, or test it indirectly
-        // For now, we'll test it indirectly through DownloadRemainingAlbumTracksInBackground
-        _metadataServiceMock
-            .Setup(s => s.GetAlbumAsync("yandex", "0060253780838"))
-            .ReturnsAsync(new Album
-            {
-                Id = albumId,
-                Title = "Test Album",
-                Songs = new List<Song>()
-            });
+        var externalAlbumId = (string?) extractExternalIdFromAlbumIdMethod?.Invoke(service, [albumId]);
 
-        // Assert - If this doesn't throw, the extraction worked
-        service.DownloadRemainingAlbumTracksInBackground("yandex", albumId, "track-1");
-        Assert.True(true);
+        // Assert
+        Assert.Equal("60253780838", externalAlbumId);
+    }
+
+    [Fact]
+    public void ExtractExternalIdFromAlbumId_WithInvalidYandexAlbumId_ReturnsNull()
+    {
+        // Arrange
+        var service = CreateService(oAuthToken: "test-token");
+        var externalAlbumId = "ext-deezer-album-60253780838";
+        // The method is protected, so we use Reflection to test it
+        var extractExternalIdFromAlbumIdMethod = service.GetType().GetMethod(
+            "ExtractExternalIdFromAlbumId",
+            System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic
+        );
+
+        // Act
+        var result = (string?) extractExternalIdFromAlbumIdMethod?.Invoke(service, [externalAlbumId]);
+
+        // Assert
+        Assert.Null(result);
     }
 
     #endregion
 
-    #region Quality Format Tests
-
-    [Fact]
-    public async Task CreateService_WithFlacQuality_UsesCorrectFormat()
-    {
-        // Arrange & Act
-        var service = CreateService(
-            oAuthToken: "test-token", 
-            quality: "FLAC");
-
-        // Assert - Service created successfully with quality setting
-        Assert.NotNull(service);
-    }
-
-    [Fact]
-    public async Task CreateService_WithMp3Quality_UsesCorrectFormat()
-    {
-        // Arrange & Act
-        var service = CreateService(
-            oAuthToken: "test-token", 
-            quality: "MP3_320");
-
-        // Assert - Service created successfully with quality setting
-        Assert.NotNull(service);
-    }
-
-    [Fact]
-    public async Task CreateService_WithNullQuality_UsesDefaultFormat()
-    {
-        // Arrange & Act
-        var service = CreateService(
-            oAuthToken: "test-token", 
-            quality: null);
-
-        // Assert - Service created successfully with default quality
-        Assert.NotNull(service);
-    }
-
-    #endregion
 }

@@ -266,7 +266,7 @@ public class YandexDownloadService : BaseDownloadService
 
     private async Task<DownloadResult?> DownloadTrackLegacyAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-         _logger.LogInformation("Downloading track {} with legacy Yandex API", trackId);
+         _logger.LogInformation("Downloading track {TrackId} with legacy Yandex API", trackId);
 
         YandexDownloadOptionLegacy? downloadOption = await GetDownloadOptionLegacyAsync(trackId, cancellationToken);
         if (downloadOption is null)
