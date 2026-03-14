@@ -32,7 +32,7 @@ public class YandexMetadataService : IMusicMetadataService
     )
     {
         _logger = logger;
-        _includeUnavailable = yandexSettings.Value.IncludeUnavilable;
+        _includeUnavailable = yandexSettings.Value.IncludeUnavailable;
         _httpClient = httpClientFactory.CreateClient("Yandex");
     }
     

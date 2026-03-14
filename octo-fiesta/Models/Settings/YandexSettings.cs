@@ -24,7 +24,7 @@ public class YandexSettings
     /// Include unavailable songs in albums and search results.
     /// Default: false
     /// </summary>
-    public bool IncludeUnavilable { get; set; } = false;
+    public bool IncludeUnavailable { get; set; } = false;
 
     /// <summary>
     /// Language used by Yandex API. Some tracks, albums and playlists

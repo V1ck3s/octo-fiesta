@@ -60,7 +60,7 @@ public class YandexDownloadServiceTests : IDisposable
     private YandexDownloadService CreateService(
         string? oAuthToken = null, 
         string? quality = null,
-        bool includeUnavilable = false,
+        bool IncludeUnavailable = false,
         string language = "ru",
         DownloadMode downloadMode = DownloadMode.Track)
     {
@@ -80,7 +80,7 @@ public class YandexDownloadServiceTests : IDisposable
         {
             OAuthToken = oAuthToken,
             Quality = quality,
-            IncludeUnavilable = includeUnavilable,
+            IncludeUnavailable = IncludeUnavailable,
             Language = language,
         });
 

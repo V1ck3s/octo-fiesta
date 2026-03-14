@@ -80,6 +80,6 @@ services:
       # This setting allows to show such tracks in search results, playlists and albums
       # Default: false
       # Available: true, false
-      - IncludeUnavilable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS}
+      - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

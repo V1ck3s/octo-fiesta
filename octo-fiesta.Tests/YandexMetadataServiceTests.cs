@@ -40,7 +40,7 @@ public class YandexMetadataServiceTests
         {
             OAuthToken = "oAuthToken",
             Quality = "AAC_256",
-            IncludeUnavilable = false,
+            IncludeUnavailable = false,
             Language = "ru",
         });
         
