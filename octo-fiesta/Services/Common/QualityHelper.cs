@@ -11,19 +11,26 @@ public static class QualityHelper
     private static readonly Dictionary<string, int> QualityLevels = new(StringComparer.OrdinalIgnoreCase)
     {
         // Lossy qualities (from lowest to highest)
-        { "AAC_96", 0 },    // Tidal LOW - 96kbps AAC
-        { "MP3_128", 1 },
-        { "AAC_320", 2 },   // Tidal HIGH - 320kbps AAC
-        { "MP3_320", 2 },
+        { "AAC_64", 0 },
+        { "AAC_96", 1 },    // Tidal LOW - 96kbps AAC
+        { "MP3_128", 2 },
+        { "MP3_192", 3 },
+        { "AAC_192", 4 },
+        { "AAC_256", 5 },
+        { "AAC_320", 6 },   // Tidal HIGH - 320kbps AAC
+        { "MP3_320", 6 },
         
         // Lossless qualities (Qobuz/Tidal variants)
-        { "FLAC", 3 },
-        { "FLAC_16", 3 },
-        { "FLAC_24", 4 },   // Tidal HI_RES_LOSSLESS
-        { "FLAC_24_LOW", 4 },
-        { "FLAC_24_HIGH", 5 }
+        { "FLAC", 7 },
+        { "FLAC_16", 7 },
+        { "FLAC_24", 8 },   // Tidal HI_RES_LOSSLESS
+        { "FLAC_24_LOW", 8 },
+        { "FLAC_24_HIGH", 9 }
     };
-    
+
+
+
+
     /// <summary>
     /// Determines if a track should be upgraded based on stored quality vs target quality
     /// </summary>

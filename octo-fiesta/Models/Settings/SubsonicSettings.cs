@@ -75,7 +75,12 @@ public enum MusicService
     /// <summary>
     /// SquidWTF music service (supports Qobuz and Tidal backends)
     /// </summary>
-    SquidWTF
+    SquidWTF,
+
+    /// <summary>
+    /// Yandex music service
+    /// </summary>
+    Yandex
 }
 
 public class SubsonicSettings

@@ -38,9 +38,20 @@ public class LocalLibraryServiceTests : IDisposable
             .Setup<Task<HttpResponseMessage>>("SendAsync", 
                 ItExpr.IsAny<HttpRequestMessage>(), 
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
-                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":false,\"count\":100}}}")
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":false,\"count\":100}}}")
+                };
             });
         
         var httpClient = new HttpClient(_mockHandler.Object);
@@ -183,13 +194,13 @@ public class LocalLibraryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task TriggerLibraryScanAsync_ReturnsTrue()
+    public async Task TriggerLibraryScanAsync_WithoutCredentials_ReturnsFalse()
     {
-        // Act
+        // Act - no credentials set, admin check fails
         var result = await _service.TriggerLibraryScanAsync();
 
         // Assert
-        Assert.True(result);
+        Assert.False(result);
     }
 
     [Fact]
@@ -270,15 +281,26 @@ public class LocalLibraryServiceTests : IDisposable
     public async Task TriggerLibraryScanAsync_WithCredentials_IncludesAuthInRequest()
     {
         // Arrange
-        Uri? capturedUri = null;
+        var capturedUris = new List<Uri?>();
         _mockHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
-                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
             });
 
         _service.SetSubsonicCredentials(new Dictionary<string, string>
@@ -293,9 +315,10 @@ public class LocalLibraryServiceTests : IDisposable
         // Act
         await _service.TriggerLibraryScanAsync();
 
-        // Assert
-        Assert.NotNull(capturedUri);
-        var query = capturedUri!.Query;
+        // Assert - should have made 2 requests: getUser + startScan
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        var query = scanUri!.Query;
         Assert.Contains("u=admin", query);
         Assert.Contains("t=abc123", query);
         Assert.Contains("s=xyz789", query);
@@ -304,28 +327,17 @@ public class LocalLibraryServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task TriggerLibraryScanAsync_WithoutCredentials_SendsRequestWithoutAuth()
+    public async Task TriggerLibraryScanAsync_WithoutCredentials_DoesNotSendRequest()
     {
-        // Arrange
-        Uri? capturedUri = null;
-        _mockHandler.Protected()
-            .Setup<Task<HttpResponseMessage>>("SendAsync",
-                ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>())
-            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
-            });
-
         // Act - no credentials set
         await _service.TriggerLibraryScanAsync();
 
-        // Assert
-        Assert.NotNull(capturedUri);
-        var query = capturedUri!.Query;
-        Assert.DoesNotContain("u=", query);
-        Assert.DoesNotContain("t=", query);
+        // Assert - no HTTP request should be made
+        _mockHandler.Protected()
+            .Verify("SendAsync",
+                Times.Never(),
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>());
     }
 
     [Fact]
@@ -354,22 +366,34 @@ public class LocalLibraryServiceTests : IDisposable
         _service.SetSubsonicCredentials(secondParams);
 
         // Assert - verified indirectly: scan should use first user's credentials
-        Uri? capturedUri = null;
+        var capturedUris = new List<Uri?>();
         _mockHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
-                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
             });
 
         await _service.TriggerLibraryScanAsync();
 
-        Assert.NotNull(capturedUri);
-        Assert.Contains("u=firstuser", capturedUri!.Query);
-        Assert.DoesNotContain("seconduser", capturedUri.Query);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=firstuser", scanUri!.Query);
+        Assert.DoesNotContain("seconduser", scanUri.Query);
     }
 
     [Fact]
@@ -396,20 +420,32 @@ public class LocalLibraryServiceTests : IDisposable
         };
         _service.SetSubsonicCredentials(validParams);
 
-        Uri? capturedUri = null;
+        var capturedUris = new List<Uri?>();
         _mockHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUri = req.RequestUri)
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
             {
-                Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
             });
 
         await _service.TriggerLibraryScanAsync();
 
-        Assert.NotNull(capturedUri);
-        Assert.Contains("u=realuser", capturedUri!.Query);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=realuser", scanUri!.Query);
     }
 }

@@ -72,3 +72,10 @@ obj/
 
 # Downloaded music files
 octo-fiesta/downloads/
+
+# macOS
+.DS_Store
+__MACOSX/
+.AppleDouble
+.LSOverride
+Icon[]

@@ -805,6 +805,48 @@ public class SubsonicController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Scrobbles a song. External song IDs are resolved to local Subsonic IDs when possible.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/scrobble")]
+    [Route("rest/scrobble.view")]
+    public async Task<IActionResult> Scrobble()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (parameters.TryGetValue("id", out var id) && !string.IsNullOrWhiteSpace(id))
+        {
+            var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
+            if (isExternal && string.Equals(type, "song", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(provider) && !string.IsNullOrEmpty(externalId))
+            {
+                var localId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider, externalId);
+                if (!string.IsNullOrEmpty(localId))
+                {
+                    _logger.LogInformation("Resolved scrobble ID {ExternalId} to local ID {LocalId}", id, localId);
+                    parameters["id"] = localId;
+                }
+                else
+                {
+                    _logger.LogInformation("Could not resolve external scrobble ID {ExternalId} to a local ID", id);
+                }
+            }
+        }
+
+        try
+        {
+            var result = await _proxyService.RelayAsync("rest/scrobble", parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+    }
+
     private string GetExternalPlaylistIdFromStarParameters(Dictionary<string, string> parameters)
     {
         // Clients may send the playlist ID as "id" or "albumId" depending on the client
