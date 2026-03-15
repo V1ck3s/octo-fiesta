@@ -131,32 +131,40 @@ public class DeezerDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
 
-        // Download the encrypted file
-        var response = await RetryWithBackoffAsync(async () =>
+        try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
-            request.Headers.Add("User-Agent", "Mozilla/5.0");
-            request.Headers.Add("Accept", "*/*");
+            // Download the encrypted file
+            var response = await RetryWithBackoffAsync(async () =>
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
+                request.Headers.Add("User-Agent", "Mozilla/5.0");
+                request.Headers.Add("Accept", "*/*");
+                
+                return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            });
+
+            response.EnsureSuccessStatusCode();
+
+            // Download and decrypt
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var outputFile = IOFile.Create(outputPath);
             
-            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        });
+            // Use the actual track ID from downloadInfo for decryption (may be alternative track)
+            await DecryptAndWriteStreamAsync(responseStream, outputFile, downloadInfo.TrackId, cancellationToken);
+            
+            // Close file before writing metadata
+            await outputFile.DisposeAsync();
+            
+            // Write metadata and cover art
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
 
-        response.EnsureSuccessStatusCode();
-
-        // Download and decrypt
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var outputFile = IOFile.Create(outputPath);
-        
-        // Use the actual track ID from downloadInfo for decryption (may be alternative track)
-        await DecryptAndWriteStreamAsync(responseStream, outputFile, downloadInfo.TrackId, cancellationToken);
-        
-        // Close file before writing metadata
-        await outputFile.DisposeAsync();
-        
-        // Write metadata and cover art
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
-
-        return new DownloadResult(outputPath, downloadedQuality);
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     #endregion

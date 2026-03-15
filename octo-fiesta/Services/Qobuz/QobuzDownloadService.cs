@@ -129,20 +129,28 @@ public class QobuzDownloadService : BaseDownloadService
         
         outputPath = PathHelper.ResolveUniquePath(outputPath);
 
-        // Download the file (Qobuz files are NOT encrypted like Deezer)
-        var response = await _httpClient.GetAsync(downloadInfo.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        try
+        {
+            // Download the file (Qobuz files are NOT encrypted like Deezer)
+            var response = await _httpClient.GetAsync(downloadInfo.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
 
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var outputFile = IOFile.Create(outputPath);
-        
-        await responseStream.CopyToAsync(outputFile, cancellationToken);
-        await outputFile.DisposeAsync();
-        
-        // Write metadata and cover art
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
+            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var outputFile = IOFile.Create(outputPath);
+            
+            await responseStream.CopyToAsync(outputFile, cancellationToken);
+            await outputFile.DisposeAsync();
+            
+            // Write metadata and cover art
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
 
-        return new DownloadResult(outputPath, downloadedQuality);
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     #endregion

@@ -29,6 +29,7 @@ public class SubsonicController : ControllerBase
     private readonly SubsonicProxyService _proxyService;
     private readonly PlaylistSyncService? _playlistSyncService;
     private readonly ILogger<SubsonicController> _logger;
+    private readonly IHostApplicationLifetime _hostApplicationLifetime;
     
     public SubsonicController(
         IOptions<SubsonicSettings> subsonicSettings,
@@ -39,6 +40,7 @@ public class SubsonicController : ControllerBase
         SubsonicResponseBuilder responseBuilder,
         SubsonicModelMapper modelMapper,
         SubsonicProxyService proxyService,
+        IHostApplicationLifetime hostApplicationLifetime,
         ILogger<SubsonicController> logger,
         PlaylistSyncService? playlistSyncService = null)
     {
@@ -50,6 +52,7 @@ public class SubsonicController : ControllerBase
         _responseBuilder = responseBuilder;
         _modelMapper = modelMapper;
         _proxyService = proxyService;
+        _hostApplicationLifetime = hostApplicationLifetime;
         _playlistSyncService = playlistSyncService;
         _logger = logger;
 
@@ -152,9 +155,12 @@ public class SubsonicController : ControllerBase
         // This ensures quality upgrade logic is applied
         try
         {
-            // Intentionally decouple external downloads from RequestAborted.
-            // If the client disconnects, the download should still complete, so we don't end up with broken files (partial downloads, missing metadata, missing cover)
-            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, CancellationToken.None);
+            // Allow cancellation from both client disconnect and application shutdown
+            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                HttpContext.RequestAborted,
+                _hostApplicationLifetime.ApplicationStopping);
+
+            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, cancellationTokenSource.Token);
             return File(downloadStream, "audio/mpeg", enableRangeProcessing: true);
         }
         catch (Exception ex)
