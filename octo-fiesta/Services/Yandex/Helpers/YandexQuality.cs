@@ -88,13 +88,13 @@ public static class YandexQuality
 
     public static string CodecToExtension(string codec)
     {
-        codec = codec.Trim().ToLowerInvariant();
-        if (codec == "mp3") return ".mp3";
-        
-        string result = codec.StartsWith("flac") ? ".flac" : ".aac";
-        if (codec.EndsWith("mp4")) result += ".m4a";
-        
-        return result;
+        return codec.Trim().ToLowerInvariant() switch
+        {
+            "flac" => ".flac",
+            "mp3" => ".mp3",
+            "aac" or "he-aac" => ".aac",
+            _ => ".m4a"
+        };
     }
 
 }
