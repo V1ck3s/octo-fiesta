@@ -30,6 +30,9 @@ public class LocalLibraryService : ILocalLibraryService
     
     // Stored Subsonic auth parameters for server-to-server calls
     private Dictionary<string, string>? _subsonicCredentials;
+    
+    // Whether the captured user has admin rights (null = not checked yet)
+    private bool? _userIsAdmin;
 
     public LocalLibraryService(
         IConfiguration configuration,
@@ -307,6 +310,44 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         await File.WriteAllTextAsync(_mappingFilePath, json);
     }
 
+    private async Task<bool> CheckUserIsAdminAsync()
+    {
+        try
+        {
+            var authQuery = BuildAuthQuery();
+            if (string.IsNullOrEmpty(authQuery) || _subsonicCredentials == null || !_subsonicCredentials.TryGetValue("u", out var username))
+            {
+                return false;
+            }
+            
+            var url = $"{_subsonicSettings.Url}/rest/getUser?f=json&username={Uri.EscapeDataString(username)}{authQuery}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (!response.IsSuccessStatusCode) return false;
+            
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+            
+            if (doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) &&
+                subsonicResponse.TryGetProperty("user", out var user) &&
+                user.TryGetProperty("adminRole", out var adminRole))
+            {
+                var isAdmin = adminRole.GetBoolean();
+                if (!isAdmin)
+                {
+                    _logger.LogInformation("Subsonic user '{User}' is not admin, library scan will be skipped", username);
+                }
+                return isAdmin;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to check user admin rights, library scan will be skipped");
+        }
+        
+        return false;
+    }
+
     private string BuildAuthQuery()
     {
         if (_subsonicCredentials == null || _subsonicCredentials.Count == 0)
@@ -343,6 +384,17 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     public async Task<bool> TriggerLibraryScanAsync()
     {
+        // Check admin rights on first call
+        if (_userIsAdmin == null)
+        {
+            _userIsAdmin = await CheckUserIsAdminAsync();
+        }
+        
+        if (_userIsAdmin == false)
+        {
+            return false;
+        }
+        
         // Debounce: avoid triggering too many successive scans
         var now = DateTime.UtcNow;
         if (now - _lastScanTrigger < _scanDebounceInterval)
