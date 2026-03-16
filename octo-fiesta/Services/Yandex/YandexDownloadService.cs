@@ -403,6 +403,7 @@ public class YandexDownloadService : BaseDownloadService
             // Download the file
             await using var outputFile = File.Create(outputPath);
             await stream.CopyToAsync(outputFile, cancellationToken);
+            await outputFile.DisposeAsync();
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
             
             // Write metadata
