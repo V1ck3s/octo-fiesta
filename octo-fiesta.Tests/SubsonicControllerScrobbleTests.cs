@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -72,6 +73,9 @@ public class SubsonicControllerScrobbleTests
         var proxyService = new SubsonicProxyService(
             mockHttpClientFactory.Object, _settings, httpContextAccessor);
 
+        var appLifetimeMock = new Mock<IHostApplicationLifetime>();
+        appLifetimeMock.SetupGet(x => x.ApplicationStopping).Returns(CancellationToken.None);
+
         var controller = new SubsonicController(
             _settings,
             _mockMetadataService.Object,
@@ -81,6 +85,7 @@ public class SubsonicControllerScrobbleTests
             _responseBuilder,
             _modelMapper,
             proxyService,
+            appLifetimeMock.Object,
             _mockLogger.Object,
             playlistSyncService: null);
 

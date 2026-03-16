@@ -398,16 +398,24 @@ public class YandexDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
 
-        // Download the file
-        await using var outputFile = File.Create(outputPath);
-        await stream.CopyToAsync(outputFile, cancellationToken);
-        await outputFile.DisposeAsync();
-        Logger.LogInformation("Downloaded file to: {Path}", outputPath);
-        
-        // Write metadata
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
+        try
+        {
+            // Download the file
+            await using var outputFile = File.Create(outputPath);
+            await stream.CopyToAsync(outputFile, cancellationToken);
+            await outputFile.DisposeAsync();
+            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
+            
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
 
-        return new DownloadResult(outputPath, downloadedQuality);
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     #endregion

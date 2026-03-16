@@ -485,7 +485,14 @@ public abstract class BaseDownloadService : IDownloadService
                     }
                 }
             }
-            Logger.LogError(ex, "Download failed for {SongId}", songId);
+            if (ex is OperationCanceledException)
+            {
+                Logger.LogInformation("Download canceled for {SongId}: {Message}", songId, ex.Message);
+            }
+            else
+            {
+                Logger.LogError(ex, "Download failed for {SongId}", songId);
+            }
             throw;
         }
         finally
@@ -759,6 +766,27 @@ public abstract class BaseDownloadService : IDownloadService
         {
             Logger.LogError(ex, "Failed to create directory: {Path}", path);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Deletes an incomplete file after canceled/failed downloads.
+    /// </summary>
+    protected void TryDeleteIncompleteFile(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !IOFile.Exists(filePath))
+        {
+            return;
+        }
+
+        try
+        {
+            IOFile.Delete(filePath);
+            Logger.LogInformation("Deleted incomplete file: {Path}", filePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to delete incomplete file: {Path}", filePath);
         }
     }
 

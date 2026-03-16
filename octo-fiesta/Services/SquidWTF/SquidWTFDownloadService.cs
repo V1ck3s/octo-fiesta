@@ -172,13 +172,21 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
         
-        // Download the file (no decryption needed)
-        await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-        
-        // Write metadata
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
-        
-        return new DownloadResult(outputPath, downloadedQuality);
+        try
+        {
+            // Download the file (no decryption needed)
+            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
+            
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     private string GetQobuzQuality()
@@ -234,13 +242,21 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
         
-        // Download the file (no decryption needed)
-        await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-        
-        // Write metadata
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
-        
-        return new DownloadResult(outputPath, downloadedQuality);
+        try
+        {
+            // Download the file (no decryption needed)
+            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
+            
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     /// <summary>
