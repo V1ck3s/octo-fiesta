@@ -29,6 +29,7 @@ public class SubsonicController : ControllerBase
     private readonly SubsonicProxyService _proxyService;
     private readonly PlaylistSyncService? _playlistSyncService;
     private readonly ILogger<SubsonicController> _logger;
+    private readonly IHostApplicationLifetime _hostApplicationLifetime;
     
     public SubsonicController(
         IOptions<SubsonicSettings> subsonicSettings,
@@ -39,6 +40,7 @@ public class SubsonicController : ControllerBase
         SubsonicResponseBuilder responseBuilder,
         SubsonicModelMapper modelMapper,
         SubsonicProxyService proxyService,
+        IHostApplicationLifetime hostApplicationLifetime,
         ILogger<SubsonicController> logger,
         PlaylistSyncService? playlistSyncService = null)
     {
@@ -50,6 +52,7 @@ public class SubsonicController : ControllerBase
         _responseBuilder = responseBuilder;
         _modelMapper = modelMapper;
         _proxyService = proxyService;
+        _hostApplicationLifetime = hostApplicationLifetime;
         _playlistSyncService = playlistSyncService;
         _logger = logger;
 
@@ -152,7 +155,12 @@ public class SubsonicController : ControllerBase
         // This ensures quality upgrade logic is applied
         try
         {
-            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, HttpContext.RequestAborted);
+            // Allow cancellation from both client disconnect and application shutdown
+            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                HttpContext.RequestAborted,
+                _hostApplicationLifetime.ApplicationStopping);
+
+            var downloadStream = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, cancellationTokenSource.Token);
             return File(downloadStream, "audio/mpeg", enableRangeProcessing: true);
         }
         catch (Exception ex)
@@ -305,19 +313,21 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        var localAlbumNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var localAlbumNames = new HashSet<string>();
         foreach (var album in localAlbums)
         {
             if (album is Dictionary<string, object> dict && dict.TryGetValue("name", out var nameObj))
             {
-                localAlbumNames.Add(nameObj?.ToString() ?? "");
+                var normalizedName = StringNormalizer.CreateComparisonKey(nameObj?.ToString() ?? "");
+                localAlbumNames.Add(normalizedName);
             }
         }
 
         var mergedAlbums = localAlbums.ToList();
         foreach (var externalAlbum in externalAlbums)
         {
-            if (!localAlbumNames.Contains(externalAlbum.Title))
+            var normalizedExternalName = StringNormalizer.CreateComparisonKey(externalAlbum.Title);
+            if (!localAlbumNames.Contains(normalizedExternalName))
             {
                 mergedAlbums.Add(_responseBuilder.ConvertAlbumToJson(externalAlbum));
             }
@@ -482,19 +492,21 @@ public class SubsonicController : ControllerBase
 
         if (externalAlbum != null && externalAlbum.Songs.Count > 0)
         {
-            var localSongTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var localSongTitles = new HashSet<string>();
             foreach (var song in localSongs)
             {
                 if (song is Dictionary<string, object> dict && dict.TryGetValue("title", out var titleObj))
                 {
-                    localSongTitles.Add(titleObj?.ToString() ?? "");
+                    var normalizedTitle = StringNormalizer.CreateComparisonKey(titleObj?.ToString() ?? "");
+                    localSongTitles.Add(normalizedTitle);
                 }
             }
 
             var mergedSongs = localSongs.ToList();
             foreach (var externalSong in externalAlbum.Songs)
             {
-                if (!localSongTitles.Contains(externalSong.Title))
+                var normalizedExternalTitle = StringNormalizer.CreateComparisonKey(externalSong.Title);
+                if (!localSongTitles.Contains(normalizedExternalTitle))
                 {
                     mergedSongs.Add(_responseBuilder.ConvertSongToJson(externalSong));
                 }
@@ -734,7 +746,7 @@ public class SubsonicController : ControllerBase
     #endregion
 
     /// <summary>
-    /// Stars (favorites) an item. For playlists, this triggers a full download.
+    /// Stars (favorites) an item. For external playlists and albums, this triggers a full download.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/star")]
@@ -743,10 +755,9 @@ public class SubsonicController : ControllerBase
     {
         var parameters = await ExtractAllParameters();
         var format = parameters.GetValueOrDefault("f", "xml");
-        
+
         // Check if this is a playlist
-        var playlistId = parameters.GetValueOrDefault("id", "");
-        
+        var playlistId = GetExternalPlaylistIdFromStarParameters(parameters);
         if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
         {
             if (_playlistSyncService == null)
@@ -772,6 +783,14 @@ public class SubsonicController : ControllerBase
             // Return success response immediately
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
+
+        var (isExternalAlbum, albumProvider, albumExternalId, rawAlbumId) = GetExternalAlbumFromStarParameters(parameters);
+        if (isExternalAlbum)
+        {
+            _logger.LogInformation("Starring external album {AlbumId}, triggering full download", rawAlbumId);
+            _downloadService.DownloadFullAlbumInBackground(albumProvider!, albumExternalId!);
+            return _responseBuilder.CreateResponse(format, "starred", new { });
+        }
         
         // For non-playlist items, relay to real Subsonic server
         try
@@ -784,6 +803,110 @@ public class SubsonicController : ControllerBase
         {
             return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Scrobbles a song. External song IDs are resolved to local Subsonic IDs when possible.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/scrobble")]
+    [Route("rest/scrobble.view")]
+    public async Task<IActionResult> Scrobble()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (parameters.TryGetValue("id", out var id) && !string.IsNullOrWhiteSpace(id))
+        {
+            var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
+            if (isExternal && string.Equals(type, "song", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(provider) && !string.IsNullOrEmpty(externalId))
+            {
+                var localId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider, externalId);
+                if (!string.IsNullOrEmpty(localId))
+                {
+                    _logger.LogInformation("Resolved scrobble ID {ExternalId} to local ID {LocalId}", id, localId);
+                    parameters["id"] = localId;
+                }
+                else
+                {
+                    _logger.LogInformation("Could not resolve external scrobble ID {ExternalId} to a local ID", id);
+                }
+            }
+        }
+
+        try
+        {
+            var result = await _proxyService.RelayAsync("rest/scrobble", parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+    }
+
+    private string GetExternalPlaylistIdFromStarParameters(Dictionary<string, string> parameters)
+    {
+        // Clients may send the playlist ID as "id" or "albumId" depending on the client
+        // (playlists are presented as albums, so most clients use "albumId")
+        var id = parameters.GetValueOrDefault("id", "");
+        if (!string.IsNullOrEmpty(id) && PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            return id;
+        }
+
+        var albumId = parameters.GetValueOrDefault("albumId", "");
+        if (!string.IsNullOrEmpty(albumId) && PlaylistIdHelper.IsExternalPlaylist(albumId))
+        {
+            return albumId;
+        }
+
+        return string.Empty;
+    }
+
+    private (bool IsExternalAlbum, string? Provider, string? ExternalId, string RawAlbumId) GetExternalAlbumFromStarParameters(Dictionary<string, string> parameters)
+    {
+        var id = parameters.GetValueOrDefault("id", "");
+        if (TryParseExternalAlbumId(id, out var provider, out var externalId))
+        {
+            return (true, provider, externalId, id);
+        }
+
+        var albumId = parameters.GetValueOrDefault("albumId", "");
+        if (TryParseExternalAlbumId(albumId, out provider, out externalId))
+        {
+            return (true, provider, externalId, albumId);
+        }
+
+        return (false, null, null, string.Empty);
+    }
+
+    private bool TryParseExternalAlbumId(string id, out string? provider, out string? externalId)
+    {
+        provider = null;
+        externalId = null;
+
+        if (string.IsNullOrWhiteSpace(id) || PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            return false;
+        }
+
+        var (isExternal, parsedProvider, type, parsedExternalId) = _localLibraryService.ParseExternalId(id);
+        if (!isExternal || !string.Equals(type, "album", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(parsedProvider) || string.IsNullOrEmpty(parsedExternalId))
+        {
+            return false;
+        }
+
+        provider = parsedProvider;
+        externalId = parsedExternalId;
+        return true;
     }
 
     // Generic endpoint to handle all subsonic API calls

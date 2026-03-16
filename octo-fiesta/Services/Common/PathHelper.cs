@@ -1,3 +1,4 @@
+using octo_fiesta.Models.Domain;
 using IOFile = System.IO.File;
 
 namespace octo_fiesta.Services.Common;
@@ -35,7 +36,13 @@ public static class PathHelper
     }
     
     /// <summary>
+    /// Default folder template matching the legacy Artist/Album/Track structure.
+    /// </summary>
+    public const string DefaultTemplate = "{artist}/{album}/{track} - {title}";
+
+    /// <summary>
     /// Builds the output path for a downloaded track following the Artist/Album/Track structure.
+    /// Legacy overload — delegates to the template-based version with the default template.
     /// </summary>
     /// <param name="downloadPath">Base download directory path.</param>
     /// <param name="artist">Artist name (will be sanitized).</param>
@@ -46,17 +53,94 @@ public static class PathHelper
     /// <returns>Full path for the track file.</returns>
     public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension)
     {
-        var safeArtist = SanitizeFolderName(artist);
-        var safeAlbum = SanitizeFolderName(album);
-        var safeTitle = SanitizeFileName(title);
-        
-        var artistFolder = Path.Combine(downloadPath, safeArtist);
-        var albumFolder = Path.Combine(artistFolder, safeAlbum);
-        
-        var trackPrefix = trackNumber.HasValue ? $"{trackNumber:D2} - " : "";
-        var fileName = $"{trackPrefix}{safeTitle}{extension}";
-        
-        return Path.Combine(albumFolder, fileName);
+        var song = new Song
+        {
+            Title = title,
+            Artist = artist,
+            Album = album,
+            Track = trackNumber
+        };
+        return BuildTrackPath(downloadPath, song, extension, DefaultTemplate, null);
+    }
+
+    /// <summary>
+    /// Builds the output path for a downloaded track using a configurable folder template.
+    /// The template is split on '/' — segments before the last become folders (sanitized via
+    /// <see cref="SanitizeFolderName"/>), the last segment becomes the file name (sanitized via
+    /// <see cref="SanitizeFileName"/>). The file extension is appended automatically.
+    /// </summary>
+    /// <param name="downloadPath">Base download directory path.</param>
+    /// <param name="song">Song metadata providing all placeholder values.</param>
+    /// <param name="extension">File extension including the dot (e.g., ".flac", ".mp3").</param>
+    /// <param name="template">Folder template with {placeholder} tokens. Uses '/' to separate folder levels.</param>
+    /// <param name="downloadedQuality">Quality string for {quality} placeholder (e.g., "FLAC", "MP3_320").</param>
+    /// <returns>Full path for the track file.</returns>
+    public static string BuildTrackPath(string downloadPath, Song song, string extension, string template, string? downloadedQuality)
+    {
+        var artistForPath = song.AlbumArtist ?? song.Artist;
+
+        var segments = template.Split('/');
+        var result = downloadPath;
+
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var segment = ReplacePlaceholders(segments[i], song, artistForPath, downloadedQuality);
+            var isFileName = i == segments.Length - 1;
+
+            if (isFileName)
+            {
+                var safeFileName = SanitizeFileName(segment);
+                result = Path.Combine(result, $"{safeFileName}{extension}");
+            }
+            else
+            {
+                var safeFolder = SanitizeFolderName(segment);
+                result = Path.Combine(result, safeFolder);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces template placeholders with actual metadata values.
+    /// </summary>
+    internal static string ReplacePlaceholders(string segment, Song song, string artistForPath, string? downloadedQuality)
+    {
+        var result = segment
+            .Replace("{artist}", artistForPath)
+            .Replace("{album}", song.Album)
+            .Replace("{title}", song.Title);
+
+        // {track} — zero-padded track number, empty string if null
+        var trackValue = song.Track.HasValue ? $"{song.Track.Value:D2}" : "";
+        result = result.Replace("{track}", trackValue);
+
+        // {disc} — disc number, "Unknown" if null
+        var discValue = song.DiscNumber.HasValue ? song.DiscNumber.Value.ToString() : "Unknown";
+        result = result.Replace("{disc}", discValue);
+
+        // {year} — year, "Unknown" if null
+        var yearValue = song.Year.HasValue ? song.Year.Value.ToString() : "Unknown";
+        result = result.Replace("{year}", yearValue);
+
+        // {genre} — genre, "Unknown" if null/empty
+        var genreValue = string.IsNullOrWhiteSpace(song.Genre) ? "Unknown" : song.Genre;
+        result = result.Replace("{genre}", genreValue);
+
+        // {quality} — downloaded quality, "Unknown" if null/empty
+        var qualityValue = string.IsNullOrWhiteSpace(downloadedQuality) ? "Unknown" : downloadedQuality;
+        result = result.Replace("{quality}", qualityValue);
+
+        // Clean up artifacts from empty placeholders:
+        // If {track} was empty, we might have leftover " - " at the start of the segment
+        // e.g., template "{track} - {title}" with no track → " - My Song" → "My Song"
+        if (!song.Track.HasValue)
+        {
+            result = result.TrimStart(' ', '-').TrimStart();
+        }
+
+        return result;
     }
 
     /// <summary>

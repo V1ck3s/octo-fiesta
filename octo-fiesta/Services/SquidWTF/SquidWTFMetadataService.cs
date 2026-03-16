@@ -390,6 +390,9 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 song.Album = album.Title;
                 song.AlbumId = album.Id;
                 song.AlbumArtist = album.Artist;
+                song.Year ??= album.Year;
+                song.Genre ??= album.Genre;
+                song.TotalTracks ??= album.SongCount;
                 
                 // Use album cover for tracks if track doesn't have one (common for tracks from /api/get-album)
                 if (string.IsNullOrEmpty(song.CoverArtUrl))
@@ -599,6 +602,9 @@ public class SquidWTFMetadataService : IMusicMetadataService
                     song.Album = album.Title;
                     song.AlbumId = album.Id;
                     song.AlbumArtist = album.Artist;
+                    song.Year ??= album.Year;
+                    song.Genre ??= album.Genre;
+                    song.TotalTracks ??= album.SongCount;
                     // Use album cover for tracks if track doesn't have one
                     if (string.IsNullOrEmpty(song.CoverArtUrl))
                     {
@@ -636,23 +642,14 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private async Task<List<Album>> GetArtistAlbumsTidalAsync(string artistId)
     {
-        // Search for albums by artist name to get their discography
-        // First get the artist to get their name
-        var artist = await GetArtistTidalAsync(artistId);
-        if (artist == null) return new List<Album>();
-        
-        // Search for albums by artist name
-        var response = await SendTidalRequestAsync($"/search/?al={Uri.EscapeDataString(artist.Name)}");
-        
+        var response = await SendTidalRequestAsync($"/artist/?f={artistId}&skip_tracks=true");
         if (response == null) return new List<Album>();
         
-        var dataResponse = JsonSerializer.Deserialize<TidalNestedSearchResponse>(response);
-        if (dataResponse?.Data?.Albums?.Items == null) return new List<Album>();
+        var dataResponse = JsonSerializer.Deserialize<TidalArtistAlbumsResponseWrapper>(response);
+        if (dataResponse?.Albums?.Items == null) return new List<Album>();
         
         // Filter albums that have this artist as main artist
-        return dataResponse.Data.Albums.Items
-            .Where(a => a.Artists?.Any(ar => ar.Id.ToString() == artistId) == true ||
-                       a.Artist?.Id.ToString() == artistId)
+        return dataResponse.Albums.Items
             .Select(MapTidalAlbumToAlbum)
             .ToList();
     }

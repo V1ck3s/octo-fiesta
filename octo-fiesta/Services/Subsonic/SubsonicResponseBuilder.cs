@@ -116,6 +116,7 @@ public class SubsonicResponseBuilder
                     genre = album.Genre ?? "",
                     created = System.DateTime.UtcNow.ToString("o"),
                     isCompilation = false,
+                    displayArtist = album.Artist ?? "",
                     song = (album.Songs ?? Enumerable.Empty<Song>()).Select(s => ConvertSongToJson(s)).ToList()
                 }
             });
@@ -136,6 +137,7 @@ public class SubsonicResponseBuilder
                     new XAttribute("year", album.Year ?? 0),
                     new XAttribute("coverArt", album.Id),
                     new XAttribute("created", System.DateTime.UtcNow.ToString("o")),
+                    new XAttribute("displayArtist", album.Artist ?? ""),
                     (album.Songs?.Select(s => ConvertSongToXml(s, ns, album.Id)) ?? Enumerable.Empty<XElement>())
                 )
             )
@@ -178,6 +180,7 @@ public class SubsonicResponseBuilder
                     year = playlist.CreatedDate?.Year ?? 0,
                     genre = "Playlist",
                     isCompilation = false,
+                    displayArtist = artistName,
                     created = playlist.CreatedDate.HasValue ? playlist.CreatedDate.Value.ToUniversalTime().ToString("o") : System.DateTime.UtcNow.ToString("o"),
                     song = tracks.Select(s => {
                         var songJson = ConvertSongToJson(s);
@@ -199,6 +202,7 @@ public class SubsonicResponseBuilder
             new XAttribute("duration", totalDuration),
             new XAttribute("genre", "Playlist"),
             new XAttribute("coverArt", playlist.Id),
+            new XAttribute("displayArtist", artistName),
             new XAttribute("created", playlist.CreatedDate.HasValue ? playlist.CreatedDate.Value.ToUniversalTime().ToString("o") : System.DateTime.UtcNow.ToString("o"))
         );
         
@@ -330,6 +334,7 @@ public class SubsonicResponseBuilder
             ["artistId"] = song.ArtistId ?? "",
             ["duration"] = song.Duration ?? 0,
             ["track"] = song.Track ?? 0,
+            ["discNumber"] = song.DiscNumber ?? 0,
             ["year"] = song.Year ?? 0,
             ["suffix"] = suffix,
             ["contentType"] = contentType,
@@ -337,7 +342,10 @@ public class SubsonicResponseBuilder
             ["size"] = size,
             ["type"] = "music",
             ["isVideo"] = false,
-            ["isExternal"] = !song.IsLocal
+            ["isExternal"] = !song.IsLocal,
+            ["displayArtist"] = song.Artist ?? "",
+            ["displayAlbumArtist"] = song.Artist ?? "",
+            ["displayComposer"] = ""
         };
 
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
@@ -368,7 +376,8 @@ public class SubsonicResponseBuilder
             ["songCount"] = album.SongCount ?? 0,
             ["year"] = album.Year ?? 0,
             ["created"] = System.DateTime.UtcNow.ToString("o"),
-            ["isExternal"] = !album.IsLocal
+            ["isExternal"] = !album.IsLocal,
+            ["displayArtist"] = album.Artist ?? ""
         };
 
         // Only include coverArt if the album has a cover URL (avoids broken images)
@@ -454,6 +463,7 @@ public class SubsonicResponseBuilder
             new XAttribute("artist", song.Artist ?? ""),
             new XAttribute("duration", song.Duration ?? 0),
             new XAttribute("track", song.Track ?? 0),
+            new XAttribute("discNumber", song.DiscNumber ?? 0),
             new XAttribute("year", song.Year ?? 0),
             new XAttribute("suffix", suffix),
             new XAttribute("contentType", contentType),
@@ -462,7 +472,10 @@ public class SubsonicResponseBuilder
             new XAttribute("bitRate", bitRate),
             new XAttribute("size", size),
             new XAttribute("isDir", "false"),
-            new XAttribute("isExternal", (!song.IsLocal).ToString().ToLower())
+            new XAttribute("isExternal", (!song.IsLocal).ToString().ToLower()),
+            new XAttribute("displayArtist", song.Artist ?? ""),
+            new XAttribute("displayAlbumArtist", song.Artist ?? ""),
+            new XAttribute("displayComposer", "")
         );
 
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
@@ -500,7 +513,8 @@ public class SubsonicResponseBuilder
             new XAttribute("duration", totalDuration),
             new XAttribute("year", album.Year ?? 0),
             new XAttribute("created", System.DateTime.UtcNow.ToString("o")),
-            new XAttribute("isExternal", (!album.IsLocal).ToString().ToLower())
+            new XAttribute("isExternal", (!album.IsLocal).ToString().ToLower()),
+            new XAttribute("displayArtist", album.Artist ?? "")
         );
 
         // Only include coverArt if the album has a cover URL (avoids broken images)

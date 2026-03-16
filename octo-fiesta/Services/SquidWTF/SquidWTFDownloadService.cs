@@ -162,9 +162,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         };
         
         // Build output path
-        var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;
@@ -173,13 +172,21 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
         
-        // Download the file (no decryption needed)
-        await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-        
-        // Write metadata
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
-        
-        return new DownloadResult(outputPath, downloadedQuality);
+        try
+        {
+            // Download the file (no decryption needed)
+            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
+            
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     private string GetQobuzQuality()
@@ -225,9 +232,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         var downloadedQuality = GetDownloadedQuality(actualQuality, manifest.MimeType);
         
         // Build output path
-        var artistForPath = song.AlbumArtist ?? song.Artist;
         var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, artistForPath, song.Album, song.Title, song.Track, extension);
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;
@@ -236,13 +242,21 @@ public class SquidWTFDownloadService : BaseDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
         
-        // Download the file (no decryption needed)
-        await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-        
-        // Write metadata
-        await WriteMetadataAsync(outputPath, song, cancellationToken);
-        
-        return new DownloadResult(outputPath, downloadedQuality);
+        try
+        {
+            // Download the file (no decryption needed)
+            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
+            
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            
+            return new DownloadResult(outputPath, downloadedQuality);
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
+        }
     }
 
     /// <summary>

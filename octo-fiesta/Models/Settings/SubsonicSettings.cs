@@ -75,7 +75,12 @@ public enum MusicService
     /// <summary>
     /// SquidWTF music service (supports Qobuz and Tidal backends)
     /// </summary>
-    SquidWTF
+    SquidWTF,
+
+    /// <summary>
+    /// Yandex music service
+    /// </summary>
+    Yandex
 }
 
 public class SubsonicSettings
@@ -142,4 +147,12 @@ public class SubsonicSettings
     /// the track will be re-downloaded in FLAC
     /// </summary>
     public bool AutoUpgradeQuality { get; set; } = false;
+    
+    /// <summary>
+    /// Template for organizing downloaded files into folders (default: {artist}/{album}/{track} - {title})
+    /// Environment variable: FOLDER_TEMPLATE
+    /// Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
+    /// Slashes (/) separate folder levels; the last segment becomes the file name.
+    /// </summary>
+    public string FolderTemplate { get; set; } = "{artist}/{album}/{track} - {title}";
 }

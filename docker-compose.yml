@@ -4,9 +4,11 @@ services:
     container_name: octo-fiesta
     restart: unless-stopped
     ports:
-      - "5274:8080"
+      - "5274:${INTERNAL_PORT:-8080}"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+      # Internal listening port (must match the port in "ports" mapping above)
+      - ASPNETCORE_URLS=http://+:${INTERNAL_PORT:-8080}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
       
@@ -29,6 +31,9 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
+      # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
+      - Subsonic__FolderTemplate=${FOLDER_TEMPLATE:-{artist}/{album}/{track} - {title}}
       
       # ===== DEEZER SETTINGS =====
       # Deezer ARL token (required if using Deezer)
@@ -56,5 +61,25 @@ services:
       # Instance timeout in seconds for Tidal backend (default: 5)
       # Switches to next instance if current one doesn't respond in time
       - SquidWTF__InstanceTimeoutSeconds=${SQUIDWTF_INSTANCE_TIMEOUT:-5}
+
+      # ===== YANDEX MUSIC SETTINGS =====
+      # OAuth token for API access.
+      # Obtained from browser #access_token fragment after authenticating on 
+      # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
+      - Yandex__OAuthToken=${YANDEX_OAUTH_TOKEN:-}
+      # Preferred audio quality (optional)
+      # Default: FLAC (16-bit/44.1kHz)
+      # Available: AAC_64, MP3_192, AAC_192, AAC_256, MP3_320, FLAC
+      - Yandex__Quality=${YANDEX_QUALITY:-}
+      # Language for the API responses.
+      # Curated playlists and some album titles will be translated into that language.
+      # Default: ru
+      # Available: en/uz/uk/us/ru/kk/hy
+      - Yandex__Language=${YANDEX_LANGUAGE:-}
+      # Some tracks are included in the API responses but are marked unavailable for listening
+      # This setting allows to show such tracks in search results, playlists and albums
+      # Default: false
+      # Available: true, false
+      - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

@@ -160,6 +160,27 @@ public abstract class BaseDownloadService : IDownloadService
         });
     }
 
+    public void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId)
+    {
+        if (externalProvider != ProviderName)
+        {
+            Logger.LogWarning("Provider '{Provider}' is not supported for album download", externalProvider);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadFullAlbumAsync(albumExternalId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to download full album {AlbumId}", albumExternalId);
+            }
+        });
+    }
+
     #endregion
 
     #region Template Methods (to be implemented by subclasses)
@@ -464,7 +485,14 @@ public abstract class BaseDownloadService : IDownloadService
                     }
                 }
             }
-            Logger.LogError(ex, "Download failed for {SongId}", songId);
+            if (ex is OperationCanceledException)
+            {
+                Logger.LogInformation("Download canceled for {SongId}: {Message}", songId, ex.Message);
+            }
+            else
+            {
+                Logger.LogError(ex, "Download failed for {SongId}", songId);
+            }
             throw;
         }
         finally
@@ -492,21 +520,38 @@ public abstract class BaseDownloadService : IDownloadService
 
     protected async Task DownloadRemainingAlbumTracksAsync(string albumExternalId, string excludeTrackExternalId, CancellationToken cancellationToken = default)
     {
-        Logger.LogInformation("Starting background download for album {AlbumId} (excluding track {TrackId})",
-            albumExternalId, excludeTrackExternalId);
+        await DownloadAlbumTracksAsync(albumExternalId, excludeTrackExternalId, cancellationToken);
+    }
+
+    protected async Task DownloadFullAlbumAsync(string albumExternalId, CancellationToken cancellationToken = default)
+    {
+        await DownloadAlbumTracksAsync(albumExternalId, excludeTrackExternalId: null, cancellationToken);
+    }
+
+    private async Task DownloadAlbumTracksAsync(string albumExternalId, string? excludeTrackExternalId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(excludeTrackExternalId))
+        {
+            Logger.LogInformation("Starting background full album download for album {AlbumId}", albumExternalId);
+        }
+        else
+        {
+            Logger.LogInformation("Starting background download for album {AlbumId} (excluding track {TrackId})",
+                albumExternalId, excludeTrackExternalId);
+        }
 
         var album = await MetadataService.GetAlbumAsync(ProviderName, albumExternalId);
         if (album == null)
         {
-            Logger.LogWarning("Album {AlbumId} not found, cannot download remaining tracks", albumExternalId);
+            Logger.LogWarning("Album {AlbumId} not found, cannot download tracks", albumExternalId);
             return;
         }
 
         var tracksToDownload = album.Songs
-            .Where(s => s.ExternalId != excludeTrackExternalId && !string.IsNullOrEmpty(s.ExternalId))
+            .Where(s => !string.IsNullOrEmpty(s.ExternalId) && (string.IsNullOrEmpty(excludeTrackExternalId) || s.ExternalId != excludeTrackExternalId))
             .ToList();
 
-        Logger.LogInformation("Found {Count} additional tracks to download for album '{AlbumTitle}'",
+        Logger.LogInformation("Found {Count} tracks to download for album '{AlbumTitle}'",
             tracksToDownload.Count, album.Title);
 
         foreach (var track in tracksToDownload)
@@ -725,6 +770,27 @@ public abstract class BaseDownloadService : IDownloadService
     }
 
     /// <summary>
+    /// Deletes an incomplete file after canceled/failed downloads.
+    /// </summary>
+    protected void TryDeleteIncompleteFile(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !IOFile.Exists(filePath))
+        {
+            return;
+        }
+
+        try
+        {
+            IOFile.Delete(filePath);
+            Logger.LogInformation("Deleted incomplete file: {Path}", filePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to delete incomplete file: {Path}", filePath);
+        }
+    }
+
+    /// <summary>
     /// Gets the cached file path for a given provider and external ID
     /// Returns null if no cached file exists
     /// </summary>
@@ -829,35 +895,24 @@ public abstract class BaseDownloadService : IDownloadService
             }
 
             var artistForPath = song.AlbumArtist ?? song.Artist;
-            var safeArtist = PathHelper.SanitizeFolderName(artistForPath);
-            var safeAlbum = PathHelper.SanitizeFolderName(song.Album);
-            var safeTitle = PathHelper.SanitizeFileName(song.Title);
 
-            var albumFolder = Path.Combine(CachePath, safeArtist, safeAlbum);
-            if (!Directory.Exists(albumFolder))
+            // Build the expected file name from the last segment of the template.
+            // We don't know the quality at lookup time, so we search by file name pattern
+            // within the entire cache directory tree to handle any folder template.
+            var template = SubsonicSettings.FolderTemplate;
+            var templateSegments = template.Split('/');
+            var fileNameTemplate = templateSegments[^1];
+
+            var expectedFileName = PathHelper.ReplacePlaceholders(fileNameTemplate, song, artistForPath, null);
+            var safeFileName = PathHelper.SanitizeFileName(expectedFileName);
+
+            // Search from the cache root for any file matching the expected name,
+            // regardless of the folder structure used by the template.
+            var searchPattern = $"{safeFileName}*.*";
+            var matches = Directory.GetFiles(CachePath, searchPattern, SearchOption.AllDirectories);
+            if (matches.Length > 0)
             {
-                return null;
-            }
-
-            var trackPrefix = song.Track.HasValue ? $"{song.Track.Value:D2} - " : string.Empty;
-
-            // Prefer exact expected prefix, but allow duplicates resolved by " (n)" suffix.
-            var primaryPattern = $"{trackPrefix}{safeTitle}*.*";
-            var primaryMatches = Directory.GetFiles(albumFolder, primaryPattern, SearchOption.TopDirectoryOnly);
-            if (primaryMatches.Length > 0)
-            {
-                return primaryMatches[0];
-            }
-
-            // If track numbers differ/missing, try title-only match within the same album folder.
-            if (!string.IsNullOrEmpty(trackPrefix))
-            {
-                var fallbackPattern = $"{safeTitle}*.*";
-                var fallbackMatches = Directory.GetFiles(albumFolder, fallbackPattern, SearchOption.TopDirectoryOnly);
-                if (fallbackMatches.Length > 0)
-                {
-                    return fallbackMatches[0];
-                }
+                return matches[0];
             }
 
             return null;

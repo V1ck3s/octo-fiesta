@@ -36,6 +36,13 @@ public interface IDownloadService
     /// <param name="albumExternalId">The album ID on the external provider</param>
     /// <param name="excludeTrackExternalId">The track ID to exclude (already downloaded)</param>
     void DownloadRemainingAlbumTracksInBackground(string externalProvider, string albumExternalId, string excludeTrackExternalId);
+
+    /// <summary>
+    /// Downloads all tracks from an album in background.
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="albumExternalId">The album ID on the external provider</param>
+    void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId);
     
     /// <summary>
     /// Checks if a song is currently being downloaded

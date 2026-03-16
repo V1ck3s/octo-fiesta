@@ -217,6 +217,9 @@ public class QobuzMetadataService : IMusicMetadataService
                     song.Album = album.Title;
                     song.AlbumId = album.Id;
                     song.AlbumArtist = album.Artist;
+                    song.Year ??= album.Year;
+                    song.Genre ??= album.Genre;
+                    song.TotalTracks ??= album.SongCount;
                     
                     if (ShouldIncludeSong(song))
                     {
