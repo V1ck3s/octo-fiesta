@@ -14,7 +14,7 @@ using System.Net;
 
 namespace octo_fiesta.Tests;
 
-public class SubsonicControllerScrobbleTests
+public class SubsonicControllerStarUnstarExternalIdTests
 {
     private readonly Mock<IMusicMetadataService> _mockMetadataService;
     private readonly Mock<ILocalLibraryService> _mockLocalLibraryService;
@@ -25,7 +25,7 @@ public class SubsonicControllerScrobbleTests
     private readonly SubsonicModelMapper _modelMapper;
     private readonly IOptions<SubsonicSettings> _settings;
 
-    public SubsonicControllerScrobbleTests()
+    public SubsonicControllerStarUnstarExternalIdTests()
     {
         _mockMetadataService = new Mock<IMusicMetadataService>();
         _mockLocalLibraryService = new Mock<ILocalLibraryService>();
@@ -103,7 +103,7 @@ public class SubsonicControllerScrobbleTests
     }
 
     [Fact]
-    public async Task Scrobble_WithResolvableExternalId_UsesLocalId()
+    public async Task Star_WithResolvableExternalSongId_UsesLocalId()
     {
         // Arrange
         _mockLocalLibraryService
@@ -118,7 +118,6 @@ public class SubsonicControllerScrobbleTests
             queryParams: new Dictionary<string, string>
             {
                 { "id", "ext-qobuz-song-123" },
-                { "submission", "true" },
                 { "f", "json" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -128,19 +127,19 @@ public class SubsonicControllerScrobbleTests
             captureRequest: req => capturedRequest = req);
 
         // Act
-        var result = await controller.Scrobble();
+        var result = await controller.Star();
 
         // Assert
         Assert.IsType<FileContentResult>(result);
         Assert.NotNull(capturedRequest);
         var requestUrl = capturedRequest!.RequestUri!.ToString();
-        Assert.Contains("/rest/scrobble", requestUrl);
+        Assert.Contains("/rest/star", requestUrl);
         Assert.Contains("id=9981", requestUrl);
         Assert.DoesNotContain("ext-qobuz-song-123", requestUrl);
     }
 
     [Fact]
-    public async Task Scrobble_WithUnresolvableExternalId_ReturnsErrorAndDoesNotRelay()
+    public async Task Star_WithUnresolvableExternalSongId_ReturnsErrorAndDoesNotRelay()
     {
         // Arrange
         _mockLocalLibraryService
@@ -155,17 +154,86 @@ public class SubsonicControllerScrobbleTests
             queryParams: new Dictionary<string, string>
             {
                 { "id", "ext-deezer-song-999" },
-                { "submission", "true" },
                 { "f", "xml" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("ok")
+                Content = new StringContent("{}")
             },
             captureRequest: req => capturedRequest = req);
 
         // Act
-        var result = await controller.Scrobble();
+        var result = await controller.Star();
+
+        // Assert
+        var contentResult = Assert.IsType<ContentResult>(result);
+        Assert.Contains("status=\"failed\"", contentResult.Content ?? "");
+        Assert.Contains("code=\"70\"", contentResult.Content ?? "");
+        Assert.Null(capturedRequest);
+    }
+
+    [Fact]
+    public async Task Unstar_WithResolvableExternalSongId_UsesLocalId()
+    {
+        // Arrange
+        _mockLocalLibraryService
+            .Setup(x => x.ParseExternalId("ext-qobuz-song-321"))
+            .Returns((true, "qobuz", "song", "321"));
+        _mockLocalLibraryService
+            .Setup(x => x.GetLocalIdForExternalSongAsync("qobuz", "321"))
+            .ReturnsAsync("2001");
+
+        HttpRequestMessage? capturedRequest = null;
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "ext-qobuz-song-321" },
+                { "f", "json" }
+            },
+            proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}")
+            },
+            captureRequest: req => capturedRequest = req);
+
+        // Act
+        var result = await controller.Unstar();
+
+        // Assert
+        Assert.IsType<FileContentResult>(result);
+        Assert.NotNull(capturedRequest);
+        var requestUrl = capturedRequest!.RequestUri!.ToString();
+        Assert.Contains("/rest/unstar", requestUrl);
+        Assert.Contains("id=2001", requestUrl);
+        Assert.DoesNotContain("ext-qobuz-song-321", requestUrl);
+    }
+
+    [Fact]
+    public async Task Unstar_WithUnresolvableExternalSongId_ReturnsErrorAndDoesNotRelay()
+    {
+        // Arrange
+        _mockLocalLibraryService
+            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
+            .Returns((true, "deezer", "song", "456"));
+        _mockLocalLibraryService
+            .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .ReturnsAsync((string?)null);
+
+        HttpRequestMessage? capturedRequest = null;
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "ext-deezer-song-456" },
+                { "f", "xml" }
+            },
+            proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}")
+            },
+            captureRequest: req => capturedRequest = req);
+
+        // Act
+        var result = await controller.Unstar();
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);

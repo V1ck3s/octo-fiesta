@@ -747,6 +747,7 @@ public class SubsonicController : ControllerBase
 
     /// <summary>
     /// Stars (favorites) an item. For external playlists and albums, this triggers a full download.
+    /// External song IDs are resolved to local Subsonic IDs when possible.
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/star")]
@@ -791,11 +792,48 @@ public class SubsonicController : ControllerBase
             _downloadService.DownloadFullAlbumInBackground(albumProvider!, albumExternalId!);
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
+
+        var starResolution = await ResolveExternalSongIdIfPossible(parameters, "star");
+        if (starResolution is { IsExternalSong: true, Resolved: false })
+        {
+            return _responseBuilder.CreateError(format, 70,
+                "External song could not be starred because it is not available locally yet.");
+        }
         
         // For non-playlist items, relay to real Subsonic server
         try
         {
             var result = await _proxyService.RelayAsync("rest/star", parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Removes favorite from an item. External song IDs are resolved to local Subsonic IDs when possible.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/unstar")]
+    [Route("rest/unstar.view")]
+    public async Task<IActionResult> Unstar()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        var unstarResolution = await ResolveExternalSongIdIfPossible(parameters, "unstar");
+        if (unstarResolution is { IsExternalSong: true, Resolved: false })
+        {
+            return _responseBuilder.CreateError(format, 70,
+                "External song could not be unstarred because it is not available locally.");
+        }
+
+        try
+        {
+            var result = await _proxyService.RelayAsync("rest/unstar", parameters);
             var contentType = result.ContentType ?? $"application/{format}";
             return File(result.Body, contentType);
         }
@@ -816,23 +854,11 @@ public class SubsonicController : ControllerBase
         var parameters = await ExtractAllParameters();
         var format = parameters.GetValueOrDefault("f", "xml");
 
-        if (parameters.TryGetValue("id", out var id) && !string.IsNullOrWhiteSpace(id))
+        var scrobbleResolution = await ResolveExternalSongIdIfPossible(parameters, "scrobble");
+        if (scrobbleResolution is { IsExternalSong: true, Resolved: false })
         {
-            var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
-            if (isExternal && string.Equals(type, "song", StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrEmpty(provider) && !string.IsNullOrEmpty(externalId))
-            {
-                var localId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider, externalId);
-                if (!string.IsNullOrEmpty(localId))
-                {
-                    _logger.LogInformation("Resolved scrobble ID {ExternalId} to local ID {LocalId}", id, localId);
-                    parameters["id"] = localId;
-                }
-                else
-                {
-                    _logger.LogInformation("Could not resolve external scrobble ID {ExternalId} to a local ID", id);
-                }
-            }
+            return _responseBuilder.CreateError(format, 70,
+                "External song could not be scrobbled because it is not available locally yet.");
         }
 
         try
@@ -864,6 +890,32 @@ public class SubsonicController : ControllerBase
         }
 
         return string.Empty;
+    }
+
+    private async Task<(bool IsExternalSong, bool Resolved)> ResolveExternalSongIdIfPossible(Dictionary<string, string> parameters, string endpoint)
+    {
+        if (!parameters.TryGetValue("id", out var id) || string.IsNullOrWhiteSpace(id))
+        {
+            return (false, false);
+        }
+
+        var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
+        if (!isExternal || !string.Equals(type, "song", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(provider) || string.IsNullOrEmpty(externalId))
+        {
+            return (false, false);
+        }
+
+        var localId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider, externalId);
+        if (!string.IsNullOrEmpty(localId))
+        {
+            _logger.LogInformation("Resolved {Endpoint} ID {ExternalId} to local ID {LocalId}", endpoint, id, localId);
+            parameters["id"] = localId;
+            return (true, true);
+        }
+
+        _logger.LogInformation("Could not resolve external {Endpoint} ID {ExternalId} to a local ID", endpoint, id);
+        return (true, false);
     }
 
     private (bool IsExternalAlbum, string? Provider, string? ExternalId, string RawAlbumId) GetExternalAlbumFromStarParameters(Dictionary<string, string> parameters)
