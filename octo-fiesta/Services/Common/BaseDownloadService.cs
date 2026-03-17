@@ -393,25 +393,6 @@ public abstract class BaseDownloadService : IDownloadService
 
                     if (SubsonicSettings.AutoUpgradeQuality && shouldUpgrade)
                     {
-                        // Check if another upgrade is already in progress for this song
-                        if (ActiveDownloads.TryGetValue(songId, out var existingDownload) && existingDownload.Status == DownloadStatus.InProgress)
-                        {
-                            Logger.LogInformation("Upgrade already in progress for {SongId}, waiting...", songId);
-                            DownloadLock.Release();
-
-                            while (ActiveDownloads.TryGetValue(songId, out existingDownload) && existingDownload.Status == DownloadStatus.InProgress)
-                            {
-                                await Task.Delay(500, cancellationToken);
-                            }
-
-                            if (existingDownload?.Status == DownloadStatus.Completed && existingDownload.LocalPath != null)
-                            {
-                                return existingDownload.LocalPath;
-                            }
-
-                            throw new Exception(existingDownload?.ErrorMessage ?? "Upgrade failed");
-                        }
-
                         Logger.LogInformation("Upgrading quality from {OldQuality} to {NewQuality} for: {Path}",
                             existingMapping.DownloadedQuality ?? "unknown", targetQuality, existingMapping.LocalPath);
                         var backupPath = existingMapping.LocalPath + ".backup";
@@ -458,33 +439,6 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
 
-            // Check if download in progress. If the in-progress marker belongs to our
-            // current upgrade flow (ourDownloadInfo), do not wait on it.
-            if (ActiveDownloads.TryGetValue(songId, out var activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
-            {
-                if (ourDownloadInfo != null && ReferenceEquals(activeDownload, ourDownloadInfo))
-                {
-                    // This is our own marker created for a quality-upgrade; proceed without waiting.
-                }
-                else
-                {
-                    Logger.LogInformation("Download already in progress for {SongId}, waiting...", songId);
-                    // Release lock while waiting
-                    DownloadLock.Release();
-
-                    while (ActiveDownloads.TryGetValue(songId, out activeDownload) && activeDownload.Status == DownloadStatus.InProgress)
-                    {
-                        await Task.Delay(500, cancellationToken);
-                    }
-
-                    if (activeDownload?.Status == DownloadStatus.Completed && activeDownload.LocalPath != null)
-                    {
-                        return activeDownload.LocalPath;
-                    }
-
-                    throw new Exception(activeDownload?.ErrorMessage ?? "Download failed");
-                }
-            }
             // Get metadata
             // Always fetch the full album to ensure AlbumArtist is correctly set.
             // Without this, tracks with featured artists get filed under the track artist instead of the album artist
