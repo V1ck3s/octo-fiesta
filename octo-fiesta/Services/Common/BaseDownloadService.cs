@@ -376,11 +376,19 @@ public abstract class BaseDownloadService : IDownloadService
         // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
         await DownloadLock.WaitAsync(cancellationToken);
 
+        // Tell other concurrent tasks we are started downloading routine
+        // and keep reference to it for easy access
+        DownloadInfo ourDownloadInfo = ActiveDownloads[songId] = new()
+        {
+            SongId = songId,
+            ExternalId = externalId,
+            ExternalProvider = externalProvider,
+            Status = DownloadStatus.InProgress,
+            StartedAt = DateTime.UtcNow
+        };
+        
         try
         {
-            // If we create an ActiveDownloads entry for a quality-upgrade, keep a reference
-            // to that instance so we can identify our own marker later without special flags.
-            DownloadInfo? ourDownloadInfo = null;
             // Check if already downloaded (skip for cache mode as we want to check cache folder)
             if (!isCache)
             {
@@ -389,41 +397,38 @@ public abstract class BaseDownloadService : IDownloadService
                 {
                     // Check if we should upgrade quality
                     var targetQuality = GetTargetQuality();
-                    var shouldUpgrade = QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, targetQuality);
+                    bool shouldUpgrade = SubsonicSettings.AutoUpgradeQuality
+                        && QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, targetQuality);
 
-                    if (SubsonicSettings.AutoUpgradeQuality && shouldUpgrade)
-                    {
-                        Logger.LogInformation("Upgrading quality from {OldQuality} to {NewQuality} for: {Path}",
-                            existingMapping.DownloadedQuality ?? "unknown", targetQuality, existingMapping.LocalPath);
-                        var backupPath = existingMapping.LocalPath + ".backup";
-                        try
-                        {
-                            IOFile.Move(existingMapping.LocalPath, backupPath);
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogWarning(ex, "Failed to create backup for quality upgrade, skipping upgrade");
-                            return existingMapping.LocalPath;
-                        }
-
-                        // Store backup path to restore on failure - register an in-progress marker so other callers know an upgrade is in progress. Keep a reference to our marker.
-                        var upgradeInfo = new DownloadInfo
-                        {
-                            SongId = songId,
-                            ExternalId = externalId,
-                            ExternalProvider = externalProvider,
-                            Status = DownloadStatus.InProgress,
-                            StartedAt = DateTime.UtcNow,
-                            BackupPath = backupPath
-                        };
-                        ActiveDownloads[songId] = upgradeInfo;
-                        ourDownloadInfo = upgradeInfo;
-                    }
-                    else
+                    // No upgrade needed – return already downloaded path
+                    if (!shouldUpgrade)
                     {
                         Logger.LogInformation("Song already downloaded: {Path}", existingMapping.LocalPath);
+                        ourDownloadInfo.Status = DownloadStatus.Completed;
+                        ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                        ourDownloadInfo.LocalPath = existingMapping.LocalPath;
                         return existingMapping.LocalPath;
                     }
+
+                    // Back up existing track for quality upgrade
+                    Logger.LogInformation("Upgrading quality from {OldQuality} to {NewQuality} for: {Path}",
+                        existingMapping.DownloadedQuality ?? "unknown", targetQuality, existingMapping.LocalPath);
+                    var backupPath = existingMapping.LocalPath + ".backup";
+                    try
+                    {
+                        IOFile.Move(existingMapping.LocalPath, backupPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Failed to create backup for quality upgrade, skipping upgrade");
+                        ourDownloadInfo.Status = DownloadStatus.Completed;
+                        ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                        ourDownloadInfo.LocalPath = existingMapping.LocalPath;
+                        return existingMapping.LocalPath;
+                    }
+
+                    // Store backup path to restore on failure
+                    ourDownloadInfo.BackupPath = backupPath;
                 }
             }
             else
@@ -435,6 +440,9 @@ public abstract class BaseDownloadService : IDownloadService
                     Logger.LogInformation("Song found in cache: {Path}", cachedPath);
                     // Update file access time for cache cleanup logic
                     IOFile.SetLastAccessTime(cachedPath, DateTime.UtcNow);
+                    ourDownloadInfo.Status = DownloadStatus.Completed;
+                    ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                    ourDownloadInfo.LocalPath = cachedPath;
                     return cachedPath;
                 }
             }
@@ -479,26 +487,14 @@ public abstract class BaseDownloadService : IDownloadService
                 throw new Exception("Song not found");
             }
 
-            // Only create new DownloadInfo if not already created (e.g., by upgrade logic)
-            if (!ActiveDownloads.TryGetValue(songId, out var downloadInfo))
-            {
-                downloadInfo = new DownloadInfo
-                {
-                    SongId = songId,
-                    ExternalId = externalId,
-                    ExternalProvider = externalProvider,
-                    Status = DownloadStatus.InProgress,
-                    StartedAt = DateTime.UtcNow
-                };
-                ActiveDownloads[songId] = downloadInfo;
-            }
+
 
             var downloadResult = await DownloadTrackAsync(externalId, song, forcePermanent, cancellationToken);
             var localPath = downloadResult.LocalPath;
 
-            downloadInfo.Status = DownloadStatus.Completed;
-            downloadInfo.LocalPath = localPath;
-            downloadInfo.CompletedAt = DateTime.UtcNow;
+            ourDownloadInfo.Status = DownloadStatus.Completed;
+            ourDownloadInfo.LocalPath = localPath;
+            ourDownloadInfo.CompletedAt = DateTime.UtcNow;
 
             // Invalidate the metadata path cache so subsequent requests find the newly downloaded file
             var cacheKey = $"{externalProvider}|{externalId}";
@@ -563,24 +559,21 @@ public abstract class BaseDownloadService : IDownloadService
         }
         catch (Exception ex)
         {
-            if (ActiveDownloads.TryGetValue(songId, out var downloadInfo))
-            {
-                downloadInfo.Status = DownloadStatus.Failed;
-                downloadInfo.ErrorMessage = ex.Message;
+            ourDownloadInfo.Status = DownloadStatus.Failed;
+            ourDownloadInfo.ErrorMessage = ex.Message;
 
-                // Restore backup if quality upgrade failed
-                if (!string.IsNullOrEmpty(downloadInfo.BackupPath) && IOFile.Exists(downloadInfo.BackupPath))
+            // Restore backup if quality upgrade failed
+            if (!string.IsNullOrEmpty(ourDownloadInfo.BackupPath) && IOFile.Exists(ourDownloadInfo.BackupPath))
+            {
+                try
                 {
-                    try
-                    {
-                        var originalPath = downloadInfo.BackupPath.Replace(".backup", "");
-                        IOFile.Move(downloadInfo.BackupPath, originalPath);
-                        Logger.LogInformation("Restored backup after failed quality upgrade: {Path}", originalPath);
-                    }
-                    catch (Exception restoreEx)
-                    {
-                        Logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", downloadInfo.BackupPath);
-                    }
+                    var originalPath = ourDownloadInfo.BackupPath.Replace(".backup", "");
+                    IOFile.Move(ourDownloadInfo.BackupPath, originalPath);
+                    Logger.LogInformation("Restored backup after failed quality upgrade: {Path}", originalPath);
+                }
+                catch (Exception restoreEx)
+                {
+                    Logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", ourDownloadInfo.BackupPath);
                 }
             }
             if (ex is OperationCanceledException)
@@ -596,19 +589,18 @@ public abstract class BaseDownloadService : IDownloadService
         finally
         {
             // Clean up backup file on success
-            if (ActiveDownloads.TryGetValue(songId, out var info) &&
-                info.Status == DownloadStatus.Completed &&
-                !string.IsNullOrEmpty(info.BackupPath) &&
-                IOFile.Exists(info.BackupPath))
+            if (ourDownloadInfo.Status == DownloadStatus.Completed &&
+                !string.IsNullOrEmpty(ourDownloadInfo.BackupPath) &&
+                IOFile.Exists(ourDownloadInfo.BackupPath))
             {
                 try
                 {
-                    IOFile.Delete(info.BackupPath);
+                    IOFile.Delete(ourDownloadInfo.BackupPath);
                     Logger.LogInformation("Deleted backup after successful quality upgrade");
                 }
                 catch (Exception deleteEx)
                 {
-                    Logger.LogWarning(deleteEx, "Failed to delete backup file: {BackupPath}", info.BackupPath);
+                    Logger.LogWarning(deleteEx, "Failed to delete backup file: {BackupPath}", ourDownloadInfo.BackupPath);
                 }
             }
 
