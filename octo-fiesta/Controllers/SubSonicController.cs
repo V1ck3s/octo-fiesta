@@ -911,6 +911,54 @@ public class SubsonicController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates a playlist. External song IDs are resolved to local Subsonic IDs.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/updatePlaylist")]
+    [Route("rest/updatePlaylist.view")]
+    public async Task<IActionResult> UpdatePlaylist()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (parameters.TryGetValue("songIdToAdd", out var rawSongIdToAdd) && !string.IsNullOrWhiteSpace(rawSongIdToAdd))
+        {
+            var requestedSongIds = rawSongIdToAdd
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (requestedSongIds.Length > 0)
+            {
+                var resolvedSongIds = new List<string>(requestedSongIds.Length);
+
+                foreach (var songId in requestedSongIds)
+                {
+                    var resolvedId = await ResolvePlaylistSongIdAsync(songId, HttpContext.RequestAborted);
+                    if (string.IsNullOrEmpty(resolvedId))
+                    {
+                        return _responseBuilder.CreateError(format, 70,
+                            $"Could not add external song '{songId}' to playlist: local track not available");
+                    }
+
+                    resolvedSongIds.Add(resolvedId);
+                }
+
+                parameters["songIdToAdd"] = string.Join(',', resolvedSongIds);
+            }
+        }
+
+        try
+        {
+            var result = await _proxyService.RelayAsync("rest/updatePlaylist", parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+    }
+
     private string GetExternalPlaylistIdFromStarParameters(Dictionary<string, string> parameters)
     {
         // Clients may send the playlist ID as "id" or "albumId" depending on the client
@@ -997,6 +1045,44 @@ public class SubsonicController : ControllerBase
         provider = parsedProvider;
         externalId = parsedExternalId;
         return true;
+    }
+
+    private async Task<string?> ResolvePlaylistSongIdAsync(string songId, CancellationToken cancellationToken)
+    {
+        var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(songId);
+
+        if (!isExternal || !string.Equals(type, "song", StringComparison.OrdinalIgnoreCase))
+        {
+            return songId;
+        }
+
+        if (string.IsNullOrEmpty(provider) || string.IsNullOrEmpty(externalId))
+        {
+            return null;
+        }
+
+        // Song already has a local Subsonic ID.
+        var localId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider, externalId);
+        if (!string.IsNullOrEmpty(localId))
+        {
+            return localId;
+        }
+
+        _logger.LogInformation("Song {SongId} is not available locally yet. Downloading before playlist update.", songId);
+        await _downloadService.DownloadSongAsync(provider, externalId, cancellationToken);
+
+        localId = await _localLibraryService.WaitForLocalIdAfterScanAsync(provider, externalId, cancellationToken);
+        if (!string.IsNullOrEmpty(localId))
+        {
+            return localId;
+        }
+
+        _logger.LogWarning(
+            "Could not resolve local Subsonic ID for external song {Provider}:{ExternalId} after download and scan",
+            provider,
+            externalId);
+
+        return null;
     }
 
     // Generic endpoint to handle all subsonic API calls
