@@ -97,7 +97,7 @@ public class DeezerDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC";
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         var downloadInfo = await GetTrackDownloadInfoAsync(trackId, cancellationToken);
         
@@ -121,7 +121,9 @@ public class DeezerDownloadService : BaseDownloadService
         };
 
         // Build organized folder structure using configured template
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
+        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+        var basePath = useCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories if they don't exist

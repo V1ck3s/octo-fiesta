@@ -747,6 +747,7 @@ public class SubsonicController : ControllerBase
 
     /// <summary>
     /// Stars (favorites) an item. For external playlists and albums, this triggers a full download.
+    /// In Cache mode, starring an external song moves it from cache to permanent storage.
     /// External song IDs are resolved to local Subsonic IDs when possible.
     /// </summary>
     [HttpGet, HttpPost]
@@ -768,12 +769,15 @@ public class SubsonicController : ControllerBase
             
             _logger.LogInformation("Starring external playlist {PlaylistId}, triggering download", playlistId);
             
+            // In Cache mode, download directly to permanent storage
+            var forcePermanent = _subsonicSettings.StorageMode == StorageMode.Cache;
+            
             // Trigger playlist download in background
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await _playlistSyncService.DownloadFullPlaylistAsync(playlistId);
+                    await _playlistSyncService.DownloadFullPlaylistAsync(playlistId, forcePermanent);
                 }
                 catch (Exception ex)
                 {
@@ -789,10 +793,44 @@ public class SubsonicController : ControllerBase
         if (isExternalAlbum)
         {
             _logger.LogInformation("Starring external album {AlbumId}, triggering full download", rawAlbumId);
-            _downloadService.DownloadFullAlbumInBackground(albumProvider!, albumExternalId!);
+            // In Cache mode, download directly to permanent storage
+            if (_subsonicSettings.StorageMode == StorageMode.Cache)
+            {
+                _downloadService.DownloadFullAlbumInBackgroundToPermanent(albumProvider!, albumExternalId!);
+            }
+            else
+            {
+                _downloadService.DownloadFullAlbumInBackground(albumProvider!, albumExternalId!);
+            }
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
 
+        // Check if this is an external song in Cache mode
+        if (_subsonicSettings.StorageMode == StorageMode.Cache && parameters.TryGetValue("id", out var id))
+        {
+            var (isExternal, provider, type, externalId) = _localLibraryService.ParseExternalId(id);
+            if (isExternal && string.Equals(type, "song", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrEmpty(provider) && !string.IsNullOrEmpty(externalId))
+            {
+                _logger.LogInformation("Starring external song in Cache mode: {Provider}:{ExternalId}", provider, externalId);
+                
+                var permanentized = await _downloadService.PermanentizeCachedSongAsync(provider, externalId);
+                if (permanentized)
+                {
+                    _logger.LogInformation("Successfully permanentized cached song {Provider}:{ExternalId}", provider, externalId);
+                    // Return success - the song will be available locally after Navidrome scans
+                    return _responseBuilder.CreateResponse(format, "starred", new { });
+                }
+                else
+                {
+                    // Song not in cache - user needs to play it first
+                    return _responseBuilder.CreateError(format, 70, 
+                        "Song is not in cache yet. Play it first, then star it to save permanently.");
+                }
+            }
+        }
+
+        // In Permanent mode, resolve external song IDs to local Subsonic IDs
         var starResolution = await ResolveExternalSongIdIfPossible(parameters, "star");
         if (starResolution is { IsExternalSong: true, Resolved: false })
         {
@@ -800,7 +838,7 @@ public class SubsonicController : ControllerBase
                 "External song could not be starred because it is not available locally yet.");
         }
         
-        // For non-playlist items, relay to real Subsonic server
+        // For non-external items or Permanent mode, relay to real Subsonic server
         try
         {
             var result = await _proxyService.RelayAsync("rest/star", parameters);

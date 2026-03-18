@@ -84,10 +84,10 @@ public class YandexDownloadService : BaseDownloadService
         return true;
     }
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         
-        DownloadResult? downloadResult = await DownloadTrackModernAsync(trackId, song, cancellationToken);
+        DownloadResult? downloadResult = await DownloadTrackModernAsync(trackId, song, forcePermanent, cancellationToken);
         if (downloadResult is not null)
         {
             return downloadResult;
@@ -97,7 +97,7 @@ public class YandexDownloadService : BaseDownloadService
         );
 
 
-        downloadResult = await DownloadTrackLegacyAsync(trackId, song, cancellationToken);
+        downloadResult = await DownloadTrackLegacyAsync(trackId, song, forcePermanent, cancellationToken);
         if (downloadResult is not null)
         {
             return downloadResult;
@@ -122,7 +122,7 @@ public class YandexDownloadService : BaseDownloadService
 
     #region Modern Yandex API
     
-    private async Task<DownloadResult?> DownloadTrackModernAsync(string trackId, Song song, CancellationToken cancellationToken)
+    private async Task<DownloadResult?> DownloadTrackModernAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Downloading track {TrackId} with encrypted Yandex API", trackId);
         
@@ -150,6 +150,7 @@ public class YandexDownloadService : BaseDownloadService
             song,
             downloadInfo.Codec,
             actualQuality,
+            forcePermanent,
             cancellationToken
         );
     }
@@ -264,7 +265,7 @@ public class YandexDownloadService : BaseDownloadService
 
     #region Legacy Yandex API
 
-    private async Task<DownloadResult?> DownloadTrackLegacyAsync(string trackId, Song song, CancellationToken cancellationToken)
+    private async Task<DownloadResult?> DownloadTrackLegacyAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
          _logger.LogInformation("Downloading track {TrackId} with legacy Yandex API", trackId);
 
@@ -300,6 +301,7 @@ public class YandexDownloadService : BaseDownloadService
             song,
             downloadOption.Codec,
             actualQuality,
+            forcePermanent,
             cancellationToken
         );
     }
@@ -384,11 +386,13 @@ public class YandexDownloadService : BaseDownloadService
 
     #region Common methods for both APIs
 
-    private async Task<DownloadResult> SaveDownloadStreamToSongFileWithMetadata(Stream stream, Song song, string codec, string downloadedQuality, CancellationToken cancellationToken)
+    private async Task<DownloadResult> SaveDownloadStreamToSongFileWithMetadata(Stream stream, Song song, string codec, string downloadedQuality, bool forcePermanent, CancellationToken cancellationToken)
     {
         // Construct download path
         var extension = YandexQuality.CodecToExtension(codec);
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
+        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+        var basePath = useCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
 
         // Create directories
