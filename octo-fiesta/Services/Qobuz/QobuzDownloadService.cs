@@ -123,7 +123,7 @@ public class QobuzDownloadService : BaseDownloadService
         var response = await _httpClient.GetAsync(downloadInfo.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
 
         return new DownloadResult(responseStream, extension, downloadedQuality);
     }

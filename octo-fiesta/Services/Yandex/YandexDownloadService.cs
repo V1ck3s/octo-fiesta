@@ -232,7 +232,7 @@ public class YandexDownloadService : BaseDownloadService
             var response = await _httpClient.GetAsync(directUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var encryptedStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var encryptedStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
 
                 // initialize decryption machinery
                 byte[] keyHex = Convert.FromHexString(downloadInfo.Key);
@@ -288,7 +288,7 @@ public class YandexDownloadService : BaseDownloadService
             return null;
         }
 
-        Stream downloadStream = await downloadResponse.Content.ReadAsStreamAsync(cancellationToken);
+        Stream downloadStream = await HttpResponseStream.CreateAsync(downloadResponse, cancellationToken);
         string extension = YandexQuality.CodecToExtension(downloadOption.Codec);
         string actualQuality = YandexQuality.FromApiParams(downloadOption.Codec, downloadOption.BitRate);
 

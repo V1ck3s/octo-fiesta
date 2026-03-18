@@ -329,7 +329,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         
-        return await response.Content.ReadAsStreamAsync(cancellationToken);
+        return await HttpResponseStream.CreateAsync(response, cancellationToken);
     }
 
     #endregion

@@ -131,7 +131,7 @@ public class DeezerDownloadService : BaseDownloadService
 
         // Decrypt
         // Streams are disposed at the calling side
-        var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
         var downloadStream = new DeezerDecryptedStream(responseStream, trackId);
 
         return new DownloadResult(downloadStream, extension, downloadedQuality);
