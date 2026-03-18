@@ -619,20 +619,19 @@ public class DeezerMetadataService : IMusicMetadataService
             if (playlistElement.TryGetProperty("tracks", out var tracks) &&
                 tracks.TryGetProperty("data", out var tracksData))
             {
-                int trackIndex = 1;
                 foreach (var track in tracksData.EnumerateArray())
                 {
                     // For playlists, use the track's own artist (not a single album artist)
-                    var song = ParseDeezerTrack(track, trackIndex);
+                    var song = ParseDeezerTrack(track);
                     
                     // Override album name to be the playlist name
                     song.Album = playlistName;
                     
                     if (ShouldIncludeSong(song))
                     {
+                        song.Track = songs.Count + 1;
                         songs.Add(song);
                     }
-                    trackIndex++;
                 }
             }
             
