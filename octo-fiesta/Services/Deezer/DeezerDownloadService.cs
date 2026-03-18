@@ -93,7 +93,7 @@ public class DeezerDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC";
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         var downloadInfo = await GetTrackDownloadInfoAsync(trackId, cancellationToken);
         

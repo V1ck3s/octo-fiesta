@@ -84,10 +84,10 @@ public class YandexDownloadService : BaseDownloadService
         return true;
     }
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         
-        DownloadResult? downloadResult = await DownloadTrackModernAsync(trackId, song, forcePermanent, cancellationToken);
+        DownloadResult? downloadResult = await DownloadTrackModernAsync(trackId, song, cancellationToken);
         if (downloadResult is not null)
         {
             return downloadResult;
@@ -97,7 +97,7 @@ public class YandexDownloadService : BaseDownloadService
         );
 
 
-        downloadResult = await DownloadTrackLegacyAsync(trackId, song, forcePermanent, cancellationToken);
+        downloadResult = await DownloadTrackLegacyAsync(trackId, song, cancellationToken);
         if (downloadResult is not null)
         {
             return downloadResult;
@@ -122,7 +122,7 @@ public class YandexDownloadService : BaseDownloadService
 
     #region Modern Yandex API
     
-    private async Task<DownloadResult?> DownloadTrackModernAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    private async Task<DownloadResult?> DownloadTrackModernAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Downloading track {TrackId} with encrypted Yandex API", trackId);
         
@@ -259,7 +259,7 @@ public class YandexDownloadService : BaseDownloadService
 
     #region Legacy Yandex API
 
-    private async Task<DownloadResult?> DownloadTrackLegacyAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    private async Task<DownloadResult?> DownloadTrackLegacyAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
          _logger.LogInformation("Downloading track {TrackId} with legacy Yandex API", trackId);
 

@@ -336,7 +336,7 @@ public abstract class BaseDownloadService : IDownloadService
     /// <param name="forcePermanent">If true, downloads to permanent storage even in Cache mode</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Download result with local file path and quality</returns>
-    protected abstract Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken);
+    protected abstract Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken);
 
     /// <summary>
     /// Extracts the external album ID from the internal album ID format.
@@ -452,7 +452,7 @@ public abstract class BaseDownloadService : IDownloadService
             string localPath;
             await using (downloadResult.DownloadStream)
             {
-                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, cancellationToken);
+                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, isCache, cancellationToken);
             }
             song.LocalPath = localPath;
 
@@ -627,9 +627,9 @@ public abstract class BaseDownloadService : IDownloadService
     /// <param name="result">DownloadResult containing download Stream and quality string.</param>
     /// <param name="song">Song metadata to interpolate into storage template.</param>
     /// <returns></returns>
-    protected async Task<string> SaveDownloadStreamToFileAsync(DownloadResult result, Song song, CancellationToken cancellationToken)
+    protected async Task<string> SaveDownloadStreamToFileAsync(DownloadResult result, Song song, bool toCache, CancellationToken cancellationToken)
     {
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        var basePath = toCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, result.Extension, SubsonicSettings.FolderTemplate, result.DownloadedQuality);
 
         // Create directories

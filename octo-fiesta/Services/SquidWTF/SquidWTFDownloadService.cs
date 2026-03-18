@@ -110,15 +110,15 @@ public class SquidWTFDownloadService : BaseDownloadService
         return IsQobuzSource ? "27" : "HI_RES_LOSSLESS";
     }
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         if (IsQobuzSource)
         {
-            return await DownloadTrackQobuzAsync(trackId, song, forcePermanent, cancellationToken);
+            return await DownloadTrackQobuzAsync(trackId, song, cancellationToken);
         }
         else
         {
-            return await DownloadTrackTidalAsync(trackId, song, forcePermanent, cancellationToken);
+            return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
         }
     }
 
@@ -126,7 +126,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     #region Qobuz Download
 
-    private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         // Get download URL
         var quality = GetQobuzQuality();
@@ -190,7 +190,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     #region Tidal Download
 
-    private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         var requestedQuality = GetTidalQuality();
         var (manifest, actualQuality) = await GetTidalManifestAsync(trackId, requestedQuality, cancellationToken);
