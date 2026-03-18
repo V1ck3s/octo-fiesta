@@ -92,7 +92,7 @@ public class QobuzDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC_24_HIGH";
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         // Get the download URL with signature
         var downloadInfo = await GetTrackDownloadUrlAsync(trackId, cancellationToken);
@@ -121,7 +121,9 @@ public class QobuzDownloadService : BaseDownloadService
         };
 
         // Build organized folder structure using configured template
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
+        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+        var basePath = useCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         var albumFolder = Path.GetDirectoryName(outputPath)!;

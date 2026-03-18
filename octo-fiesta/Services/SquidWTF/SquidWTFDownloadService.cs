@@ -110,15 +110,15 @@ public class SquidWTFDownloadService : BaseDownloadService
         return IsQobuzSource ? "27" : "HI_RES_LOSSLESS";
     }
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         if (IsQobuzSource)
         {
-            return await DownloadTrackQobuzAsync(trackId, song, cancellationToken);
+            return await DownloadTrackQobuzAsync(trackId, song, forcePermanent, cancellationToken);
         }
         else
         {
-            return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
+            return await DownloadTrackTidalAsync(trackId, song, forcePermanent, cancellationToken);
         }
     }
 
@@ -126,7 +126,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     #region Qobuz Download
 
-    private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, CancellationToken cancellationToken)
+    private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         // Get download URL
         var quality = GetQobuzQuality();
@@ -162,7 +162,9 @@ public class SquidWTFDownloadService : BaseDownloadService
         };
         
         // Build output path
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
+        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+        var basePath = useCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
@@ -214,7 +216,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     #region Tidal Download
 
-    private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, CancellationToken cancellationToken)
+    private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
     {
         var requestedQuality = GetTidalQuality();
         var (manifest, actualQuality) = await GetTidalManifestAsync(trackId, requestedQuality, cancellationToken);
@@ -232,7 +234,9 @@ public class SquidWTFDownloadService : BaseDownloadService
         var downloadedQuality = GetDownloadedQuality(actualQuality, manifest.MimeType);
         
         // Build output path
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
+        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+        var basePath = useCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
         
         // Create directories
