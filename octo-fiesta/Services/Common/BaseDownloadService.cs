@@ -323,9 +323,9 @@ public abstract class BaseDownloadService : IDownloadService
     #region Template Methods (to be implemented by subclasses)
 
     /// <summary>
-    /// Result of a track download containing path and quality info
+    /// Result of a track download containing Stream with track content, preferred filename extension and quality
     /// </summary>
-    public record DownloadResult(string LocalPath, string? DownloadedQuality);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -447,50 +447,14 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
 
-            // Get metadata
-            // Always fetch the full album to ensure AlbumArtist is correctly set.
-            // Without this, tracks with featured artists get filed under the track artist instead of the album artist
-            // Exception: playlists are represented as albums but should use track artist.
-            Song? song = null;
-
-            var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
-            if (tempSong != null && !string.IsNullOrEmpty(tempSong.AlbumId)
-                && !PlaylistIdHelper.IsExternalPlaylist(tempSong.AlbumId))
+            Song song = await GetSongMetadataForTrackAsync(externalProvider, externalId);
+            var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
+            string localPath;
+            await using (downloadResult.DownloadStream)
             {
-                var albumExternalId = ExtractExternalIdFromAlbumId(tempSong.AlbumId);
-                if (!string.IsNullOrEmpty(albumExternalId))
-                {
-                    // Get full album with correct AlbumArtist
-                    var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
-                    if (album != null)
-                    {
-                        // Find the track in the album to get full metadata including AlbumArtist
-                        song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
-
-                        // If track not found in album (e.g., bonus track), use tempSong with album artist
-                        if (song == null && !string.IsNullOrEmpty(album.Artist))
-                        {
-                            tempSong.AlbumArtist = album.Artist;
-                        }
-                    }
-                }
+                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, cancellationToken);
             }
-
-            // Use individual song if album fetch didn't find it
-            if (song == null)
-            {
-                song = tempSong ?? await MetadataService.GetSongAsync(externalProvider, externalId);
-            }
-
-            if (song == null)
-            {
-                throw new Exception("Song not found");
-            }
-
-
-
-            var downloadResult = await DownloadTrackAsync(externalId, song, forcePermanent, cancellationToken);
-            var localPath = downloadResult.LocalPath;
+            song.LocalPath = localPath;
 
             ourDownloadInfo.Status = DownloadStatus.Completed;
             ourDownloadInfo.LocalPath = localPath;
@@ -499,8 +463,6 @@ public abstract class BaseDownloadService : IDownloadService
             // Invalidate the metadata path cache so subsequent requests find the newly downloaded file
             var cacheKey = $"{externalProvider}|{externalId}";
             _metadataPathCache.TryRemove(cacheKey, out _);
-
-            song.LocalPath = localPath;
 
             // Check if this track belongs to a playlist and update M3U
             if (PlaylistSyncService != null)
@@ -605,6 +567,95 @@ public abstract class BaseDownloadService : IDownloadService
             }
 
             DownloadLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Gets Song metadata for specified track.
+    /// Used to create download file path with respect to storage template
+    /// and to write metadata to song file.
+    /// </summary>
+    protected async Task<Song> GetSongMetadataForTrackAsync(string externalProvider, string externalId)
+    {
+        // Always fetch the full album to ensure AlbumArtist is correctly set.
+        // Without this, tracks with featured artists get filed under the track artist instead of the album artist
+        // Exception: playlists are represented as albums but should use track artist.
+        Song? song = null;
+
+        var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
+        if (tempSong != null && !string.IsNullOrEmpty(tempSong.AlbumId)
+            && !PlaylistIdHelper.IsExternalPlaylist(tempSong.AlbumId))
+        {
+            var albumExternalId = ExtractExternalIdFromAlbumId(tempSong.AlbumId);
+            if (!string.IsNullOrEmpty(albumExternalId))
+            {
+                // Get full album with correct AlbumArtist
+                var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
+                if (album != null)
+                {
+                    // Find the track in the album to get full metadata including AlbumArtist
+                    song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
+
+                    // If track not found in album (e.g., bonus track), use tempSong with album artist
+                    if (song == null && !string.IsNullOrEmpty(album.Artist))
+                    {
+                        tempSong.AlbumArtist = album.Artist;
+                    }
+                }
+            }
+        }
+
+        // Use individual song if album fetch didn't find it
+        if (song == null)
+        {
+            song = tempSong ?? await MetadataService.GetSongAsync(externalProvider, externalId);
+        }
+
+        if (song == null)
+        {
+            throw new Exception("Song not found");
+        }
+
+        return song;
+    }
+
+    /// <summary>
+    /// Takes DownloadResult provided by specific provider and saves it to file
+    /// with respect to storage template and storage mode.
+    /// Writes Song metadata to created file.
+    /// </summary>
+    /// <param name="result">DownloadResult containing download Stream and quality string.</param>
+    /// <param name="song">Song metadata to interpolate into storage template.</param>
+    /// <returns></returns>
+    protected async Task<string> SaveDownloadStreamToFileAsync(DownloadResult result, Song song, CancellationToken cancellationToken)
+    {
+        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
+        var outputPath = PathHelper.BuildTrackPath(basePath, song, result.Extension, SubsonicSettings.FolderTemplate, result.DownloadedQuality);
+
+        // Create directories
+        var albumFolder = Path.GetDirectoryName(outputPath)!;
+        EnsureDirectoryExists(albumFolder);
+
+        // Resolve unique path if file already exists
+        outputPath = PathHelper.ResolveUniquePath(outputPath);
+
+        try
+        {
+            // Download the file
+            await using var outputFile = IOFile.Create(outputPath);
+            await result.DownloadStream.CopyToAsync(outputFile, cancellationToken);
+            await outputFile.DisposeAsync();
+            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
+
+            // Write metadata
+            await WriteMetadataAsync(outputPath, song, cancellationToken);
+
+            return outputPath;
+        }
+        catch
+        {
+            TryDeleteIncompleteFile(outputPath);
+            throw;
         }
     }
 
