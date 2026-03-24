@@ -100,7 +100,7 @@ public class BaseDownloadServiceCleanupTests : IDisposable
 
         protected override string? GetTargetQuality() => null;
 
-        protected override Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+        protected override Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
         {
             LastOutputPath = Path.Combine(_testDownloadPath, "partial-file.mp3");
             File.WriteAllText(LastOutputPath, "partial");

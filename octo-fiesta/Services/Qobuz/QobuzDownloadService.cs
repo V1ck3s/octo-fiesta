@@ -92,7 +92,7 @@ public class QobuzDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC_24_HIGH";
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         // Get the download URL with signature
         var downloadInfo = await GetTrackDownloadUrlAsync(trackId, cancellationToken);
@@ -120,39 +120,12 @@ public class QobuzDownloadService : BaseDownloadService
             _ => downloadInfo.MimeType?.Contains("flac") == true ? "FLAC" : "MP3_320"
         };
 
-        // Build organized folder structure using configured template
-        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
-        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
-        var basePath = useCache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
-        
-        var albumFolder = Path.GetDirectoryName(outputPath)!;
-        EnsureDirectoryExists(albumFolder);
-        
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
+        var response = await _httpClient.GetAsync(downloadInfo.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
 
-        try
-        {
-            // Download the file (Qobuz files are NOT encrypted like Deezer)
-            var response = await _httpClient.GetAsync(downloadInfo.Url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            response.EnsureSuccessStatusCode();
+        var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
 
-            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var outputFile = IOFile.Create(outputPath);
-            
-            await responseStream.CopyToAsync(outputFile, cancellationToken);
-            await outputFile.DisposeAsync();
-            
-            // Write metadata and cover art
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
-
-            return new DownloadResult(outputPath, downloadedQuality);
-        }
-        catch
-        {
-            TryDeleteIncompleteFile(outputPath);
-            throw;
-        }
+        return new DownloadResult(responseStream, extension, downloadedQuality);
     }
 
     #endregion

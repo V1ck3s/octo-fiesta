@@ -37,10 +37,6 @@ public class DeezerDownloadService : BaseDownloadService
     private readonly int _minRequestIntervalMs = 200;
     
     private const string DeezerApiBase = "https://api.deezer.com";
-    
-    // Deezer's standard Blowfish CBC encryption key for track decryption
-    // This is a well-known constant used by the Deezer API, not a user-specific secret
-    private const string BfSecret = "g4el58wc0zvf9na1";
 
     protected override string ProviderName => "deezer";
 
@@ -97,7 +93,7 @@ public class DeezerDownloadService : BaseDownloadService
     
     protected override string? GetTargetQuality() => _preferredQuality ?? "FLAC";
 
-    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, bool forcePermanent, CancellationToken cancellationToken)
+    protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         var downloadInfo = await GetTrackDownloadInfoAsync(trackId, cancellationToken);
         
@@ -120,53 +116,25 @@ public class DeezerDownloadService : BaseDownloadService
             _ => downloadInfo.Format
         };
 
-        // Build organized folder structure using configured template
-        // Use permanent storage if forcePermanent is set, otherwise respect StorageMode
-        var useCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
-        var basePath = useCache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
-        
-        // Create directories if they don't exist
-        var albumFolder = Path.GetDirectoryName(outputPath)!;
-        EnsureDirectoryExists(albumFolder);
-        
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
 
-        try
+        // Download the encrypted file
+        var response = await RetryWithBackoffAsync(async () =>
         {
-            // Download the encrypted file
-            var response = await RetryWithBackoffAsync(async () =>
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
-                request.Headers.Add("User-Agent", "Mozilla/5.0");
-                request.Headers.Add("Accept", "*/*");
-                
-                return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            });
-
-            response.EnsureSuccessStatusCode();
-
-            // Download and decrypt
-            await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var outputFile = IOFile.Create(outputPath);
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadInfo.DownloadUrl);
+            request.Headers.Add("User-Agent", "Mozilla/5.0");
+            request.Headers.Add("Accept", "*/*");
             
-            // Use the actual track ID from downloadInfo for decryption (may be alternative track)
-            await DecryptAndWriteStreamAsync(responseStream, outputFile, downloadInfo.TrackId, cancellationToken);
-            
-            // Close file before writing metadata
-            await outputFile.DisposeAsync();
-            
-            // Write metadata and cover art
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        });
 
-            return new DownloadResult(outputPath, downloadedQuality);
-        }
-        catch
-        {
-            TryDeleteIncompleteFile(outputPath);
-            throw;
-        }
+        response.EnsureSuccessStatusCode();
+
+        // Decrypt
+        // Streams are disposed at the calling side
+        var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
+        var downloadStream = new DeezerDecryptedStream(responseStream, trackId);
+
+        return new DownloadResult(downloadStream, extension, downloadedQuality);
     }
 
     #endregion
@@ -420,84 +388,6 @@ public class DeezerDownloadService : BaseDownloadService
                 };
             }
         });
-    }
-
-    #endregion
-
-    #region Decryption
-
-    private byte[] GetBlowfishKey(string trackId)
-    {
-        var hash = MD5.HashData(Encoding.UTF8.GetBytes(trackId));
-        var hashHex = Convert.ToHexString(hash).ToLower();
-        
-        var bfKey = new byte[16];
-        for (int i = 0; i < 16; i++)
-        {
-            bfKey[i] = (byte)(hashHex[i] ^ hashHex[i + 16] ^ BfSecret[i]);
-        }
-        
-        return bfKey;
-    }
-
-    private async Task DecryptAndWriteStreamAsync(
-        Stream input, 
-        Stream output, 
-        string trackId, 
-        CancellationToken cancellationToken)
-    {
-        var bfKey = GetBlowfishKey(trackId);
-        var iv = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7 };
-        
-        var buffer = new byte[2048];
-        int chunkIndex = 0;
-        
-        while (true)
-        {
-            var bytesRead = await ReadExactAsync(input, buffer, cancellationToken);
-            if (bytesRead == 0) break;
-
-            var chunk = buffer.AsSpan(0, bytesRead).ToArray();
-
-            // Every 3rd chunk (index % 3 == 0) is encrypted
-            if (chunkIndex % 3 == 0 && bytesRead == 2048)
-            {
-                chunk = DecryptBlowfishCbc(chunk, bfKey, iv);
-            }
-
-            await output.WriteAsync(chunk, cancellationToken);
-            chunkIndex++;
-        }
-    }
-
-    private async Task<int> ReadExactAsync(Stream stream, byte[] buffer, CancellationToken cancellationToken)
-    {
-        int totalRead = 0;
-        while (totalRead < buffer.Length)
-        {
-            var bytesRead = await stream.ReadAsync(buffer.AsMemory(totalRead, buffer.Length - totalRead), cancellationToken);
-            if (bytesRead == 0) break;
-            totalRead += bytesRead;
-        }
-        return totalRead;
-    }
-
-    private byte[] DecryptBlowfishCbc(byte[] data, byte[] key, byte[] iv)
-    {
-        // Use BouncyCastle for native Blowfish CBC decryption
-        var engine = new BlowfishEngine();
-        var cipher = new CbcBlockCipher(engine);
-        cipher.Init(false, new ParametersWithIV(new KeyParameter(key), iv));
-        
-        var output = new byte[data.Length];
-        var blockSize = cipher.GetBlockSize(); // 8 bytes for Blowfish
-        
-        for (int offset = 0; offset < data.Length; offset += blockSize)
-        {
-            cipher.ProcessBlock(data, offset, output, offset);
-        }
-        
-        return output;
     }
 
     #endregion
