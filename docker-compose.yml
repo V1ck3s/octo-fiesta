@@ -33,7 +33,7 @@ services:
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
       # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
-      - Subsonic__FolderTemplate=${FOLDER_TEMPLATE:-{artist}/{album}/{track} - {title}}
+      - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
       
       # ===== DEEZER SETTINGS =====
       # Deezer ARL token (required if using Deezer)
