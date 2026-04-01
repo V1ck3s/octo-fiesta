@@ -80,8 +80,19 @@ public class SubsonicRequestParser
     /// </summary>
     private async Task ExtractJsonParametersAsync(HttpRequest request, Dictionary<string, string> parameters)
     {
-        using var reader = new StreamReader(request.Body);
+        // Keep the request body stream open for downstream proxy forwarding.
+        request.EnableBuffering();
+        if (request.Body.CanSeek)
+        {
+            request.Body.Position = 0;
+        }
+
+        using var reader = new StreamReader(request.Body, leaveOpen: true);
         var body = await reader.ReadToEndAsync();
+        if (request.Body.CanSeek)
+        {
+            request.Body.Position = 0;
+        }
         
         if (!string.IsNullOrEmpty(body))
         {

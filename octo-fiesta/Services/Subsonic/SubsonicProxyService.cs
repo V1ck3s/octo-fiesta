@@ -97,27 +97,27 @@ public class SubsonicProxyService
         // Forward body for POST/PUT/PATCH
         if (incomingRequest.Method != "GET" && incomingRequest.Method != "HEAD")
         {
-            // Reset position to read the buffered body from the beginning
+            // Reset position to forward the original buffered body from the beginning.
             if (incomingRequest.Body.CanSeek)
             {
                 incomingRequest.Body.Position = 0;
             }
-            
-            string bodyContent;
-            using (var reader = new StreamReader(incomingRequest.Body, leaveOpen: true))
+
+            if (incomingRequest.ContentLength is > 0 ||
+                !string.IsNullOrEmpty(incomingRequest.ContentType))
             {
-                bodyContent = await reader.ReadToEndAsync(cancellationToken);
-            }
-            
-            if (!string.IsNullOrEmpty(bodyContent))
-            {
-                request.Content = new StringContent(bodyContent);
-                
+                request.Content = new StreamContent(incomingRequest.Body);
+
                 // Preserve content type
                 if (incomingRequest.ContentType != null)
                 {
                     request.Content.Headers.ContentType = 
                         System.Net.Http.Headers.MediaTypeHeaderValue.Parse(incomingRequest.ContentType);
+                }
+
+                if (incomingRequest.ContentLength.HasValue)
+                {
+                    request.Content.Headers.ContentLength = incomingRequest.ContentLength.Value;
                 }
             }
         }
