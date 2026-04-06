@@ -513,8 +513,11 @@ public class SubsonicController : ControllerBase
             }
 
             mergedSongs = mergedSongs
-                .OrderBy(s => s is Dictionary<string, object> dict && dict.TryGetValue("track", out var track) 
-                    ? Convert.ToInt32(track) 
+                .OrderBy(s => s is Dictionary<string, object> dict && dict.TryGetValue("discNumber", out var discNumber)
+                    ? Convert.ToInt32(discNumber)
+                    : 0)
+                .ThenBy(s => s is Dictionary<string, object> dict && dict.TryGetValue("track", out var track)
+                    ? Convert.ToInt32(track)
                     : 0)
                 .ToList();
 
