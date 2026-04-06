@@ -1,4 +1,5 @@
 using octo_fiesta.Services.Local;
+using octo_fiesta.Services;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Download;
@@ -19,6 +20,7 @@ public class LocalLibraryServiceTests : IDisposable
     private readonly string _testDownloadPath;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
     private readonly Mock<HttpMessageHandler> _mockHandler;
+    private readonly Mock<IMusicMetadataService> _mockMetadataService;
 
     public LocalLibraryServiceTests()
     {
@@ -57,11 +59,12 @@ public class LocalLibraryServiceTests : IDisposable
         var httpClient = new HttpClient(_mockHandler.Object);
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
+        _mockMetadataService = new Mock<IMusicMetadataService>();
 
         var subsonicSettings = Options.Create(new SubsonicSettings { Url = "http://localhost:4533" });
         var mockLogger = new Mock<ILogger<LocalLibraryService>>();
 
-        _service = new LocalLibraryService(configuration, _mockHttpClientFactory.Object, subsonicSettings, mockLogger.Object);
+        _service = new LocalLibraryService(configuration, _mockHttpClientFactory.Object, _mockMetadataService.Object, subsonicSettings, mockLogger.Object);
     }
 
     public void Dispose()
@@ -213,6 +216,130 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.NotNull(result);
         Assert.False(result.Scanning);
         Assert.Equal(100, result.Count);
+    }
+
+    [Fact]
+    public async Task WaitForLocalIdAfterScanAsync_WhenScanCompletes_ResolvesId()
+    {
+        var song = new Song
+        {
+            Title = "Scanned Song",
+            Artist = "Scan Artist",
+            Album = "Scan Album",
+            ExternalProvider = "deezer",
+            ExternalId = "scan-id"
+        };
+        var localPath = Path.Combine(_testDownloadPath, "scan-song.mp3");
+        await File.WriteAllTextAsync(localPath, "fake audio content");
+        await _service.RegisterDownloadedSongAsync(song, localPath);
+        _service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "admin",
+            ["t"] = "token",
+            ["s"] = "salt",
+            ["v"] = "1.16.1",
+            ["c"] = "tests"
+        });
+
+        var statusCalls = 0;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+
+                if (url.Contains("startScan"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                    };
+                }
+
+                if (url.Contains("getScanStatus"))
+                {
+                    statusCalls++;
+                    var scanning = statusCalls == 1 ? "true" : "false";
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent($"{{\"subsonic-response\":{{\"status\":\"ok\",\"scanStatus\":{{\"scanning\":{scanning},\"count\":100}}}}}}")
+                    };
+                }
+
+                if (url.Contains("search3"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"searchResult3\":{\"song\":[{\"id\":\"555\",\"title\":\"Scanned Song\",\"artist\":\"Scan Artist\",\"album\":\"Scan Album\"}]}}}")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await _service.WaitForLocalIdAfterScanAsync("deezer", "scan-id");
+
+        Assert.Equal("555", result);
+    }
+
+    [Fact]
+    public async Task GetLocalIdForExternalSongAsync_WithoutMapping_ResolvesViaMetadataAndSearch3()
+    {
+        _mockMetadataService
+            .Setup(x => x.GetSongAsync("deezer", "fallback-id"))
+            .ReturnsAsync(new Song
+            {
+                Title = "Fallback Song",
+                Artist = "Fallback Artist",
+                Album = "Fallback Album",
+                ExternalProvider = "deezer",
+                ExternalId = "fallback-id"
+            });
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("search3"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"searchResult3\":{\"song\":[{\"id\":\"777\",\"title\":\"Fallback Song\",\"artist\":\"Fallback Artist\",\"album\":\"Fallback Album\"}]}}}")
+                    };
+                }
+
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await _service.GetLocalIdForExternalSongAsync("deezer", "fallback-id");
+
+        Assert.Equal("777", result);
     }
 
     [Theory]

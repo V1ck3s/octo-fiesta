@@ -714,6 +714,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
                     var song = MapTidalTrackToSong(item.Item);
                     if (ShouldIncludeSong(song))
                     {
+                        song.Track = songs.Count + 1;
                         songs.Add(song);
                     }
                 }

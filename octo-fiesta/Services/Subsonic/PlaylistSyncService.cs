@@ -117,11 +117,14 @@ public class PlaylistSyncService
     /// Downloads all tracks from a playlist and creates an M3U file.
     /// This is triggered when a user stars a playlist.
     /// </summary>
-    public async Task DownloadFullPlaylistAsync(string playlistId, CancellationToken cancellationToken = default)
+    /// <param name="playlistId">The playlist ID</param>
+    /// <param name="forcePermanent">If true, downloads to permanent storage even in Cache mode (used when starring)</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    public async Task DownloadFullPlaylistAsync(string playlistId, bool forcePermanent = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            _logger.LogInformation("Starting download for playlist {PlaylistId}", playlistId);
+            _logger.LogInformation("Starting download for playlist {PlaylistId} (forcePermanent: {ForcePermanent})", playlistId, forcePermanent);
             
             // Parse playlist ID
             if (!PlaylistIdHelper.IsExternalPlaylist(playlistId))
@@ -184,7 +187,10 @@ public class PlaylistSyncService
                     AddTrackToPlaylistCache(trackId, playlistId);
                     
                     _logger.LogInformation("Downloading track '{Artist} - {Title}'", track.Artist, track.Title);
-                    var localPath = await downloadService.DownloadSongAsync(provider, track.ExternalId, cancellationToken);
+                    // Use DownloadSongToPermanentAsync in Cache mode when starring to ensure tracks go to permanent storage
+                    var localPath = forcePermanent
+                        ? await downloadService.DownloadSongToPermanentAsync(provider, track.ExternalId, cancellationToken)
+                        : await downloadService.DownloadSongAsync(provider, track.ExternalId, cancellationToken);
                     
                     downloadedTracks.Add((track, localPath));
                     _logger.LogDebug("Downloaded: {Path}", localPath);

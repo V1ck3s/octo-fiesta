@@ -719,7 +719,7 @@ public class DeezerMetadataServiceTests
                         id = 111,
                         title = "Track 1",
                         duration = 200,
-                        track_position = 1,
+                        track_position = 11,
                         disk_number = 1,
                         artist = new
                         {
@@ -739,7 +739,7 @@ public class DeezerMetadataServiceTests
                         id = 222,
                         title = "Track 2",
                         duration = 180,
-                        track_position = 2,
+                        track_position = 42,
                         disk_number = 1,
                         artist = new
                         {
@@ -768,6 +768,8 @@ public class DeezerMetadataServiceTests
         Assert.Equal("Track 1", result[0].Title);
         Assert.Equal("Artist A", result[0].Artist);
         Assert.Equal("ext-deezer-song-111", result[0].Id);
+        Assert.Equal(1, result[0].Track);
+        Assert.Equal(2, result[1].Track);
     }
 
     [Fact]

@@ -146,6 +146,10 @@ var app = builder.Build();
 // Enable request body buffering FIRST to allow multiple reads (for proxy forwarding)
 app.UseRequestBodyBuffering();
 
+// Validate Subsonic authentication BEFORE any endpoint processing
+// This prevents unauthenticated access to external resources
+app.UseSubsonicAuthentication();
+
 app.UseExceptionHandler(_ => { }); // Global exception handler
 
 if (app.Environment.IsDevelopment())

@@ -19,6 +19,16 @@ public interface IDownloadService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the downloaded file</returns>
     Task<string> DownloadSongAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads a song from an external provider, forcing permanent storage even in Cache mode.
+    /// Used when starring playlists in Cache mode.
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalId">The ID on the external provider</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>The path to the downloaded file</returns>
+    Task<string> DownloadSongToPermanentAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Downloads a song and streams the result progressively
@@ -43,6 +53,14 @@ public interface IDownloadService
     /// <param name="externalProvider">The provider (deezer, spotify)</param>
     /// <param name="albumExternalId">The album ID on the external provider</param>
     void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId);
+
+    /// <summary>
+    /// Downloads all tracks from an album in background, forcing permanent storage even in Cache mode.
+    /// Used when starring an album in Cache mode.
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="albumExternalId">The album ID on the external provider</param>
+    void DownloadFullAlbumInBackgroundToPermanent(string externalProvider, string albumExternalId);
     
     /// <summary>
     /// Checks if a song is currently being downloaded
@@ -57,6 +75,15 @@ public interface IDownloadService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The local file path if exists, null otherwise</returns>
     Task<string?> GetLocalPathIfExistsAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Moves a cached song to permanent storage. Used when starring a song in Cache mode.
+    /// </summary>
+    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalId">The external track ID</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>True if the song was moved to permanent storage, false if not found in cache</returns>
+    Task<bool> PermanentizeCachedSongAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Checks if the service is properly configured and functional

@@ -14,7 +14,7 @@ using System.Net;
 
 namespace octo_fiesta.Tests;
 
-public class SubsonicControllerScrobbleTests
+public class SubsonicControllerUpdatePlaylistTests
 {
     private readonly Mock<IMusicMetadataService> _mockMetadataService;
     private readonly Mock<ILocalLibraryService> _mockLocalLibraryService;
@@ -25,7 +25,7 @@ public class SubsonicControllerScrobbleTests
     private readonly SubsonicModelMapper _modelMapper;
     private readonly IOptions<SubsonicSettings> _settings;
 
-    public SubsonicControllerScrobbleTests()
+    public SubsonicControllerUpdatePlaylistTests()
     {
         _mockMetadataService = new Mock<IMusicMetadataService>();
         _mockLocalLibraryService = new Mock<ILocalLibraryService>();
@@ -47,6 +47,7 @@ public class SubsonicControllerScrobbleTests
     private SubsonicController CreateController(
         Dictionary<string, string> queryParams,
         HttpResponseMessage proxyResponse,
+        Func<HttpRequestMessage, HttpResponseMessage>? responseFactory = null,
         Action<HttpRequestMessage>? captureRequest = null)
     {
         // We can't easily mock SubsonicProxyService (concrete class with HttpClient dependency)
@@ -59,7 +60,7 @@ public class SubsonicControllerScrobbleTests
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
             .Callback<HttpRequestMessage, CancellationToken>((req, _) => captureRequest?.Invoke(req))
-            .ReturnsAsync(proxyResponse);
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) => responseFactory?.Invoke(req) ?? proxyResponse);
 
         var httpClient = new HttpClient(mockHttpHandler.Object);
         var mockHttpClientFactory = new Mock<IHttpClientFactory>();
@@ -103,7 +104,7 @@ public class SubsonicControllerScrobbleTests
     }
 
     [Fact]
-    public async Task Scrobble_WithResolvableExternalId_UsesLocalId()
+    public async Task UpdatePlaylist_WithResolvableExternalSongId_UsesLocalId()
     {
         // Arrange
         _mockLocalLibraryService
@@ -117,8 +118,8 @@ public class SubsonicControllerScrobbleTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-qobuz-song-123" },
-                { "submission", "true" },
+                { "playlistId", "42" },
+                { "songIdToAdd", "ext-qobuz-song-123" },
                 { "f", "json" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -128,49 +129,69 @@ public class SubsonicControllerScrobbleTests
             captureRequest: req => capturedRequest = req);
 
         // Act
-        var result = await controller.Scrobble();
+        var result = await controller.UpdatePlaylist();
 
         // Assert
         Assert.IsType<FileContentResult>(result);
         Assert.NotNull(capturedRequest);
         var requestUrl = capturedRequest!.RequestUri!.ToString();
-        Assert.Contains("/rest/scrobble", requestUrl);
-        Assert.Contains("id=9981", requestUrl);
+        Assert.Contains("/rest/updatePlaylist", requestUrl);
+        Assert.Contains("songIdToAdd=9981", requestUrl);
         Assert.DoesNotContain("ext-qobuz-song-123", requestUrl);
+
+        _mockDownloadService.Verify(
+            x => x.DownloadSongAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task Scrobble_WithUnresolvableExternalId_ReturnsErrorAndDoesNotRelay()
+    public async Task UpdatePlaylist_WithExternalSongId_DownloadsThenUsesResolvedLocalId()
     {
         // Arrange
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-999"))
-            .Returns((true, "deezer", "song", "999"));
+            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
+            .Returns((true, "deezer", "song", "456"));
         _mockLocalLibraryService
-            .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "999"))
-            .ReturnsAsync((string?)null);
+            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .ReturnsAsync((string?)null)
+            .ReturnsAsync("777");
+
+        _mockDownloadService
+            .Setup(x => x.DownloadSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("/tmp/downloads/song.flac");
+        _mockLocalLibraryService
+            .Setup(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("777");
 
         HttpRequestMessage? capturedRequest = null;
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-999" },
-                { "submission", "true" },
-                { "f", "xml" }
+                { "playlistId", "42" },
+                { "songIdToAdd", "ext-deezer-song-456" },
+                { "f", "json" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("ok")
+                Content = new StringContent("{}")
             },
             captureRequest: req => capturedRequest = req);
 
         // Act
-        var result = await controller.Scrobble();
+        var result = await controller.UpdatePlaylist();
 
         // Assert
-        var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Contains("status=\"failed\"", contentResult.Content ?? "");
-        Assert.Contains("code=\"70\"", contentResult.Content ?? "");
-        Assert.Null(capturedRequest);
+        Assert.IsType<FileContentResult>(result);
+        Assert.NotNull(capturedRequest);
+        var requestUrl = capturedRequest!.RequestUri!.ToString();
+        Assert.Contains("/rest/updatePlaylist", requestUrl);
+        Assert.Contains("songIdToAdd=777", requestUrl);
+
+        _mockDownloadService.Verify(
+            x => x.DownloadSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()), Times.Once);
     }
+
 }

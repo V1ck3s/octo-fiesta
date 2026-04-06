@@ -148,7 +148,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         
         var downloadUrl = downloadResponse.Data.Url;
         Logger.LogInformation("Got download URL for track {TrackId}: {Title}", trackId, song.Title);
-        
+
+        Stream downloadStream = await GetDownloadStreamAsync(downloadUrl, cancellationToken);        
         // Determine file extension based on quality
         // Qobuz: 27/7/6 = FLAC, 5 = MP3
         var extension = quality == "5" ? ".mp3" : ".flac";
@@ -160,33 +161,8 @@ public class SquidWTFDownloadService : BaseDownloadService
             "5" => "MP3_320",
             _ => "FLAC"
         };
-        
-        // Build output path
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
-        
-        // Create directories
-        var albumFolder = Path.GetDirectoryName(outputPath)!;
-        EnsureDirectoryExists(albumFolder);
-        
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
-        
-        try
-        {
-            // Download the file (no decryption needed)
-            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-            
-            // Write metadata
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
-            
-            return new DownloadResult(outputPath, downloadedQuality);
-        }
-        catch
-        {
-            TryDeleteIncompleteFile(outputPath);
-            throw;
-        }
+
+        return new DownloadResult(downloadStream, extension, downloadedQuality);
     }
 
     private string GetQobuzQuality()
@@ -226,37 +202,12 @@ public class SquidWTFDownloadService : BaseDownloadService
         
         var downloadUrl = manifest.Urls[0];
         Logger.LogInformation("Got download URL for track {TrackId}: {Title} (quality: {Quality})", trackId, song.Title, actualQuality);
-        
-        // Determine file extension based on manifest mime type
+
+        Stream downloadStream = await GetDownloadStreamAsync(downloadUrl, cancellationToken);        
         var extension = GetExtensionFromMimeType(manifest.MimeType);
         var downloadedQuality = GetDownloadedQuality(actualQuality, manifest.MimeType);
         
-        // Build output path
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
-        
-        // Create directories
-        var albumFolder = Path.GetDirectoryName(outputPath)!;
-        EnsureDirectoryExists(albumFolder);
-        
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
-        
-        try
-        {
-            // Download the file (no decryption needed)
-            await DownloadFileAsync(downloadUrl, outputPath, cancellationToken);
-            
-            // Write metadata
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
-            
-            return new DownloadResult(outputPath, downloadedQuality);
-        }
-        catch
-        {
-            TryDeleteIncompleteFile(outputPath);
-            throw;
-        }
+        return new DownloadResult(downloadStream, extension, downloadedQuality);
     }
 
     /// <summary>
@@ -369,7 +320,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         return "MP3_320";
     }
 
-    private async Task DownloadFileAsync(string url, string outputPath, CancellationToken cancellationToken)
+    private async Task<Stream> GetDownloadStreamAsync(string url, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Add("User-Agent", "Mozilla/5.0");
@@ -378,12 +329,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
         
-        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var outputFile = IOFile.Create(outputPath);
-        
-        await responseStream.CopyToAsync(outputFile, cancellationToken);
-        
-        Logger.LogInformation("Downloaded file to: {Path}", outputPath);
+        return await HttpResponseStream.CreateAsync(response, cancellationToken);
     }
 
     #endregion

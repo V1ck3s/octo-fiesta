@@ -19,6 +19,7 @@ public class LocalLibraryService : ILocalLibraryService
     private readonly string _mappingFilePath;
     private readonly string _downloadDirectory;
     private readonly HttpClient _httpClient;
+    private readonly IMusicMetadataService _metadataService;
     private readonly SubsonicSettings _subsonicSettings;
     private readonly ILogger<LocalLibraryService> _logger;
     private Dictionary<string, LocalSongMapping>? _mappings;
@@ -37,12 +38,14 @@ public class LocalLibraryService : ILocalLibraryService
     public LocalLibraryService(
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
+        IMusicMetadataService metadataService,
         IOptions<SubsonicSettings> subsonicSettings,
         ILogger<LocalLibraryService> logger)
     {
         _downloadDirectory = configuration["Library:DownloadPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "downloads");
         _mappingFilePath = Path.Combine(_downloadDirectory, ".mappings.json");
         _httpClient = httpClientFactory.CreateClient();
+        _metadataService = metadataService;
         _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
         
@@ -115,19 +118,43 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         var mappings = await LoadMappingsAsync();
         var key = $"{externalProvider}:{externalId}";
 
-        if (!mappings.TryGetValue(key, out var mapping) || !File.Exists(mapping.LocalPath))
+        mappings.TryGetValue(key, out var mapping);
+        if (mapping != null && !File.Exists(mapping.LocalPath))
         {
-            return null;
+            mapping = null;
         }
 
-        if (!string.IsNullOrEmpty(mapping.LocalSubsonicId))
+        if (!string.IsNullOrEmpty(mapping?.LocalSubsonicId))
         {
             return mapping.LocalSubsonicId;
         }
 
         try
         {
-            var queryText = string.Join(" ", new[] { mapping.Artist, mapping.Title }.Where(s => !string.IsNullOrWhiteSpace(s)));
+            string? title;
+            string? artist;
+            string? album;
+
+            if (mapping != null)
+            {
+                title = mapping.Title;
+                artist = mapping.Artist;
+                album = mapping.Album;
+            }
+            else
+            {
+                var externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
+                if (externalSong == null)
+                {
+                    return null;
+                }
+
+                title = externalSong.Title;
+                artist = externalSong.Artist;
+                album = externalSong.Album;
+            }
+
+            var queryText = string.Join(" ", new[] { artist, title });
             if (string.IsNullOrWhiteSpace(queryText))
             {
                 return null;
@@ -154,9 +181,9 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
                 return null;
             }
 
-            var titleKey = StringNormalizer.CreateComparisonKey(mapping.Title);
-            var artistKey = StringNormalizer.CreateComparisonKey(mapping.Artist);
-            var albumKey = StringNormalizer.CreateComparisonKey(mapping.Album);
+            var titleKey = StringNormalizer.CreateComparisonKey(title);
+            var artistKey = StringNormalizer.CreateComparisonKey(artist);
+            var albumKey = StringNormalizer.CreateComparisonKey(album);
 
             string? matchedId = null;
 
@@ -188,18 +215,21 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
                 return null;
             }
 
-            await _lock.WaitAsync();
-            try
+            if (mapping != null)
             {
-                if (mappings.TryGetValue(key, out var mappingToUpdate))
+                await _lock.WaitAsync();
+                try
                 {
-                    mappingToUpdate.LocalSubsonicId = matchedId;
-                    await SaveMappingsAsync(mappings);
+                    if (mappings.TryGetValue(key, out var mappingToUpdate))
+                    {
+                        mappingToUpdate.LocalSubsonicId = matchedId;
+                        await SaveMappingsAsync(mappings);
+                    }
                 }
-            }
-            finally
-            {
-                _lock.Release();
+                finally
+                {
+                    _lock.Release();
+                }
             }
 
             _logger.LogInformation("Resolved local Subsonic ID {LocalId} for external song {Provider}:{ExternalId}",
@@ -212,6 +242,47 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
                 externalProvider, externalId);
             return null;
         }
+    }
+
+    public async Task<string?> WaitForLocalIdAfterScanAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
+    {
+        var localId = await GetLocalIdForExternalSongAsync(externalProvider, externalId);
+        if (!string.IsNullOrEmpty(localId))
+        {
+            return localId;
+        }
+
+        var now = DateTime.UtcNow;
+        var debounceRemaining = _scanDebounceInterval - (now - _lastScanTrigger);
+
+        var scanTriggered = await TriggerLibraryScanAsync();
+        if (!scanTriggered)
+        {
+            return await GetLocalIdForExternalSongAsync(externalProvider, externalId);
+        }
+
+        if (debounceRemaining > TimeSpan.Zero)
+        {
+            var scanStatus = await GetScanStatusAsync();
+            if (scanStatus?.Scanning != true)
+            {
+                _logger.LogInformation(
+                    "Library scan was debounced for {Provider}:{ExternalId}; waiting {DelaySeconds}s before retrying",
+                    externalProvider,
+                    externalId,
+                    Math.Ceiling(debounceRemaining.TotalSeconds));
+
+                await Task.Delay(debounceRemaining, cancellationToken);
+                scanTriggered = await TriggerLibraryScanAsync();
+                if (!scanTriggered)
+                {
+                    return await GetLocalIdForExternalSongAsync(externalProvider, externalId);
+                }
+            }
+        }
+
+        await WaitForScanToFinishAsync(cancellationToken);
+        return await GetLocalIdForExternalSongAsync(externalProvider, externalId);
     }
 
     private static IEnumerable<JsonElement> EnumerateSongs(JsonElement songNode)
@@ -467,6 +538,38 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         }
         
         return null;
+    }
+
+    private async Task WaitForScanToFinishAsync(CancellationToken cancellationToken)
+    {
+        const int pollDelayMilliseconds = 1000;
+        const int maxWaitMilliseconds = 120000;
+
+        var startedWaitingAt = DateTime.UtcNow;
+        var observedRunningScan = false;
+
+        while (DateTime.UtcNow - startedWaitingAt < TimeSpan.FromMilliseconds(maxWaitMilliseconds))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var scanStatus = await GetScanStatusAsync();
+            if (scanStatus?.Scanning == true)
+            {
+                observedRunningScan = true;
+            }
+            else if (observedRunningScan)
+            {
+                return;
+            }
+            else if (scanStatus?.Scanning == false)
+            {
+                return;
+            }
+
+            await Task.Delay(pollDelayMilliseconds, cancellationToken);
+        }
+
+        _logger.LogWarning("Timed out while waiting for library scan to finish");
     }
 }
 

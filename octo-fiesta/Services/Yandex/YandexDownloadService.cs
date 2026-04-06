@@ -143,15 +143,10 @@ public class YandexDownloadService : BaseDownloadService
             return null;
         }
 
+        string extension =  YandexQuality.CodecToExtension(downloadInfo.Codec);
         string actualQuality = YandexQuality.FromApiParams(downloadInfo!.Codec, downloadInfo.Bitrate);
 
-        return await SaveDownloadStreamToSongFileWithMetadata(
-            downloadStream,
-            song,
-            downloadInfo.Codec,
-            actualQuality,
-            cancellationToken
-        );
+        return new DownloadResult(downloadStream, extension, actualQuality);
     }
 
     private async Task<YandexDownloadInfo?> GetYandexDownloadInfoModernAsync(string trackId, CancellationToken cancellationToken)
@@ -237,7 +232,7 @@ public class YandexDownloadService : BaseDownloadService
             var response = await _httpClient.GetAsync(directUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (response.IsSuccessStatusCode)
             {
-                var encryptedStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var encryptedStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
 
                 // initialize decryption machinery
                 byte[] keyHex = Convert.FromHexString(downloadInfo.Key);
@@ -283,7 +278,7 @@ public class YandexDownloadService : BaseDownloadService
         }
         
         // Start download
-        using var downloadResponse = await _httpClient.GetAsync(directUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var downloadResponse = await _httpClient.GetAsync(directUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!downloadResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning(
@@ -293,14 +288,14 @@ public class YandexDownloadService : BaseDownloadService
             return null;
         }
 
+        Stream downloadStream = await HttpResponseStream.CreateAsync(downloadResponse, cancellationToken);
+        string extension = YandexQuality.CodecToExtension(downloadOption.Codec);
         string actualQuality = YandexQuality.FromApiParams(downloadOption.Codec, downloadOption.BitRate);
-        
-        return await SaveDownloadStreamToSongFileWithMetadata(
-            await downloadResponse.Content.ReadAsStreamAsync(cancellationToken),
-            song,
-            downloadOption.Codec,
-            actualQuality,
-            cancellationToken
+
+        return new DownloadResult(
+            downloadStream,
+            extension,
+            actualQuality
         );
     }
 
@@ -382,41 +377,4 @@ public class YandexDownloadService : BaseDownloadService
 
     #endregion
 
-    #region Common methods for both APIs
-
-    private async Task<DownloadResult> SaveDownloadStreamToSongFileWithMetadata(Stream stream, Song song, string codec, string downloadedQuality, CancellationToken cancellationToken)
-    {
-        // Construct download path
-        var extension = YandexQuality.CodecToExtension(codec);
-        var basePath = SubsonicSettings.StorageMode == StorageMode.Cache ? CachePath : DownloadPath;
-        var outputPath = PathHelper.BuildTrackPath(basePath, song, extension, SubsonicSettings.FolderTemplate, downloadedQuality);
-
-        // Create directories
-        var albumFolder = Path.GetDirectoryName(outputPath)!;
-        EnsureDirectoryExists(albumFolder);
-        
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
-
-        try
-        {
-            // Download the file
-            await using var outputFile = File.Create(outputPath);
-            await stream.CopyToAsync(outputFile, cancellationToken);
-            await outputFile.DisposeAsync();
-            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
-            
-            // Write metadata
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
-
-            return new DownloadResult(outputPath, downloadedQuality);
-        }
-        catch
-        {
-            TryDeleteIncompleteFile(outputPath);
-            throw;
-        }
-    }
-
-    #endregion
 }

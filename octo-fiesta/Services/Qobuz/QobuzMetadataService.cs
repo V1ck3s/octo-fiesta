@@ -220,6 +220,8 @@ public class QobuzMetadataService : IMusicMetadataService
                     song.Year ??= album.Year;
                     song.Genre ??= album.Genre;
                     song.TotalTracks ??= album.SongCount;
+                    song.CoverArtUrl ??= album.CoverArtUrl;
+                    song.CoverArtUrlLarge ??= album.CoverArtUrlLarge;
                     
                     if (ShouldIncludeSong(song))
                     {
