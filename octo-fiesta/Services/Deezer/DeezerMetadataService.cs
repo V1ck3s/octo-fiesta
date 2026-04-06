@@ -615,18 +615,65 @@ public class DeezerMetadataService : IMusicMetadataService
             var playlistName = playlistElement.TryGetProperty("title", out var titleEl)
                 ? titleEl.GetString() ?? "Unknown Playlist"
                 : "Unknown Playlist";
-            
+
+            // Deezer playlist/{id} embeds at most 400 tracks in tracks.data.
+            // Use the dedicated tracklist endpoint and follow pagination to load all tracks.
+            if (playlistElement.TryGetProperty("tracklist", out var tracklistEl))
+            {
+                var tracklistUrl = tracklistEl.GetString();
+                if (!string.IsNullOrWhiteSpace(tracklistUrl))
+                {
+                    var nextPageUrl = $"{tracklistUrl}?limit=1000";
+
+                    while (!string.IsNullOrWhiteSpace(nextPageUrl))
+                    {
+                        var tracklistResponse = await _httpClient.GetAsync(nextPageUrl);
+                        if (!tracklistResponse.IsSuccessStatusCode)
+                        {
+                            break;
+                        }
+
+                        var tracklistJson = await tracklistResponse.Content.ReadAsStringAsync();
+                        var tracklistElement = JsonDocument.Parse(tracklistJson).RootElement;
+
+                        if (!tracklistElement.TryGetProperty("data", out var pageTracks))
+                        {
+                            break;
+                        }
+                        
+                        foreach (var track in pageTracks.EnumerateArray())
+                        {
+                            // For playlists, use the track's own artist (not a single album artist)
+                            var song = ParseDeezerTrack(track);
+
+                            // Override album name to be the playlist name
+                            song.Album = playlistName;
+
+                            if (ShouldIncludeSong(song))
+                            {
+                                song.Track = songs.Count + 1;
+                                songs.Add(song);
+                            }
+                        }
+
+                        nextPageUrl = tracklistElement.TryGetProperty("next", out var nextEl)
+                            ? nextEl.GetString()
+                            : null;
+                    }
+
+                    return songs;
+                }
+            }
+
+            // Fallback for unexpected Deezer responses without tracklist URL.
             if (playlistElement.TryGetProperty("tracks", out var tracks) &&
                 tracks.TryGetProperty("data", out var tracksData))
             {
                 foreach (var track in tracksData.EnumerateArray())
                 {
-                    // For playlists, use the track's own artist (not a single album artist)
                     var song = ParseDeezerTrack(track);
-                    
-                    // Override album name to be the playlist name
                     song.Album = playlistName;
-                    
+
                     if (ShouldIncludeSong(song))
                     {
                         song.Track = songs.Count + 1;
