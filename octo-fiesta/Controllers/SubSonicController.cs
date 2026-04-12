@@ -305,10 +305,7 @@ public class SubsonicController : ControllerBase
                     {
                         album.Artist = artistName;
                     }
-                    if (string.IsNullOrEmpty(album.ArtistId))
-                    {
-                        album.ArtistId = localArtistId;
-                    }
+                    album.ArtistId = localArtistId;
                 }
             }
         }
