@@ -377,7 +377,8 @@ public class SubsonicResponseBuilder
             ["year"] = album.Year ?? 0,
             ["created"] = System.DateTime.UtcNow.ToString("o"),
             ["isExternal"] = !album.IsLocal,
-            ["displayArtist"] = album.Artist ?? ""
+            ["displayArtist"] = album.Artist ?? "",
+            ["releaseTypes"] = album.ReleaseType != null ? new List<string> { album.ReleaseType } : new List<string>(),
         };
 
         // Only include coverArt if the album has a cover URL (avoids broken images)

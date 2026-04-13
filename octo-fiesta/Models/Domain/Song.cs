@@ -100,4 +100,9 @@ public class Song
     /// 0 = Naturally clean, 1 = Explicit, 2 = Not applicable, 3 = Clean/edited version, 6/7 = Unknown
     /// </summary>
     public int? ExplicitContentLyrics { get; set; }
+
+    /// <summary>
+    /// Album release type (album, single, ep, etc.)
+    /// </summary>
+    public string? ReleaseType { get; set; }
 }

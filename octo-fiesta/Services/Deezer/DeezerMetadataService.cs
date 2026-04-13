@@ -512,6 +512,9 @@ public class DeezerMetadataService : IMusicMetadataService
                     genresData.GetArrayLength() > 0
                 ? genresData[0].GetProperty("name").GetString()
                 : null,
+            ReleaseType = album.TryGetProperty("record_type", out var recordType) 
+                ? recordType.GetString() 
+                : null,
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId
