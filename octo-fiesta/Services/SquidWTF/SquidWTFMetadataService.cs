@@ -583,7 +583,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         var response = await SendTidalRequestAsync($"/album/?id={albumId}");
         
         if (response == null) return null;
-        
         var albumResponse = JsonSerializer.Deserialize<TidalAlbumResponse>(response);
         var albumData = albumResponse?.Data;
         
@@ -897,11 +896,15 @@ public class SquidWTFMetadataService : IMusicMetadataService
         // Ensure main artist is first in the list
         if (artistNames.Count == 0 && !string.IsNullOrEmpty(mainArtistName))
             artistNames.Add(mainArtistName);
-        
+
+        var title = track.Title ?? "";
+        if (!string.IsNullOrEmpty(track.Version))
+            title += $" ({track.Version})";
+
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
-            Title = track.Title ?? "",
+            Title = title,
             Artist = mainArtistName,
             Artists = artistNames,
             ArtistId = track.Artist != null 
