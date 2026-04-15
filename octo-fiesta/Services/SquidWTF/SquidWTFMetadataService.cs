@@ -512,7 +512,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         // Filter duplicates
         var albums = dataResponse.Data.Albums.Items
-            .DistinctBy(a => new { a.Title, a.Artist, a.NumberOfTracks, a.ReleaseDate }).ToList();
+            .DistinctBy(a => new { a.Title, a.Artist?.Name, a.NumberOfTracks, a.ReleaseDate }).ToList();
         
         return albums
             .Take(limit)
@@ -658,7 +658,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         // Filter duplicates
         var albums = dataResponse.Albums.Items
-            .DistinctBy(a => new { a.Title, a.Artist, a.NumberOfTracks, a.ReleaseDate }).ToList();
+            .DistinctBy(a => new { a.Title, a.Artist?.Name, a.NumberOfTracks, a.ReleaseDate }).ToList();
         
         // Filter albums that have this artist as main artist
         return albums
