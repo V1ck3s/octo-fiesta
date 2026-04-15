@@ -493,6 +493,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 songs.Add(song);
             }
         }
+
+        // Filter duplicates
+        songs = songs
+            .DistinctBy(s => new { s.Title, s.Artist, s.Album, s.Duration, s.ReleaseDate }).ToList();
         
         return songs;
     }
@@ -505,8 +509,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
         
         var dataResponse = JsonSerializer.Deserialize<TidalNestedSearchResponse>(response);
         if (dataResponse?.Data?.Albums?.Items == null) return new List<Album>();
+
+        // Filter duplicates
+        var albums = dataResponse.Data.Albums.Items
+            .DistinctBy(a => new { a.Title, a.Artist?.Name, a.NumberOfTracks, a.ReleaseDate }).ToList();
         
-        return dataResponse.Data.Albums.Items
+        return albums
             .Take(limit)
             .Select(MapTidalAlbumToAlbum)
             .ToList();
@@ -646,9 +654,13 @@ public class SquidWTFMetadataService : IMusicMetadataService
         
         var dataResponse = JsonSerializer.Deserialize<TidalArtistAlbumsResponseWrapper>(response);
         if (dataResponse?.Albums?.Items == null) return new List<Album>();
+
+        // Filter duplicates
+        var albums = dataResponse.Albums.Items
+            .DistinctBy(a => new { a.Title, a.Artist?.Name, a.NumberOfTracks, a.ReleaseDate }).ToList();
         
         // Filter albums that have this artist as main artist
-        return dataResponse.Albums.Items
+        return albums
             .Select(MapTidalAlbumToAlbum)
             .ToList();
     }
