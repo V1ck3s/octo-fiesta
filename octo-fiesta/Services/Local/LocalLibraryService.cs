@@ -419,6 +419,165 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         return false;
     }
 
+    public async Task<List<(string PlaylistId, string PlaylistName)>> FindPlaylistsContainingSongAsync(string songId)
+    {
+        var result = new List<(string PlaylistId, string PlaylistName)>();
+
+        if (string.IsNullOrEmpty(songId))
+            return result;
+
+        var authQuery = BuildAuthQuery();
+        if (string.IsNullOrEmpty(authQuery))
+        {
+            _logger.LogWarning("Cannot search playlists: Subsonic credentials not set");
+            return result;
+        }
+
+        try
+        {
+            var playlistsUrl = $"{_subsonicSettings.Url}/rest/getPlaylists?f=json{authQuery}";
+            var response = await _httpClient.GetAsync(playlistsUrl);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to get playlists: {StatusCode}", response.StatusCode);
+                return result;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var subResp) ||
+                !subResp.TryGetProperty("playlists", out var playlists) ||
+                !playlists.TryGetProperty("playlist", out var playlistNode))
+                return result;
+
+            foreach (var playlist in EnumerateJsonElements(playlistNode))
+            {
+                var playlistId = playlist.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+                var playlistName = playlist.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                if (string.IsNullOrEmpty(playlistId)) continue;
+
+                var detailUrl = $"{_subsonicSettings.Url}/rest/getPlaylist?f=json&id={Uri.EscapeDataString(playlistId)}{authQuery}";
+                var detailResponse = await _httpClient.GetAsync(detailUrl);
+                if (!detailResponse.IsSuccessStatusCode) continue;
+
+                var detailContent = await detailResponse.Content.ReadAsStringAsync();
+                using var detailDoc = JsonDocument.Parse(detailContent);
+
+                if (!detailDoc.RootElement.TryGetProperty("subsonic-response", out var subResp2) ||
+                    !subResp2.TryGetProperty("playlist", out var playlistDetail) ||
+                    !playlistDetail.TryGetProperty("entry", out var entries))
+                    continue;
+
+                foreach (var entry in EnumerateJsonElements(entries))
+                {
+                    var entrySongId = entry.TryGetProperty("id", out var songIdEl) ? songIdEl.ToString() : null;
+                    if (entrySongId == songId)
+                    {
+                        result.Add((playlistId, playlistName ?? ""));
+                        break;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to search playlists for song {SongId}", songId);
+        }
+
+        return result;
+    }
+
+    public async Task MigratePlaylistEntriesAsync(string oldSongId, string newSongId, List<(string PlaylistId, string PlaylistName)> affectedPlaylists)
+    {
+        if (oldSongId == newSongId || affectedPlaylists.Count == 0)
+            return;
+
+        var authQuery = BuildAuthQuery();
+        if (string.IsNullOrEmpty(authQuery))
+        {
+            _logger.LogWarning("Cannot migrate playlists: Subsonic credentials not set");
+            return;
+        }
+
+        foreach (var (playlistId, playlistName) in affectedPlaylists)
+        {
+            try
+            {
+                // Re-fetch current playlist state
+                var detailUrl = $"{_subsonicSettings.Url}/rest/getPlaylist?f=json&id={Uri.EscapeDataString(playlistId)}{authQuery}";
+                var detailResponse = await _httpClient.GetAsync(detailUrl);
+                if (!detailResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to fetch playlist {PlaylistId} for migration: {StatusCode}", playlistId, detailResponse.StatusCode);
+                    continue;
+                }
+
+                var detailContent = await detailResponse.Content.ReadAsStringAsync();
+                using var detailDoc = JsonDocument.Parse(detailContent);
+
+                if (!detailDoc.RootElement.TryGetProperty("subsonic-response", out var subResp) ||
+                    !subResp.TryGetProperty("playlist", out var playlistDetail) ||
+                    !playlistDetail.TryGetProperty("entry", out var entries))
+                    continue;
+
+                var songIds = new List<string>();
+                foreach (var entry in EnumerateJsonElements(entries))
+                {
+                    var id = entry.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+                    if (!string.IsNullOrEmpty(id))
+                        songIds.Add(id);
+                }
+
+                if (songIds.Count == 0 || !songIds.Contains(oldSongId))
+                    continue;
+
+                // Build updated list with replacement
+                var updatedSongIds = songIds.Select(id => id == oldSongId ? newSongId : id).ToList();
+
+                // Build updatePlaylist URL: remove all entries + re-add in order
+                var url = $"{_subsonicSettings.Url}/rest/updatePlaylist?f=json&playlistId={Uri.EscapeDataString(playlistId)}";
+                for (var i = 0; i < songIds.Count; i++)
+                    url += $"&songIndexToRemove={i}";
+                foreach (var id in updatedSongIds)
+                    url += $"&songIdToAdd={Uri.EscapeDataString(id)}";
+                url += authQuery;
+
+                var updateResponse = await _httpClient.GetAsync(url);
+                if (updateResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Migrated playlist '{PlaylistName}' ({PlaylistId}): replaced song {OldId} with {NewId}",
+                        playlistName, playlistId, oldSongId, newSongId);
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to update playlist '{PlaylistName}' ({PlaylistId}): {StatusCode}",
+                        playlistName, playlistId, updateResponse.StatusCode);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error migrating playlist '{PlaylistName}' ({PlaylistId})", playlistName, playlistId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enumerates JSON elements that can be either a single object or an array
+    /// </summary>
+    private static IEnumerable<JsonElement> EnumerateJsonElements(JsonElement node)
+    {
+        if (node.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in node.EnumerateArray())
+                yield return element;
+        }
+        else if (node.ValueKind == JsonValueKind.Object)
+        {
+            yield return node;
+        }
+    }
+
     private string BuildAuthQuery()
     {
         if (_subsonicCredentials == null || _subsonicCredentials.Count == 0)

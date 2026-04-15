@@ -575,4 +575,240 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.NotNull(scanUri);
         Assert.Contains("u=realuser", scanUri!.Query);
     }
+
+    // --- FindPlaylistsContainingSongAsync tests ---
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_WithoutCredentials_ReturnsEmptyList()
+    {
+        var result = await _service.FindPlaylistsContainingSongAsync("some-id");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongInOnePlaylist_ReturnsThatPlaylist()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "My Playlist", new[] { "song-a", "song-b", "song-c" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-b");
+
+        Assert.Single(result);
+        Assert.Equal("pl-1", result[0].PlaylistId);
+        Assert.Equal("My Playlist", result[0].PlaylistName);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongInMultiplePlaylists_ReturnsAll()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "Playlist One", new[] { "song-a", "song-x" }),
+            ("pl-2", "Playlist Two", new[] { "song-x", "song-b" }),
+            ("pl-3", "Playlist Three", new[] { "song-c" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-x");
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, p => p.PlaylistId == "pl-1");
+        Assert.Contains(result, p => p.PlaylistId == "pl-2");
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongNotInAnyPlaylist_ReturnsEmptyList()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "Playlist", new[] { "song-a", "song-b" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("nonexistent");
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_GetPlaylistsFails_ReturnsEmptyList()
+    {
+        SetupCredentials();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylists"))
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-a");
+
+        Assert.Empty(result);
+    }
+
+    // --- MigratePlaylistEntriesAsync tests ---
+
+    [Fact]
+    public async Task MigratePlaylistEntriesAsync_RebuildsPlaylistWithCorrectOrder()
+    {
+        SetupCredentials();
+        var capturedUris = new List<Uri?>();
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"subsonic-response\":{\"playlist\":{\"entry\":[" +
+                            "{\"id\":\"song-a\",\"title\":\"A\"}," +
+                            "{\"id\":\"old-id\",\"title\":\"B\"}," +
+                            "{\"id\":\"song-c\",\"title\":\"C\"}" +
+                            "]}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        await _service.MigratePlaylistEntriesAsync("old-id", "new-id",
+            new List<(string, string)> { ("pl-1", "Test Playlist") });
+
+        var updateUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("updatePlaylist") == true);
+        Assert.NotNull(updateUri);
+        var query = updateUri!.ToString();
+
+        // Verify all 3 entries removed by index
+        Assert.Contains("songIndexToRemove=0", query);
+        Assert.Contains("songIndexToRemove=1", query);
+        Assert.Contains("songIndexToRemove=2", query);
+
+        // Verify re-added in correct order with replacement
+        var addParams = query.Split("songIdToAdd=").Skip(1).Select(s => s.Split('&')[0]).ToList();
+        Assert.Equal(3, addParams.Count);
+        Assert.Equal("song-a", addParams[0]);
+        Assert.Equal("new-id", addParams[1]);
+        Assert.Equal("song-c", addParams[2]);
+    }
+
+    [Fact]
+    public async Task MigratePlaylistEntriesAsync_UpdateFails_ContinuesToNextPlaylist()
+    {
+        SetupCredentials();
+        var updateCallCount = 0;
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"subsonic-response\":{\"playlist\":{\"entry\":[{\"id\":\"old-id\",\"title\":\"Song\"}]}}}")
+                    };
+                }
+                if (url.Contains("updatePlaylist"))
+                {
+                    updateCallCount++;
+                    // First call fails, second succeeds
+                    if (updateCallCount == 1)
+                        return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Should not throw - processes both playlists even if first fails
+        await _service.MigratePlaylistEntriesAsync("old-id", "new-id",
+            new List<(string, string)> { ("pl-1", "Playlist 1"), ("pl-2", "Playlist 2") });
+
+        Assert.Equal(2, updateCallCount);
+    }
+
+    // --- Helpers ---
+
+    private void SetupCredentials()
+    {
+        _service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "admin", ["t"] = "token", ["s"] = "salt", ["v"] = "1.16.1", ["c"] = "tests"
+        });
+    }
+
+    private void SetupPlaylistResponses((string Id, string Name, string[] SongIds)[] playlists)
+    {
+        var playlistListJson = string.Join(",", playlists.Select(p =>
+            $"{{\"id\":\"{p.Id}\",\"name\":\"{p.Name}\",\"songCount\":{p.SongIds.Length}}}"));
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+
+                if (url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $"{{\"subsonic-response\":{{\"playlists\":{{\"playlist\":[{playlistListJson}]}}}}}}")
+                    };
+                }
+
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    foreach (var p in playlists)
+                    {
+                        if (url.Contains($"id={p.Id}"))
+                        {
+                            var entriesJson = string.Join(",", p.SongIds.Select(id =>
+                                $"{{\"id\":\"{id}\",\"title\":\"Song {id}\"}}"));
+                            return new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = new StringContent(
+                                    $"{{\"subsonic-response\":{{\"playlist\":{{\"entry\":[{entriesJson}]}}}}}}")
+                            };
+                        }
+                    }
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+    }
 }
