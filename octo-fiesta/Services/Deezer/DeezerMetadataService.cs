@@ -238,8 +238,9 @@ public class DeezerMetadataService : IMusicMetadataService
                 song.AlbumArtist = album.Artist;
                 song.Year ??= album.Year;
                 song.Genre ??= album.Genre;
+                song.ReleaseType ??= album.ReleaseType;
                 song.TotalTracks ??= album.SongCount;
-                
+
                 if (ShouldIncludeSong(song))
                 {
                     album.Songs.Add(song);
@@ -511,6 +512,9 @@ public class DeezerMetadataService : IMusicMetadataService
                     genres.TryGetProperty("data", out var genresData) &&
                     genresData.GetArrayLength() > 0
                 ? genresData[0].GetProperty("name").GetString()
+                : null,
+            ReleaseType = album.TryGetProperty("record_type", out var recordType) 
+                ? recordType.GetString() 
                 : null,
             IsLocal = false,
             ExternalProvider = "deezer",

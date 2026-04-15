@@ -823,6 +823,9 @@ public abstract class BaseDownloadService : IDownloadService
             if (!string.IsNullOrEmpty(song.Copyright))
                 tagFile.Tag.Copyright = song.Copyright;
 
+            if (!string.IsNullOrEmpty(song.ReleaseType))
+                tagFile.Tag.MusicBrainzReleaseType = song.ReleaseType;
+
             var comments = new List<string>();
             if (!string.IsNullOrEmpty(song.Isrc))
                 comments.Add($"ISRC: {song.Isrc}");
