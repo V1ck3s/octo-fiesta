@@ -80,7 +80,9 @@ public class TidalTrack
     
     [JsonPropertyName("title")]
     public string? Title { get; set; }
-    
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
+
     [JsonPropertyName("duration")]
     public int Duration { get; set; }
     
