@@ -238,8 +238,9 @@ public class DeezerMetadataService : IMusicMetadataService
                 song.AlbumArtist = album.Artist;
                 song.Year ??= album.Year;
                 song.Genre ??= album.Genre;
+                song.ReleaseType ??= album.ReleaseType;
                 song.TotalTracks ??= album.SongCount;
-                
+
                 if (ShouldIncludeSong(song))
                 {
                     album.Songs.Add(song);
