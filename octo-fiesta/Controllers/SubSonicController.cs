@@ -895,8 +895,7 @@ public class SubsonicController : ControllerBase
         var scrobbleResolution = await ResolveExternalSongIdIfPossible(parameters, "scrobble");
         if (scrobbleResolution is { IsExternalSong: true, Resolved: false })
         {
-            return _responseBuilder.CreateError(format, 70,
-                "External song could not be scrobbled because it is not available locally yet.");
+            return _responseBuilder.CreateResponse(format, "scrobble", new { });
         }
 
         try
