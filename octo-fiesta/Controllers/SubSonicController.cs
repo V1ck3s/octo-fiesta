@@ -1069,7 +1069,10 @@ public class SubsonicController : ControllerBase
         }
 
         _logger.LogInformation("Song {SongId} is not available locally yet. Downloading before playlist update.", songId);
-        await _downloadService.DownloadSongAsync(provider, externalId, cancellationToken);
+        if (!await _downloadService.PermanentizeCachedSongAsync(provider, externalId, cancellationToken))
+        {
+           await _downloadService.DownloadSongToPermanentAsync(provider, externalId, cancellationToken);
+        }
 
         localId = await _localLibraryService.WaitForLocalIdAfterScanAsync(provider, externalId, cancellationToken);
         if (!string.IsNullOrEmpty(localId))
