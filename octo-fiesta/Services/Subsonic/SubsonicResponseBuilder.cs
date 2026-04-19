@@ -578,6 +578,44 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
+    /// Creates an OpenSubsonic transcodeDecision response indicating direct-play is possible.
+    /// Format info is derived from the song's local file (if present) or defaults to mp3.
+    /// Pass the request scheme ("http"/"https") so the client gets the right protocol.
+    /// Passing a null song yields a safe best-effort response (mp3, 128kbps).
+    /// </summary>
+    public IActionResult CreateTranscodeDecisionResponse(Song? song, string protocol)
+    {
+        string container = "mp3";
+        int bitRate = 128;
+        if (song != null)
+        {
+            var (suffix, _, br) = GetSuffixContentTypeAndBitrate(song);
+            container = suffix == "Remote" ? "mp3" : suffix;
+            bitRate = br > 0 ? br : 128;
+        }
+
+        return CreateJsonResponse(new
+        {
+            status = "ok",
+            version = SubsonicVersion,
+            openSubsonic = true,
+            transcodeDecision = new
+            {
+                canDirectPlay = true,
+                canTranscode = false,
+                sourceStream = new
+                {
+                    protocol,
+                    container,
+                    codec = container,
+                    audioChannels = 2,
+                    audioBitrate = bitRate * 1000
+                }
+            }
+        });
+    }
+
+    /// <summary>
     /// Determines the file suffix, MIME content type, and bitrate based on the song's provider and local path.
     /// Supports FLAC, M4A (AAC), and MP3 formats for local files, and provider-specific formats for external files.
     /// </summary>
