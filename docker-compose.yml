@@ -15,6 +15,10 @@ services:
       # ===== SUBSONIC SETTINGS =====
       # Navidrome/Subsonic server URL
       - Subsonic__Url=${SUBSONIC_URL:-http://localhost:4533}
+      # Admin username to perform actions on navidrome server that require admin permissions (optional)
+      - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
+      # Admin Password to perform actions on navidrome server that require admin permissions (optional)
+      - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
       # Music service to use: Deezer, Qobuz, or SquidWTF (default: SquidWTF)
       - Subsonic__MusicService=${MUSIC_SERVICE:-SquidWTF}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)

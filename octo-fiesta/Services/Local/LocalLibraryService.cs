@@ -29,7 +29,10 @@ public class LocalLibraryService : ILocalLibraryService
     private DateTime _lastScanTrigger = DateTime.MinValue;
     private readonly TimeSpan _scanDebounceInterval = TimeSpan.FromSeconds(30);
     
-    // Stored Subsonic auth parameters for server-to-server calls
+    // Primary subsonic auth parameters/credentials from config for server-to-server calls
+    private SubsonicCredentials? _subsonicAdminCredentials;
+
+    // Secondary subsonic auth parameters/credentials for server-to-server calls
     private SubsonicCredentials? _subsonicUserCredentials;
     
     // Whether the captured user has admin rights (null = not checked yet)
@@ -48,6 +51,14 @@ public class LocalLibraryService : ILocalLibraryService
         _metadataService = metadataService;
         _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
+        var adminCredentialsParameters = new Dictionary<string, string>
+        {
+            ["u"] = _subsonicSettings.AdminUsername ?? "",
+            ["p"] = _subsonicSettings.AdminPassword ?? "",
+            ["v"] = "1.16.1",
+            ["c"] = "octo-fiesta"
+        };
+        _subsonicAdminCredentials = SubsonicCredentials.TryFromDictionary(adminCredentialsParameters);
         
         if (!Directory.Exists(_downloadDirectory))
         {
@@ -406,14 +417,14 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
                 var isAdmin = adminRole.GetBoolean();
                 if (!isAdmin)
                 {
-                    _logger.LogInformation("Subsonic user '{User}' is not admin, library scan will be skipped", subsonicCredentials.Username);
+                    _logger.LogDebug("Subsonic user '{User}' has no admin rights", subsonicCredentials.Username);
                 }
                 return isAdmin;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to check user admin rights, library scan will be skipped");
+            _logger.LogWarning(ex, "Failed to check user admin rights");
         }
         
         return false;
@@ -584,7 +595,6 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         {
             return string.Empty;
         }
-
         var parts = new List<string>
         {
             $"u={Uri.EscapeDataString(credentials.Username)}",
@@ -592,16 +602,16 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
             $"c={Uri.EscapeDataString(credentials.ClientName)}"
         };
 
-        if (!string.IsNullOrEmpty(credentials.Token) && !string.IsNullOrEmpty(credentials.Salt))
+        if (!string.IsNullOrWhiteSpace(credentials.Token) && !string.IsNullOrWhiteSpace(credentials.Salt))
         {
             parts.Add($"t={Uri.EscapeDataString(credentials.Token)}");
             parts.Add($"s={Uri.EscapeDataString(credentials.Salt)}");
         }
-        else if (!string.IsNullOrEmpty(credentials.Password))
+        else if (!string.IsNullOrWhiteSpace(credentials.Password))
         {
             parts.Add($"p={Uri.EscapeDataString(credentials.Password)}");
         }
-
+        
         return "&" + string.Join("&", parts);
     }
 
@@ -626,14 +636,11 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     public async Task<bool> TriggerLibraryScanAsync()
     {
-        // Check admin rights on first call
-        if (_userIsAdmin == null)
-        {
-            _userIsAdmin = await CheckUserIsAdminAsync(_subsonicUserCredentials);
-        }
+        var requestCredentials = await ResolveAdminCapableCredentialsAsync();
         
-        if (_userIsAdmin == false)
+        if (requestCredentials == null)
         {
+            _logger.LogWarning("Can not trigger library scan due to no available admin credentials");
             return false;
         }
         
@@ -650,7 +657,7 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         
         try
         {
-            var authQuery = BuildAuthQuery(_subsonicUserCredentials);
+            var authQuery = BuildAuthQuery(requestCredentials);
             var url = $"{_subsonicSettings.Url}/rest/startScan?f=json{authQuery}";
             
             _logger.LogInformation("Triggering Subsonic library scan...");
@@ -665,7 +672,7 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
             }
             else
             {
-                _logger.LogWarning("Failed to trigger Subsonic scan: {StatusCode} - Server may require authentication", response.StatusCode);
+                _logger.LogWarning("Failed to trigger Subsonic scan: {StatusCode}", response.StatusCode);
                 return false;
             }
         }
@@ -682,7 +689,12 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         {
             // Note: This endpoint works without authentication on most Subsonic/Navidrome servers
             // when called from localhost.
-            var authQuery = BuildAuthQuery(_subsonicUserCredentials);
+            // current behavior: tries to find admin credentials otherwise tries with not admin credentials
+            var requestCredentials = await ResolveAdminCapableCredentialsAsync();
+
+            if (requestCredentials == null) requestCredentials = _subsonicUserCredentials;
+
+            var authQuery = BuildAuthQuery(requestCredentials);
             var url = $"{_subsonicSettings.Url}/rest/getScanStatus?f=json{authQuery}";
             
             var response = await _httpClient.GetAsync(url);
@@ -741,6 +753,28 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         }
 
         _logger.LogWarning("Timed out while waiting for library scan to finish");
+    }
+
+    private async Task<SubsonicCredentials?> ResolveAdminCapableCredentialsAsync()
+    {
+        // Check admin rights on first call
+        if (_userIsAdmin == null)
+        {
+            _userIsAdmin = await CheckUserIsAdminAsync(_subsonicUserCredentials);
+        }
+
+        if (_subsonicAdminCredentials != null && await CheckUserIsAdminAsync(_subsonicAdminCredentials))
+        {
+            return _subsonicAdminCredentials;
+        }
+        else if (_subsonicUserCredentials != null && _userIsAdmin == true)
+        {
+            return _subsonicUserCredentials;
+        }
+        else
+        {
+            return null;
+        }
     }
 }
 
