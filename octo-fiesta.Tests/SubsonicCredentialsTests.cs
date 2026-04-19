@@ -13,25 +13,44 @@ public class SubsonicCredentialsTests
         ["c"] = "aonsoku"
     };
 
-    [Fact]
-    public void TryFromDictionary_ValidParameters_ReturnsCredentials()
+    private static Dictionary<string, string> ValidPasswordAuthDictionary() => new()
     {
-        var parameters = ValidTokenAuthDictionary();
+        ["u"] = "alice",
+        ["p"] = "hunter2",
+        ["v"] = "1.16.1",
+        ["c"] = "feishin"
+    };
 
-        var result = SubsonicCredentials.TryFromDictionary(parameters);
+    [Fact]
+    public void TryFromDictionary_TokenAuth_ReturnsCredentials()
+    {
+        var result = SubsonicCredentials.TryFromDictionary(ValidTokenAuthDictionary());
 
         Assert.NotNull(result);
         Assert.Equal("alice", result.Username);
         Assert.Equal("abc123", result.Token);
         Assert.Equal("salt42", result.Salt);
+        Assert.Null(result.Password);
         Assert.Equal("1.16.1", result.ApiVersion);
         Assert.Equal("aonsoku", result.ClientName);
     }
 
+    [Fact]
+    public void TryFromDictionary_PasswordAuth_ReturnsCredentials()
+    {
+        var result = SubsonicCredentials.TryFromDictionary(ValidPasswordAuthDictionary());
+
+        Assert.NotNull(result);
+        Assert.Equal("alice", result.Username);
+        Assert.Equal("hunter2", result.Password);
+        Assert.Null(result.Token);
+        Assert.Null(result.Salt);
+        Assert.Equal("1.16.1", result.ApiVersion);
+        Assert.Equal("feishin", result.ClientName);
+    }
+
     [Theory]
     [InlineData("u")]
-    [InlineData("t")]
-    [InlineData("s")]
     [InlineData("v")]
     [InlineData("c")]
     public void TryFromDictionary_MissingRequiredParameter_ReturnsNull(string keyToRemove)
@@ -44,16 +63,26 @@ public class SubsonicCredentialsTests
         Assert.Null(result);
     }
 
-    [Theory]
-    [InlineData("u")]
-    [InlineData("t")]
-    [InlineData("s")]
-    [InlineData("v")]
-    [InlineData("c")]
-    public void TryFromDictionary_EmptyRequiredParameter_ReturnsNull(string keyToRemove)
+    [Fact]
+    public void TryFromDictionary_NoAuthMethod_ReturnsNull()
+    {
+        var parameters = new Dictionary<string, string>
+        {
+            ["u"] = "alice",
+            ["v"] = "1.16.1",
+            ["c"] = "client"
+        };
+
+        var result = SubsonicCredentials.TryFromDictionary(parameters);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void TryFromDictionary_TokenWithoutSalt_ReturnsNull()
     {
         var parameters = ValidTokenAuthDictionary();
-        parameters[keyToRemove] = "";
+        parameters.Remove("s");
 
         var result = SubsonicCredentials.TryFromDictionary(parameters);
 

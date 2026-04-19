@@ -3,26 +3,30 @@ namespace octo_fiesta.Models.Subsonic;
 /// <summary>
 /// Represents a credentials set for subsonic login
 /// </summary>
- 
 public record SubsonicCredentials(
     string Username,
-    string Token,
-    string Salt,
+    string? Token,
+    string? Salt,
+    string? Password,
     string ApiVersion,
     string ClientName
 )
 {
-    public static SubsonicCredentials? TryFromDictionary(
-        IDictionary<string, string>? dict)
+    public static SubsonicCredentials? TryFromDictionary(IDictionary<string, string>? dict)
     {
         if (dict == null) return null;
-        if (!dict.TryGetValue("u", out var Username) || string.IsNullOrEmpty(Username)) return null;
-        if (!dict.TryGetValue("t", out var Token) || string.IsNullOrEmpty(Token)) return null;
-        if (!dict.TryGetValue("s", out var Salt) || string.IsNullOrEmpty(Salt)) return null;
-        if (!dict.TryGetValue("v", out var ApiVersion) || string.IsNullOrEmpty(ApiVersion)) return null;
-        if (!dict.TryGetValue("c", out var ClientName) || string.IsNullOrEmpty(ClientName)) return null;
+        if (!dict.TryGetValue("u", out var username) || string.IsNullOrEmpty(username)) return null;
+        if (!dict.TryGetValue("v", out var apiVersion) || string.IsNullOrEmpty(apiVersion)) return null;
+        if (!dict.TryGetValue("c", out var clientName) || string.IsNullOrEmpty(clientName)) return null;
 
-        return new SubsonicCredentials(Username, Token, Salt, ApiVersion, ClientName);
+        dict.TryGetValue("t", out var token);
+        dict.TryGetValue("s", out var salt);
+        dict.TryGetValue("p", out var password);
+
+        var hasToken = !string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(salt);
+        var hasPassword = !string.IsNullOrEmpty(password);
+        if (!hasToken && !hasPassword) return null;
+
+        return new SubsonicCredentials(username, token, salt, password, apiVersion, clientName);
     }
-
 }

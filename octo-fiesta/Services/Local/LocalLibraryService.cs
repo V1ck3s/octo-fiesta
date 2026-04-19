@@ -580,21 +580,30 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     private string BuildAuthQuery(SubsonicCredentials? credentials)
     {
-    if (credentials == null)
+        if (credentials == null)
         {
             return string.Empty;
         }
-    var parts = new List<string>
-    {
-        $"u={Uri.EscapeDataString(credentials.Username)}",
-        $"t={Uri.EscapeDataString(credentials.Token)}",
-        $"s={Uri.EscapeDataString(credentials.Salt)}",
-        $"v={Uri.EscapeDataString(credentials.ApiVersion)}",
-        $"c={Uri.EscapeDataString(credentials.ClientName)}"
-    };
-    
-    return "&" + string.Join("&", parts);
-}
+
+        var parts = new List<string>
+        {
+            $"u={Uri.EscapeDataString(credentials.Username)}",
+            $"v={Uri.EscapeDataString(credentials.ApiVersion)}",
+            $"c={Uri.EscapeDataString(credentials.ClientName)}"
+        };
+
+        if (!string.IsNullOrEmpty(credentials.Token) && !string.IsNullOrEmpty(credentials.Salt))
+        {
+            parts.Add($"t={Uri.EscapeDataString(credentials.Token)}");
+            parts.Add($"s={Uri.EscapeDataString(credentials.Salt)}");
+        }
+        else if (!string.IsNullOrEmpty(credentials.Password))
+        {
+            parts.Add($"p={Uri.EscapeDataString(credentials.Password)}");
+        }
+
+        return "&" + string.Join("&", parts);
+    }
 
     public string GetDownloadDirectory() => _downloadDirectory;
 
