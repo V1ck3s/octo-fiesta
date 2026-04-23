@@ -874,9 +874,18 @@ public class SubsonicController : ControllerBase
                 }
                 else
                 {
-                    // Song not in cache - user needs to play it first
-                    return _responseBuilder.CreateError(format, 70, 
-                        "Song is not in cache yet. Play it first, then star it to save permanently.");
+                    try
+                    {
+                        await _downloadService.DownloadSongToPermanentAsync(provider, externalId);
+                        _logger.LogInformation("Successfully permanentized cached song {Provider}:{ExternalId}", provider,
+                            externalId);
+                        // Return success - the song will be available locally after Navidrome scans
+                        return _responseBuilder.CreateResponse(format, "starred", new { });
+                    }
+                    catch
+                    {
+                        return _responseBuilder.CreateError(format, 80, "Failed to download starred song");
+                    }
                 }
             }
         }
