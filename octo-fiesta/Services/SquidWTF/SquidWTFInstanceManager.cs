@@ -15,13 +15,13 @@ public class SquidWTFInstanceManager
     private readonly SquidWTFSettings _settings;
     private readonly ILogger<SquidWTFInstanceManager> _logger;
     
-    private const string InstancesJsonUrl = "https://monochrome.tf/instances.json";
+    private const string DefaultInstancesJsonUrl = "https://monochrome.tf/instances.json";
     private const int DefaultTimeoutSeconds = 5;
-    
-    // Static Qobuz API (no failover needed as there's only one)
+    private const string FallbackInstance = "https://tidal-api.binimum.org";
+
+    // No failover for Qobuz — only one public endpoint exists.
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    
-    // Instance state - shared across all requests during app lifetime
+
     private List<string>? _tidalInstances;
     private int _currentInstanceIndex;
     private string? _currentTidalInstance;
@@ -38,10 +38,9 @@ public class SquidWTFInstanceManager
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _logger = logger;
-        
-        // Use configured timeout or default
-        TimeoutSeconds = _settings.InstanceTimeoutSeconds > 0 
-            ? _settings.InstanceTimeoutSeconds 
+
+        TimeoutSeconds = _settings.InstanceTimeoutSeconds > 0
+            ? _settings.InstanceTimeoutSeconds
             : DefaultTimeoutSeconds;
     }
     
@@ -68,15 +67,13 @@ public class SquidWTFInstanceManager
         CancellationToken cancellationToken = default)
     {
         var baseUrl = await GetBaseUrlAsync();
-        
-        // For Qobuz, just send the request (no failover)
+
         if (_settings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
         {
             var request = createRequest(baseUrl);
             return await _httpClient.SendAsync(request, cancellationToken);
         }
-        
-        // For Tidal, try with failover
+
         var attemptedInstances = new HashSet<string>();
         
         while (attemptedInstances.Count < (_tidalInstances?.Count ?? 1))
@@ -108,14 +105,12 @@ public class SquidWTFInstanceManager
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                // Timeout - switch to next instance
-                _logger.LogWarning("Tidal instance {Instance} timed out after {Timeout}s, switching to next...", 
+                _logger.LogWarning("Tidal instance {Instance} timed out after {Timeout}s, switching to next...",
                     currentUrl, TimeoutSeconds);
                 SwitchToNextInstance();
             }
             catch (HttpRequestException ex)
             {
-                // Network error - switch to next instance
                 _logger.LogWarning(ex, "Tidal instance {Instance} failed, switching to next...", currentUrl);
                 SwitchToNextInstance();
             }
@@ -168,35 +163,54 @@ public class SquidWTFInstanceManager
     
     private async Task LoadInstancesAsync()
     {
+        var configured = _settings.Instances?
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Select(url => url.Trim().TrimEnd('/'))
+            .ToList();
+
+        if (configured is { Count: > 0 })
+        {
+            _tidalInstances = configured;
+            _currentInstanceIndex = 0;
+            _currentTidalInstance = _tidalInstances[0];
+
+            _logger.LogInformation(
+                "Using {Count} configured Tidal instance(s), starting with {Instance}",
+                _tidalInstances.Count, _currentTidalInstance);
+            return;
+        }
+
+        var instancesUrl = string.IsNullOrWhiteSpace(_settings.InstancesUrl)
+            ? DefaultInstancesJsonUrl
+            : _settings.InstancesUrl!.Trim();
+
         try
         {
-            _logger.LogInformation("Loading SquidWTF instances from {Url}", InstancesJsonUrl);
-            
-            var response = await _httpClient.GetStringAsync(InstancesJsonUrl);
+            _logger.LogInformation("Loading SquidWTF instances from {Url}", instancesUrl);
+
+            var response = await _httpClient.GetStringAsync(instancesUrl);
             var instances = JsonSerializer.Deserialize<InstancesJson>(response);
-            
+
             if (instances?.Api == null || instances.Api.Count == 0)
             {
                 throw new InvalidOperationException("No API instances found in instances.json");
             }
-            
-            // Normalize URLs (remove trailing slashes)
+
             _tidalInstances = instances.Api
                 .Select(url => url.TrimEnd('/'))
                 .ToList();
-            
+
             _currentInstanceIndex = 0;
             _currentTidalInstance = _tidalInstances[0];
-            
-            _logger.LogInformation("Loaded {Count} Tidal instances, starting with {Instance}", 
+
+            _logger.LogInformation("Loaded {Count} Tidal instances, starting with {Instance}",
                 _tidalInstances.Count, _currentTidalInstance);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load instances from remote JSON, using fallback");
-            
-            // Fallback to hardcoded instance
-            _tidalInstances = new List<string> { "https://tidal-api.binimum.org" };
+
+            _tidalInstances = new List<string> { FallbackInstance };
             _currentInstanceIndex = 0;
             _currentTidalInstance = _tidalInstances[0];
         }

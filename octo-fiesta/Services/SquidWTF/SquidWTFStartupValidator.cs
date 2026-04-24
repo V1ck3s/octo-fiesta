@@ -46,6 +46,15 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteStatus("Instance Timeout", $"{_settings.InstanceTimeoutSeconds}s", ConsoleColor.Cyan);
         }
 
+        if (_settings.Instances is { Count: > 0 })
+        {
+            WriteStatus("Instance Source", $"custom ({_settings.Instances.Count})", ConsoleColor.Cyan);
+        }
+        else if (!string.IsNullOrWhiteSpace(_settings.InstancesUrl))
+        {
+            WriteStatus("Instances URL", _settings.InstancesUrl!, ConsoleColor.Cyan);
+        }
+
         try
         {
             if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
