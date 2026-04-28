@@ -10,7 +10,8 @@ namespace octo_fiesta.Tests;
 
 public class SquidWTFInstanceManagerTests
 {
-    private const string InstancesJsonUrl = "https://monochrome.tf/instances.json";
+    private const string InstancesJsonUrl = "https://tidal-uptime.geeked.wtf/";
+    private const string FallbackInstance = "https://monochrome-api.samidy.com";
 
     private static readonly string[] TestInstances = 
     [
@@ -21,6 +22,16 @@ public class SquidWTFInstanceManagerTests
 
     private static string BuildInstancesJson() =>
         $$"""{"api":["{{string.Join("\",\"", TestInstances)}}"]}""";
+
+    private static string BuildInstancesObjectJson() =>
+        """
+        {
+          "api": [
+            { "url": "https://object-instance1.example.com", "version": "2.10" },
+            { "url": "https://object-instance2.example.com", "version": "2.9" }
+          ]
+        }
+        """;
 
     private static SquidWTFInstanceManager CreateManager(
         Mock<HttpMessageHandler> handlerMock,
@@ -266,5 +277,72 @@ public class SquidWTFInstanceManagerTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(TestInstances[2], manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithObjectApiFormat_ParsesUrls()
+    {
+        const string customUrl = "https://my-mirror.example.com/uptime.json";
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var url = request.RequestUri?.ToString();
+
+                if (url == customUrl)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(BuildInstancesObjectJson())
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(handlerMock, instancesUrl: customUrl);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("https://object-instance1.example.com", manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithInvalidApiFormat_UsesFallbackInstance()
+    {
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var url = request.RequestUri?.ToString();
+
+                if (url == InstancesJsonUrl)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"api\":[{\"version\":\"2.10\"}]}")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(handlerMock);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(FallbackInstance, manager.GetCurrentInstance());
     }
 }

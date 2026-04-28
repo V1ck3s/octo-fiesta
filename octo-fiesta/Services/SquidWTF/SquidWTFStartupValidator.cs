@@ -137,7 +137,7 @@ public class SquidWTFStartupValidator : BaseStartupValidator
         else
         {
             // Fallback if instance manager not available
-            var response = await _httpClient.GetAsync("https://tidal-api.binimum.org/", cancellationToken);
+            var response = await _httpClient.GetAsync("https://monochrome-api.samidy.com/", cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {

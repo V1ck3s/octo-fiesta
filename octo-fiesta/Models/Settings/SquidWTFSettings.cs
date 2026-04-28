@@ -35,8 +35,8 @@ public class SquidWTFSettings
 
     /// <summary>
     /// Override URL for the remote instances.json file. When set, replaces the built-in
-    /// default (monochrome.tf) as the source of the Tidal instance list. Ignored if
-    /// <see cref="Instances"/> is provided. Only applies to Tidal source.
+    /// default (tidal-uptime.geeked.wtf) as the source of the Tidal instance list.
+    /// Ignored if <see cref="Instances"/> is provided. Only applies to Tidal source.
     /// </summary>
     public string? InstancesUrl { get; set; }
 }

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using octo_fiesta.Models.Settings;
 using Microsoft.Extensions.Options;
 
@@ -15,9 +14,9 @@ public class SquidWTFInstanceManager
     private readonly SquidWTFSettings _settings;
     private readonly ILogger<SquidWTFInstanceManager> _logger;
     
-    private const string DefaultInstancesJsonUrl = "https://monochrome.tf/instances.json";
+    private const string DefaultInstancesJsonUrl = "https://tidal-uptime.geeked.wtf/";
     private const int DefaultTimeoutSeconds = 5;
-    private const string FallbackInstance = "https://tidal-api.binimum.org";
+    private const string FallbackInstance = "https://monochrome-api.samidy.com/";
 
     // No failover for Qobuz — only one public endpoint exists.
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
@@ -189,16 +188,7 @@ public class SquidWTFInstanceManager
             _logger.LogInformation("Loading SquidWTF instances from {Url}", instancesUrl);
 
             var response = await _httpClient.GetStringAsync(instancesUrl);
-            var instances = JsonSerializer.Deserialize<InstancesJson>(response);
-
-            if (instances?.Api == null || instances.Api.Count == 0)
-            {
-                throw new InvalidOperationException("No API instances found in instances.json");
-            }
-
-            _tidalInstances = instances.Api
-                .Select(url => url.TrimEnd('/'))
-                .ToList();
+            _tidalInstances = ExtractApiInstances(response);
 
             _currentInstanceIndex = 0;
             _currentTidalInstance = _tidalInstances[0];
@@ -210,18 +200,49 @@ public class SquidWTFInstanceManager
         {
             _logger.LogError(ex, "Failed to load instances from remote JSON, using fallback");
 
-            _tidalInstances = new List<string> { FallbackInstance };
+            _tidalInstances = new List<string> { FallbackInstance.TrimEnd('/') };
             _currentInstanceIndex = 0;
             _currentTidalInstance = _tidalInstances[0];
         }
     }
-    
-    private class InstancesJson
+
+    private static List<string> ExtractApiInstances(string json)
     {
-        [JsonPropertyName("api")]
-        public List<string>? Api { get; set; }
-        
-        [JsonPropertyName("streaming")]
-        public List<string>? Streaming { get; set; }
+        using var doc = JsonDocument.Parse(json);
+
+        if (!doc.RootElement.TryGetProperty("api", out var apiNode) || apiNode.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("No API instances found in instances.json");
+        }
+
+        var instances = new List<string>();
+
+        foreach (var item in apiNode.EnumerateArray())
+        {
+            string? url = null;
+
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                url = item.GetString();
+            }
+            else if (item.ValueKind == JsonValueKind.Object
+                && item.TryGetProperty("url", out var urlNode)
+                && urlNode.ValueKind == JsonValueKind.String)
+            {
+                url = urlNode.GetString();
+            }
+
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                instances.Add(url.Trim().TrimEnd('/'));
+            }
+        }
+
+        if (instances.Count == 0)
+        {
+            throw new InvalidOperationException("No API instances found in instances.json");
+        }
+
+        return instances;
     }
 }

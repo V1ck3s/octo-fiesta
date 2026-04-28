@@ -67,7 +67,7 @@ services:
       # instead of this variable.
       - SquidWTF__Instances__0=${SQUIDWTF_INSTANCE:-}
       # Override URL of the remote instances.json (ignored if SQUIDWTF_INSTANCE is set).
-      # Defaults to https://monochrome.tf/instances.json if empty.
+      # Defaults to https://tidal-uptime.geeked.wtf/ if empty.
       - SquidWTF__InstancesUrl=${SQUIDWTF_INSTANCES_URL:-}
 
       # ===== YANDEX MUSIC SETTINGS =====
