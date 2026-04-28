@@ -61,6 +61,14 @@ services:
       # Instance timeout in seconds for Tidal backend (default: 5)
       # Switches to next instance if current one doesn't respond in time
       - SquidWTF__InstanceTimeoutSeconds=${SQUIDWTF_INSTANCE_TIMEOUT:-5}
+      # Force a specific Tidal API instance (e.g. a self-hosted hifi-api). When set,
+      # the remote instances.json is NOT fetched — only this URL is used.
+      # For multiple custom instances, use SquidWTF__Instances__0, __1, ... directly
+      # instead of this variable.
+      - SquidWTF__Instances__0=${SQUIDWTF_INSTANCE:-}
+      # Override URL of the remote instances.json (ignored if SQUIDWTF_INSTANCE is set).
+      # Defaults to https://monochrome.tf/instances.json if empty.
+      - SquidWTF__InstancesUrl=${SQUIDWTF_INSTANCES_URL:-}
 
       # ===== YANDEX MUSIC SETTINGS =====
       # OAuth token for API access.
