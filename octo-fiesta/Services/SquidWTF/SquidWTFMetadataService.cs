@@ -861,6 +861,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             CoverArtUrl = album.Image?.Small ?? album.Image?.Thumbnail,
             CoverArtUrlLarge = album.Image?.Large,
             Genre = album.Genre?.Name,
+            ReleaseType = album.ReleaseType,
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId
