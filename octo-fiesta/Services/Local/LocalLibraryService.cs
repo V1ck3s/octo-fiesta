@@ -32,6 +32,9 @@ public class LocalLibraryService : ILocalLibraryService
     // Primary subsonic auth parameters/credentials from config for server-to-server calls
     private SubsonicCredentials? _subsonicAdminCredentials;
 
+    // Whether the configured admin has admin rights (null = not checked yet)
+    private bool? _adminIsAdmin;
+
     // Secondary subsonic auth parameters/credentials for server-to-server calls
     private SubsonicCredentials? _subsonicUserCredentials;
     
@@ -758,12 +761,17 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
     private async Task<SubsonicCredentials?> ResolveAdminCapableCredentialsAsync()
     {
         // Check admin rights on first call
+        if (_adminIsAdmin == null)
+        {
+            _adminIsAdmin = await CheckUserIsAdminAsync(_subsonicAdminCredentials);
+        }
+
         if (_userIsAdmin == null)
         {
             _userIsAdmin = await CheckUserIsAdminAsync(_subsonicUserCredentials);
         }
 
-        if (_subsonicAdminCredentials != null && await CheckUserIsAdminAsync(_subsonicAdminCredentials))
+        if (_subsonicAdminCredentials != null && _adminIsAdmin == true)
         {
             return _subsonicAdminCredentials;
         }
