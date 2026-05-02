@@ -756,6 +756,203 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.Equal(2, updateCallCount);
     }
 
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WithAdminSettings_UsesAdminCredentials()
+    {
+        // Arrange: service configured with an admin account
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+
+        // Also set user credentials with a DIFFERENT username so we can tell which one
+        // ends up in the scan request URL.
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: every getUser call returns adminRole=true (regardless of whose it asks about).
+        // Capture every outgoing URL so we can inspect later which one reached startScan.
+        var capturedUris = new List<Uri?>();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: scan was triggered using the admin account's username, not the request user's
+        Assert.True(result);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=configured-admin", scanUri!.Query);
+        Assert.DoesNotContain("u=request-user", scanUri.Query);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_AdminSettingsButNotAdmin_FallsBackToUserWhenUserIsAdmin()
+    {
+        // Scenario: admin account is configured, but Navidrome currently says it is NOT admin
+        // (e.g. privileges were revoked at runtime). The request user however IS admin.
+        // Expected: resolver falls back to the user's credentials.
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: inspect the 'username' query parameter and return adminRole per identity.
+        // - configured-admin -> adminRole=false
+        // - request-user     -> adminRole=true
+        var capturedUris = new List<Uri?>();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    // CheckUserIsAdminAsync always queries itself (username == authenticating user),
+                    // so the 'username' param identifies which credential set is being verified.
+                    var isAdmin = url.Contains("username=request-user");
+                    var json = $"{{\"subsonic-response\":{{\"status\":\"ok\",\"user\":{{\"adminRole\":{isAdmin.ToString().ToLower()}}}}}}}";
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: scan went out with the user's credentials since the admin account failed the check
+        Assert.True(result);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=request-user", scanUri!.Query);
+        Assert.DoesNotContain("u=configured-admin", scanUri.Query);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_NeitherAdminCapable_NoScanTriggered()
+    {
+        // Scenario: admin account configured but is NOT admin, and the request user is ALSO not admin.
+        // Expected: no credentials with admin rights -> resolver returns null -> no scan.
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: every getUser call returns adminRole=false - nobody has admin rights.
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":false}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: function returns false AND no startScan request was sent.
+        // (getUser calls ARE allowed - we are checking that no SCAN went out specifically.)
+        Assert.False(result);
+        _mockHandler.Protected()
+            .Verify("SendAsync", Times.Never(),
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("startScan")),
+                ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_CachesUserAdminCheckAcrossCalls()
+    {
+        // Scenario: no admin account configured - resolver uses the user fallback path.
+        // After the first trigger, _userIsAdmin should be cached so subsequent triggers
+        // do not re-query getUser.
+        var service = BuildService();   // no admin settings -> user fallback path
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        var getUserCalls = 0;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    getUserCalls++;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Trigger twice. First call should hit getUser once; second call should NOT
+        // (the admin-status is cached in _userIsAdmin after the first check).
+        // The second call will take the debounce path for the actual scan, but that
+        // does not affect the admin-check caching we are asserting here.
+        await service.TriggerLibraryScanAsync();
+        await service.TriggerLibraryScanAsync();
+
+        Assert.Equal(1, getUserCalls);
+    }
+
     // --- Helpers ---
 
     private void SetupCredentials()
@@ -810,5 +1007,34 @@ public class LocalLibraryServiceTests : IDisposable
                     Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
                 };
             });
+    }
+
+    private LocalLibraryService BuildService(
+        string? adminUsername = null,
+        string? adminPassword = null
+        )
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = _testDownloadPath
+        })
+        .Build();
+
+        var subsonicSettings = Options.Create(new SubsonicSettings
+        {
+            Url = "https://localhost:4533",
+            AdminUsername = adminUsername,
+            AdminPassword = adminPassword
+        });
+
+        var mockLogger = new Mock<ILogger<LocalLibraryService>>();
+
+        return new LocalLibraryService(
+            configuration,
+            _mockHttpClientFactory.Object,
+            _mockMetadataService.Object,
+            subsonicSettings,
+            mockLogger.Object
+        );
     }
 }
