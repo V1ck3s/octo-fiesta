@@ -794,7 +794,7 @@ public abstract class BaseDownloadService : IDownloadService
             // Basic metadata
             tagFile.Tag.Title = song.Title;
             tagFile.Tag.Performers = song.Artists.Count > 0 
-                ? song.Artists.ToArray() 
+                ? song.Artists.Select(a => a.Name).ToArray() 
                 : new[] { song.Artist };
             tagFile.Tag.Album = song.Album;
             tagFile.Tag.AlbumArtists = new[] { !string.IsNullOrEmpty(song.AlbumArtist) ? song.AlbumArtist : song.Artist };
@@ -818,7 +818,7 @@ public abstract class BaseDownloadService : IDownloadService
                 tagFile.Tag.BeatsPerMinute = (uint)song.Bpm.Value;
 
             if (song.Contributors.Count > 0)
-                tagFile.Tag.Composers = song.Contributors.ToArray();
+                tagFile.Tag.Composers = song.Contributors.Select(c => c.Name).ToArray();
 
             if (!string.IsNullOrEmpty(song.Copyright))
                 tagFile.Tag.Copyright = song.Copyright;

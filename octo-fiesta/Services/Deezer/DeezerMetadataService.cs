@@ -357,22 +357,19 @@ public class DeezerMetadataService : IMusicMetadataService
         int? explicitContentLyrics = track.TryGetProperty("explicit_content_lyrics", out var ecl) 
             ? ecl.GetInt32() 
             : null;
-        
-        var mainArtist = track.TryGetProperty("artist", out var artist) 
-            ? artist.GetProperty("name").GetString() ?? "" 
-            : "";
-        
+
+
+        var mainArtist = track.TryGetProperty("artist", out var artist) ? ParseDeezerArtist(artist) : new Artist { Name = albumArtist ?? "" };
+
+
         return new Song
         {
             Id = $"ext-deezer-song-{externalId}",
             Title = track.GetProperty("title").GetString() ?? "",
-            Artist = mainArtist,
-            Artists = !string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>(),
-            ArtistId = track.TryGetProperty("artist", out var artistForId) 
-                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
-                : null,
-            Album = track.TryGetProperty("album", out var album) 
-                ? album.GetProperty("title").GetString() ?? "" 
+            Artist = mainArtist.Name,
+            ArtistId = mainArtist?.Id,
+            Album = track.TryGetProperty("album", out var album)
+                ? album.GetProperty("title").GetString() ?? ""
                 : "",
             AlbumId = track.TryGetProperty("album", out var albumForId) 
                 ? $"ext-deezer-album-{albumForId.GetProperty("id").GetInt64()}" 
@@ -450,17 +447,12 @@ public class DeezerMetadataService : IMusicMetadataService
         }
         
         // Contributors
-        var contributors = new List<string>();
+        var contributors = new List<Artist>();
         if (track.TryGetProperty("contributors", out var contribs))
         {
             foreach (var contrib in contribs.EnumerateArray())
             {
-                if (contrib.TryGetProperty("name", out var contribName))
-                {
-                    var name = contribName.GetString();
-                    if (!string.IsNullOrEmpty(name))
-                        contributors.Add(name);
-                }
+                contributors.Add(ParseDeezerArtist(contrib));
             }
         }
         
@@ -491,22 +483,18 @@ public class DeezerMetadataService : IMusicMetadataService
         int? explicitContentLyrics = track.TryGetProperty("explicit_content_lyrics", out var ecl) 
             ? ecl.GetInt32() 
             : null;
-        
-        var mainArtist = track.TryGetProperty("artist", out var artist) 
-            ? artist.GetProperty("name").GetString() ?? "" 
-            : "";
-        
+
+        var mainArtist = track.TryGetProperty("artist", out var artist) ? ParseDeezerArtist(artist) : new Artist { Name = albumArtist ?? "" };
+
         return new Song
         {
             Id = $"ext-deezer-song-{externalId}",
             Title = track.GetProperty("title").GetString() ?? "",
-            Artist = mainArtist,
-            Artists = contributors.Count > 0 ? contributors : (!string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>()),
-            ArtistId = track.TryGetProperty("artist", out var artistForId) 
-                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
-                : null,
-            Album = track.TryGetProperty("album", out var album) 
-                ? album.GetProperty("title").GetString() ?? "" 
+            Artist = mainArtist.Name,
+            ArtistId = mainArtist?.Id,
+            Artists = contributors,
+            Album = track.TryGetProperty("album", out var album)
+                ? album.GetProperty("title").GetString() ?? ""
                 : "",
             AlbumId = track.TryGetProperty("album", out var albumForId) 
                 ? $"ext-deezer-album-{albumForId.GetProperty("id").GetInt64()}" 
@@ -521,7 +509,6 @@ public class DeezerMetadataService : IMusicMetadataService
             Isrc = isrc,
             ReleaseDate = releaseDate,
             AlbumArtist = albumArtist,
-            Contributors = contributors,
             CoverArtUrl = coverMedium,
             CoverArtUrlLarge = coverLarge,
             IsLocal = false,

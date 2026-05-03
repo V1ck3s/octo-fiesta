@@ -322,11 +322,6 @@ public class SubsonicResponseBuilder
             size = (long)bitRate * 125L * (long)(song.Duration ?? 0);
         }
 
-        var sourceNames = song.Artists.Count > 0 ? song.Artists : song.Contributors;
-        var artistsList = sourceNames
-            .Select(name => new Dictionary<string, object> { ["name"] = name })
-            .ToList<object>();
-
         var result = new Dictionary<string, object>
         {
             ["id"] = song.Id,
@@ -335,7 +330,7 @@ public class SubsonicResponseBuilder
             ["title"] = song.Title,
             ["album"] = song.Album ?? "",
             ["artist"] = song.Artist ?? "",
-            ["artists"] = artistsList,
+            ["artists"] = song.Artists ?? new List<Artist>(),
             ["albumId"] = song.AlbumId ?? "",
             ["artistId"] = song.ArtistId ?? "",
             ["duration"] = song.Duration ?? 0,

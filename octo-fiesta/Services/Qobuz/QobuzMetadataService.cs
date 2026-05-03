@@ -550,6 +550,10 @@ public class QobuzMetadataService : IMusicMetadataService
         var performerName = track.TryGetProperty("performer", out var performer)
             ? performer.GetProperty("name").GetString() ?? ""
             : "";
+
+        var performerId = track.TryGetProperty("performer", out var performerForId)
+            ? $"ext-qobuz-artist-{GetIdAsString(performerForId.GetProperty("id"))}"
+            : null;
         
         var albumTitle = track.TryGetProperty("album", out var album)
             ? album.GetProperty("title").GetString() ?? ""
@@ -570,10 +574,8 @@ public class QobuzMetadataService : IMusicMetadataService
             Id = $"ext-qobuz-song-{externalId}",
             Title = title,
             Artist = performerName,
-            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
-            ArtistId = track.TryGetProperty("performer", out var performerForId)
-                ? $"ext-qobuz-artist-{GetIdAsString(performerForId.GetProperty("id"))}"
-                : null,
+            Artists = !string.IsNullOrEmpty(performerName) ? new List<Artist> { new Artist { Name = performerName, Id = performerId } } : new List<Artist>(),
+            ArtistId = performerId,
             Album = albumTitle,
             AlbumId = albumId,
             AlbumArtist = albumArtist,
@@ -599,9 +601,13 @@ public class QobuzMetadataService : IMusicMetadataService
         
         // Add additional metadata for full track
         if (track.TryGetProperty("composer", out var composer) &&
-            composer.TryGetProperty("name", out var composerName))
+            composer.TryGetProperty("name", out var composerName) &&
+            composer.TryGetProperty("id", out var composerId))
         {
-            song.Contributors = new List<string> { composerName.GetString() ?? "" };
+            song.Contributors = new List<Artist> { new Artist {
+                Name = composerName.GetString() ?? "",
+                Id = $"ext-qobuz-artist-{GetIdAsString(composerId)}" ?? null
+            } };
         }
         
         if (track.TryGetProperty("isrc", out var isrc))

@@ -804,21 +804,22 @@ public class SquidWTFMetadataService : IMusicMetadataService
         }
         
         // Get composers from composer field
-        var contributors = new List<string>();
+        var contributors = new List<Artist>();
         if (track.Composer != null && !string.IsNullOrEmpty(track.Composer.Name))
         {
-            contributors.Add(track.Composer.Name);
+            contributors.Add(new Artist { Name = track.Composer.Name });
         }
         
         var performerName = track.Performer?.Name ?? "";
+        var performerId = track.Performer != null ? $"ext-squidwtf-artist-{track.Performer.Id}" : null;
         
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = performerName,
-            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
-            ArtistId = track.Performer != null ? $"ext-squidwtf-artist-{track.Performer.Id}" : null,
+            Artists = !string.IsNullOrEmpty(performerName) ? new List<Artist> { new Artist { Name = performerName, Id = performerId } } : new List<Artist>(),
+            ArtistId = performerId,
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,
@@ -902,16 +903,22 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
-        var artistNames = track.Artists?
+        var artists = track.Artists?
             .Where(a => !string.IsNullOrEmpty(a.Name))
-            .Select(a => a.Name!)
-            .ToList() ?? new List<string>();
+            .Select(a => MapTidalArtistToArtist(a))
+            .ToList() ?? new List<Artist>();
         
-        var mainArtistName = track.Artist?.Name ?? (artistNames.FirstOrDefault() ?? "");
-        
+        var mainArtistName = track.Artist?.Name ?? (artists.FirstOrDefault()?.Name ?? "");
+
+        var mainArtistId = track.Artist != null 
+            ? $"ext-squidwtf-artist-{track.Artist.Id}" 
+            : (track.Artists?.FirstOrDefault() is { } firstArtist 
+                ? $"ext-squidwtf-artist-{firstArtist.Id}" 
+                : null);
+
         // Ensure main artist is first in the list
-        if (artistNames.Count == 0 && !string.IsNullOrEmpty(mainArtistName))
-            artistNames.Add(mainArtistName);
+        if (artists.Count == 0 && !string.IsNullOrEmpty(mainArtistName) && mainArtistId != null)
+            artists.Add(new Artist { Name = mainArtistName, Id = mainArtistId });
 
         var title = track.Title ?? "";
         if (!string.IsNullOrEmpty(track.Version))
@@ -922,12 +929,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
             Id = $"ext-squidwtf-song-{externalId}",
             Title = title,
             Artist = mainArtistName,
-            Artists = artistNames,
-            ArtistId = track.Artist != null 
-                ? $"ext-squidwtf-artist-{track.Artist.Id}" 
-                : (track.Artists?.FirstOrDefault() is { } firstArtist 
-                    ? $"ext-squidwtf-artist-{firstArtist.Id}" 
-                    : null),
+            Artists = artists,
+            ArtistId = mainArtistId,
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,
@@ -962,28 +965,30 @@ public class SquidWTFMetadataService : IMusicMetadataService
             }
         }
         
-        var artistNames = track.Artists?
+        var artists = track.Artists?
             .Where(a => !string.IsNullOrEmpty(a.Name))
-            .Select(a => a.Name!)
-            .ToList() ?? new List<string>();
+            .Select(a => MapTidalArtistToArtist(a))
+            .ToList() ?? new List<Artist>();
         
-        var mainArtistName = track.Artist?.Name ?? (artistNames.FirstOrDefault() ?? "");
-        
+        var mainArtistName = track.Artist?.Name ?? (artists.FirstOrDefault()?.Name ?? "");
+
+        var mainArtistId = track.Artist != null 
+            ? $"ext-squidwtf-artist-{track.Artist.Id}" 
+            : (track.Artists?.FirstOrDefault() is { } firstTrackInfoArtist 
+                ? $"ext-squidwtf-artist-{firstTrackInfoArtist.Id}" 
+                : null);
+
         // Ensure main artist is first in the list
-        if (artistNames.Count == 0 && !string.IsNullOrEmpty(mainArtistName))
-            artistNames.Add(mainArtistName);
+        if (artists.Count == 0 && !string.IsNullOrEmpty(mainArtistName) && mainArtistId != null)
+            artists.Add(new Artist { Name = mainArtistName, Id = mainArtistId });
         
         return new Song
         {
             Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = mainArtistName,
-            Artists = artistNames,
-            ArtistId = track.Artist != null 
-                ? $"ext-squidwtf-artist-{track.Artist.Id}" 
-                : (track.Artists?.FirstOrDefault() is { } firstTrackInfoArtist 
-                    ? $"ext-squidwtf-artist-{firstTrackInfoArtist.Id}" 
-                    : null),
+            Artists = artists,
+            ArtistId = mainArtistId,
             Album = track.Album?.Title ?? "",
             AlbumId = track.Album != null ? $"ext-squidwtf-album-{track.Album.Id}" : null,
             Duration = track.Duration,

@@ -68,13 +68,13 @@ public class Song
     /// All performing artists (for multi-artist tracks).
     /// First entry should match Artist. Used for file tagging (Performers field).
     /// </summary>
-    public List<string> Artists { get; set; } = new();
-    
+    public List<Artist> Artists { get; set; } = new();
+
     /// <summary>
     /// Contributing artists (features, etc.)
     /// </summary>
-    public List<string> Contributors { get; set; } = new();
-    
+    public List<Artist> Contributors { get; set; } = new();
+
     /// <summary>
     /// Indicates whether the song is available locally or needs to be downloaded
     /// </summary>
