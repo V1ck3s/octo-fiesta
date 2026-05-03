@@ -318,13 +318,25 @@ public class YandexMetadataService : IMusicMetadataService
         else if (yandexTrack.ContentWarning == "clean") explicitWarning = 3;
         else explicitWarning = 0;
 
+        string title = yandexTrack.Title ?? string.Empty;
+        if (!String.IsNullOrEmpty(yandexTrack.Version))
+        {
+            title += $" ({yandexTrack.Version})";
+        }
+
+        string albumTitle = yandexAlbum?.Title ?? string.Empty;
+        if (!String.IsNullOrEmpty(yandexAlbum?.Version))
+        {
+            albumTitle += $" ({yandexAlbum.Version})";
+        }
+
         return new Song
         {
             Id = SongPrefix + externalTrackId,
-            Title = yandexTrack.Title ?? string.Empty,
+            Title = title,
             Artist = yandexArtist?.Name ?? string.Empty,
             ArtistId = string.IsNullOrEmpty(externalArtistId) ? null : ArtistPrefix + externalArtistId,
-            Album = yandexAlbum?.Title ?? string.Empty,
+            Album = albumTitle,
             AlbumId = string.IsNullOrEmpty(externalAlbumId) ? null : AlbumPrefix + externalAlbumId,
             Duration = yandexTrack.DurationMs / 1000,
             Track = yandexAlbum?.TrackPosition?.Index,
@@ -383,10 +395,17 @@ public class YandexMetadataService : IMusicMetadataService
         string? externalArtistId = yandexArtist?.Id.ToString();
 
         string? coverUri = yandexAlbum.CoverUri ?? yandexAlbum.Cover?.Uri ?? yandexAlbum.OgImage;
+
+        string title = yandexAlbum.Title ?? string.Empty;
+        if (!String.IsNullOrEmpty(yandexAlbum.Version))
+        {
+            title += $" ({yandexAlbum.Version})";
+        }
+
         return new Album
         {
             Id = AlbumPrefix + externalId,
-            Title = yandexAlbum.Title ?? string.Empty,
+            Title = title,
             Artist = yandexArtist?.Name ?? string.Empty,
             ArtistId = string.IsNullOrEmpty(externalArtistId) ? null : ArtistPrefix + externalArtistId,
             Year = yandexAlbum.Year,

@@ -46,6 +46,9 @@ public class YandexTrack
     [JsonPropertyName("title")]
     public string? Title { get; set; } = string.Empty;
 
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
+
     /// <summary>
     /// Content warning. Known values: 'explicit', 'clean'
     /// </summary>
@@ -98,6 +101,9 @@ public class YandexTrackAlbum
 
     [JsonPropertyName("year")]
     public int? Year { get; set; }
+
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
 
     [JsonPropertyName("releaseDate")]
     public string? ReleaseDate { get; set; }
@@ -222,6 +228,9 @@ public class YandexAlbumWithTracks
 
     [JsonPropertyName("year")]
     public int? Year { get; set; }
+
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
 
     [JsonPropertyName("trackCount")]
     public int? TrackCount { get; set; }
