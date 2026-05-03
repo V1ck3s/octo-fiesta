@@ -552,7 +552,7 @@ public class QobuzMetadataServiceTests
         Assert.Equal("℗ 1959 Columbia Records", result.Copyright);
         Assert.Equal(1959, result.Year);
         Assert.Equal("1959-12-14", result.ReleaseDate);
-        Assert.Contains("Paul Desmond", result.Contributors);
+        Assert.Contains("Paul Desmond", result.Contributors.Select(c => c.Name));
         Assert.Equal("Jazz, Cool Jazz", result.Genre);
     }
     
