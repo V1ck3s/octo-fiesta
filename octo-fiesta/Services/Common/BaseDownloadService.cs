@@ -634,10 +634,6 @@ public abstract class BaseDownloadService : IDownloadService
                 var album = await MetadataService.GetAlbumAsync(externalProvider, albumExternalId);
                 if (album != null)
                 {
-                    // Find the track in the album to get full metadata including AlbumArtist
-                    song = album.Songs.FirstOrDefault(s => s.ExternalId == externalId);
-
-                    // If track not found in album (e.g., bonus track), use tempSong with album artist
                     if (song == null && !string.IsNullOrEmpty(album.Artist))
                     {
                         tempSong.AlbumArtist = album.Artist;
