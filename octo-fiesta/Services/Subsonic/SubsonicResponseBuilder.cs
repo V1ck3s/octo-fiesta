@@ -23,7 +23,7 @@ public class SubsonicResponseBuilder
         {
             return CreateJsonResponse(new { status = "ok", version = SubsonicVersion });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
@@ -42,14 +42,14 @@ public class SubsonicResponseBuilder
     {
         if (format == "json")
         {
-            return CreateJsonResponse(new 
-            { 
-                status = "failed", 
+            return CreateJsonResponse(new
+            {
+                status = "failed",
                 version = SubsonicVersion,
                 error = new { code, message }
             });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
@@ -71,14 +71,14 @@ public class SubsonicResponseBuilder
     {
         if (format == "json")
         {
-            return CreateJsonResponse(new 
-            { 
-                status = "ok", 
+            return CreateJsonResponse(new
+            {
+                status = "ok",
                 version = SubsonicVersion,
                 song = ConvertSongToJson(song)
             });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
@@ -96,12 +96,12 @@ public class SubsonicResponseBuilder
     public IActionResult CreateAlbumResponse(string format, Album album)
     {
         var totalDuration = album.Songs.Sum(s => s.Duration ?? 0);
-        
+
         if (format == "json")
         {
-            return CreateJsonResponse(new 
-            { 
-                status = "ok", 
+            return CreateJsonResponse(new
+            {
+                status = "ok",
                 version = SubsonicVersion,
                 album = new
                 {
@@ -121,7 +121,7 @@ public class SubsonicResponseBuilder
                 }
             });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
@@ -144,7 +144,7 @@ public class SubsonicResponseBuilder
         );
         return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
     }
-    
+
     /// <summary>
     /// Creates a Subsonic response for a playlist represented as an album.
     /// Playlists appear as albums with genre "Playlist".
@@ -152,21 +152,21 @@ public class SubsonicResponseBuilder
     public IActionResult CreatePlaylistAsAlbumResponse(string format, ExternalPlaylist playlist, List<Song> tracks)
     {
         var totalDuration = tracks.Sum(s => s.Duration ?? 0);
-        
+
         // Build artist name with emoji and curator
         var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
         if (!string.IsNullOrEmpty(playlist.CuratorName))
         {
             artistName += $" {playlist.CuratorName}";
         }
-        
+
         var artistId = $"curator-{playlist.Provider}-{playlist.CuratorName?.ToLowerInvariant().Replace(" ", "-") ?? "unknown"}";
-        
+
         if (format == "json")
         {
-            return CreateJsonResponse(new 
-            { 
-                status = "ok", 
+            return CreateJsonResponse(new
+            {
+                status = "ok",
                 version = SubsonicVersion,
                 album = new
                 {
@@ -191,7 +191,7 @@ public class SubsonicResponseBuilder
                 }
             });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var albumElement = new XElement(ns + "album",
             new XAttribute("id", playlist.Id),
@@ -205,12 +205,12 @@ public class SubsonicResponseBuilder
             new XAttribute("displayArtist", artistName),
             new XAttribute("created", playlist.CreatedDate.HasValue ? playlist.CreatedDate.Value.ToUniversalTime().ToString("o") : System.DateTime.UtcNow.ToString("o"))
         );
-        
+
         if (playlist.CreatedDate.HasValue)
         {
             albumElement.Add(new XAttribute("year", playlist.CreatedDate.Value.Year));
         }
-        
+
         // Add songs
         foreach (var song in tracks)
         {
@@ -219,7 +219,7 @@ public class SubsonicResponseBuilder
             songXml.SetAttributeValue("parent", playlist.Id);
             albumElement.Add(songXml);
         }
-        
+
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
                 new XAttribute("status", "ok"),
@@ -237,9 +237,9 @@ public class SubsonicResponseBuilder
     {
         if (format == "json")
         {
-            return CreateJsonResponse(new 
-            { 
-                status = "ok", 
+            return CreateJsonResponse(new
+            {
+                status = "ok",
                 version = SubsonicVersion,
                 artist = new
                 {
@@ -252,7 +252,7 @@ public class SubsonicResponseBuilder
                 }
             });
         }
-        
+
         var ns = XNamespace.Get(SubsonicNamespace);
         var doc = new XDocument(
             new XElement(ns + "subsonic-response",
@@ -322,6 +322,11 @@ public class SubsonicResponseBuilder
             size = (long)bitRate * 125L * (long)(song.Duration ?? 0);
         }
 
+        var sourceNames = song.Artists.Count > 0 ? song.Artists : song.Contributors;
+        var artistsList = sourceNames
+            .Select(name => new Dictionary<string, object> { ["name"] = name })
+            .ToList<object>();
+
         var result = new Dictionary<string, object>
         {
             ["id"] = song.Id,
@@ -330,6 +335,7 @@ public class SubsonicResponseBuilder
             ["title"] = song.Title,
             ["album"] = song.Album ?? "",
             ["artist"] = song.Artist ?? "",
+            ["artists"] = artistsList,
             ["albumId"] = song.AlbumId ?? "",
             ["artistId"] = song.ArtistId ?? "",
             ["duration"] = song.Duration ?? 0,
