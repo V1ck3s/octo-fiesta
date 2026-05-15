@@ -4,37 +4,25 @@ using Xunit;
 
 namespace octo_fiesta.Tests;
 
-public class PathHelperTemplateTests
+public class PathHelperTests : IDisposable
 {
     private static readonly string Sep = Path.DirectorySeparatorChar.ToString();
+    private const string DefaultTemplate = "{artist}/{album}/{track} - {title}";
+    private readonly string _testPath;
 
-    #region Legacy BuildTrackPath (backward compatibility)
-
-    [Fact]
-    public void BuildTrackPath_Legacy_WithTrackNumber_ReturnsExpectedPath()
+    public PathHelperTests()
     {
-        var result = PathHelper.BuildTrackPath("/downloads", "Radiohead", "Kid A", "Everything in Its Right Place", 1, ".flac");
-
-        Assert.Equal($"/downloads{Sep}Radiohead{Sep}Kid A{Sep}01 - Everything in Its Right Place.flac", result);
+        _testPath = Path.Combine(Path.GetTempPath(), "octo-fiesta-pathhelper-tests-" + Guid.NewGuid());
+        Directory.CreateDirectory(_testPath);
     }
 
-    [Fact]
-    public void BuildTrackPath_Legacy_WithoutTrackNumber_OmitsPrefix()
+    public void Dispose()
     {
-        var result = PathHelper.BuildTrackPath("/downloads", "Radiohead", "Kid A", "Everything in Its Right Place", null, ".flac");
-
-        Assert.Equal($"/downloads{Sep}Radiohead{Sep}Kid A{Sep}Everything in Its Right Place.flac", result);
+        if (Directory.Exists(_testPath))
+        {
+            Directory.Delete(_testPath, true);
+        }
     }
-
-    [Fact]
-    public void BuildTrackPath_Legacy_SanitizesSpecialCharacters()
-    {
-        var result = PathHelper.BuildTrackPath("/downloads", "AC/DC", "Back in Black", "Hells Bells", 1, ".mp3");
-
-        Assert.Equal($"/downloads{Sep}AC_DC{Sep}Back in Black{Sep}01 - Hells Bells.mp3", result);
-    }
-
-    #endregion
 
     #region Template-based BuildTrackPath
 
@@ -49,7 +37,7 @@ public class PathHelperTemplateTests
             Track = 1
         };
 
-        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", PathHelper.DefaultTemplate, "FLAC");
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", DefaultTemplate, "FLAC");
 
         Assert.Equal($"/downloads{Sep}Radiohead{Sep}Kid A{Sep}01 - Everything in Its Right Place.flac", result);
     }
@@ -66,7 +54,7 @@ public class PathHelperTemplateTests
             Track = 1
         };
 
-        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", PathHelper.DefaultTemplate, null);
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", DefaultTemplate, null);
 
         Assert.Equal($"/downloads{Sep}Album Artist{Sep}My Album{Sep}01 - My Song.flac", result);
     }
@@ -241,7 +229,7 @@ public class PathHelperTemplateTests
             Track = 5
         };
 
-        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", PathHelper.DefaultTemplate, null);
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac", DefaultTemplate, null);
 
         // '/' and '?' and ':' should be replaced with '_'
         Assert.Contains("AC_DC", result);
@@ -306,6 +294,7 @@ public class PathHelperTemplateTests
     [InlineData("...Name...", "...Name")]
     [InlineData("", "Unknown")]
     [InlineData("   ", "Unknown")]
+    [InlineData("Name/With/Slashes", "Name_With_Slashes")]
     public void SanitizeFolderName_HandlesEdgeCases(string input, string expected)
     {
         Assert.Equal(expected, PathHelper.SanitizeFolderName(input));
@@ -317,6 +306,54 @@ public class PathHelperTemplateTests
         var longName = new string('A', 150);
         var result = PathHelper.SanitizeFolderName(longName);
         Assert.Equal(100, result.Length);
+    }
+
+    #endregion
+
+    #region ResolveUniquePath Tests
+
+    [Fact]
+    public void ResolveUniquePath_WhenFileDoesNotExist_ReturnsSamePath()
+    {
+        // Arrange
+        var path = Path.Combine(_testPath, "nonexistent.mp3");
+
+        // Act
+        var result = PathHelper.ResolveUniquePath(path);
+
+        // Assert
+        Assert.Equal(path, result);
+    }
+
+    [Fact]
+    public void ResolveUniquePath_WhenFileExists_ReturnsPathWithCounter()
+    {
+        // Arrange
+        var basePath = Path.Combine(_testPath, "existing.mp3");
+        File.WriteAllText(basePath, "content");
+
+        // Act
+        var result = PathHelper.ResolveUniquePath(basePath);
+
+        // Assert
+        Assert.NotEqual(basePath, result);
+        Assert.Contains("existing (1).mp3", result);
+    }
+
+    [Fact]
+    public void ResolveUniquePath_WhenMultipleFilesExist_IncrementsCounter()
+    {
+        // Arrange
+        var basePath = Path.Combine(_testPath, "song.mp3");
+        var path1 = Path.Combine(_testPath, "song (1).mp3");
+        File.WriteAllText(basePath, "content");
+        File.WriteAllText(path1, "content");
+
+        // Act
+        var result = PathHelper.ResolveUniquePath(basePath);
+
+        // Assert
+        Assert.Contains("song (2).mp3", result);
     }
 
     #endregion

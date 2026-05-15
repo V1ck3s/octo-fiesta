@@ -36,34 +36,6 @@ public static class PathHelper
     }
     
     /// <summary>
-    /// Default folder template matching the legacy Artist/Album/Track structure.
-    /// </summary>
-    public const string DefaultTemplate = "{artist}/{album}/{track} - {title}";
-
-    /// <summary>
-    /// Builds the output path for a downloaded track following the Artist/Album/Track structure.
-    /// Legacy overload — delegates to the template-based version with the default template.
-    /// </summary>
-    /// <param name="downloadPath">Base download directory path.</param>
-    /// <param name="artist">Artist name (will be sanitized).</param>
-    /// <param name="album">Album name (will be sanitized).</param>
-    /// <param name="title">Track title (will be sanitized).</param>
-    /// <param name="trackNumber">Optional track number for prefix.</param>
-    /// <param name="extension">File extension (e.g., ".flac", ".mp3").</param>
-    /// <returns>Full path for the track file.</returns>
-    public static string BuildTrackPath(string downloadPath, string artist, string album, string title, int? trackNumber, string extension)
-    {
-        var song = new Song
-        {
-            Title = title,
-            Artist = artist,
-            Album = album,
-            Track = trackNumber
-        };
-        return BuildTrackPath(downloadPath, song, extension, DefaultTemplate, null);
-    }
-
-    /// <summary>
     /// Builds the output path for a downloaded track using a configurable folder template.
     /// The template is split on '/' — segments before the last become folders (sanitized via
     /// <see cref="SanitizeFolderName"/>), the last segment becomes the file name (sanitized via
