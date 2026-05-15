@@ -64,4 +64,14 @@ public interface ILocalLibraryService
     /// Gets the current scan status
     /// </summary>
     Task<ScanStatus?> GetScanStatusAsync();
+
+    /// <summary>
+    /// Finds all Navidrome playlists that contain a given song ID
+    /// </summary>
+    Task<List<(string PlaylistId, string PlaylistName)>> FindPlaylistsContainingSongAsync(string songId);
+
+    /// <summary>
+    /// Migrates playlist entries from an old song ID to a new song ID, preserving playlist order
+    /// </summary>
+    Task MigratePlaylistEntriesAsync(string oldSongId, string newSongId, List<(string PlaylistId, string PlaylistName)> affectedPlaylists);
 }

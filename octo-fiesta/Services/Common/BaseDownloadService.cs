@@ -225,6 +225,29 @@ public abstract class BaseDownloadService : IDownloadService
 
         Logger.LogInformation("Permanentizing cached song: {Provider}:{ExternalId} from {CachedPath}", externalProvider, externalId, cachedPath);
 
+        // Capture old Navidrome ID and affected playlists BEFORE the move
+        string? oldNavidromeId = null;
+        List<(string PlaylistId, string PlaylistName)>? affectedPlaylists = null;
+        try
+        {
+            oldNavidromeId = await LocalLibraryService.GetLocalIdForExternalSongAsync(externalProvider, externalId);
+            if (!string.IsNullOrEmpty(oldNavidromeId))
+            {
+                affectedPlaylists = await LocalLibraryService.FindPlaylistsContainingSongAsync(oldNavidromeId);
+                if (affectedPlaylists.Count > 0)
+                {
+                    Logger.LogInformation(
+                        "Song {Provider}:{ExternalId} (Navidrome ID {OldId}) found in {Count} playlist(s) - will migrate after scan",
+                        externalProvider, externalId, oldNavidromeId, affectedPlaylists.Count);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to capture playlist context before permanentization for {Provider}:{ExternalId}",
+                externalProvider, externalId);
+        }
+
         // Get song metadata (with correct AlbumArtist)
         Song? song = null;
         var tempSong = await MetadataService.GetSongAsync(externalProvider, externalId);
@@ -302,16 +325,34 @@ public abstract class BaseDownloadService : IDownloadService
         song.LocalPath = permanentPath;
         await LocalLibraryService.RegisterDownloadedSongAsync(song, permanentPath, downloadedQuality);
 
-        // Trigger library scan
+        // Trigger library scan and migrate playlists in background
+        var capturedOldId = oldNavidromeId;
+        var capturedPlaylists = affectedPlaylists;
+        var capturedProvider = externalProvider;
+        var capturedExternalId = externalId;
+
         _ = Task.Run(async () =>
         {
             try
             {
-                await LocalLibraryService.TriggerLibraryScanAsync();
+                var newNavidromeId = await LocalLibraryService.WaitForLocalIdAfterScanAsync(capturedProvider, capturedExternalId);
+
+                if (!string.IsNullOrEmpty(capturedOldId) &&
+                    !string.IsNullOrEmpty(newNavidromeId) &&
+                    capturedOldId != newNavidromeId &&
+                    capturedPlaylists is { Count: > 0 })
+                {
+                    Logger.LogInformation(
+                        "Navidrome ID changed from {OldId} to {NewId} for {Provider}:{ExternalId} - migrating {Count} playlist(s)",
+                        capturedOldId, newNavidromeId, capturedProvider, capturedExternalId, capturedPlaylists.Count);
+
+                    await LocalLibraryService.MigratePlaylistEntriesAsync(capturedOldId, newNavidromeId, capturedPlaylists);
+                }
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Failed to trigger library scan after permanentization");
+                Logger.LogWarning(ex, "Failed to complete post-permanentization tasks for {Provider}:{ExternalId}",
+                    capturedProvider, capturedExternalId);
             }
         });
 
@@ -781,6 +822,9 @@ public abstract class BaseDownloadService : IDownloadService
 
             if (!string.IsNullOrEmpty(song.Copyright))
                 tagFile.Tag.Copyright = song.Copyright;
+
+            if (!string.IsNullOrEmpty(song.ReleaseType))
+                tagFile.Tag.MusicBrainzReleaseType = song.ReleaseType;
 
             var comments = new List<string>();
             if (!string.IsNullOrEmpty(song.Isrc))

@@ -83,6 +83,9 @@ else if (musicService == MusicService.SquidWTF)
     
     // Instance manager for automatic API failover (required for Tidal)
     builder.Services.AddSingleton<SquidWTFInstanceManager>();
+
+    // Captcha ALTCHA solver for SquidWTF Qobuz
+    builder.Services.AddSingleton<SquidWTFCaptchaSolver>();
     
     // SquidWTF services (primary) - registered LAST to be injected by default
     builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();

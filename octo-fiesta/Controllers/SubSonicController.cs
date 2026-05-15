@@ -170,6 +170,57 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
+    /// OpenSubsonic extension used by some clients (e.g. Feishin) to decide whether
+    /// a track can be played directly or needs transcoding. For external songs we
+    /// return a direct-play response so the client proceeds to /rest/stream.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getTranscodeDecision")]
+    [Route("rest/getTranscodeDecision.view")]
+    public async Task<IActionResult> GetTranscodeDecision()
+    {
+        var parameters = await ExtractAllParameters();
+        var mediaId = parameters.GetValueOrDefault("mediaId", "");
+        if (string.IsNullOrWhiteSpace(mediaId))
+        {
+            mediaId = parameters.GetValueOrDefault("id", "");
+        }
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(mediaId);
+        if (!isExternal)
+        {
+            try
+            {
+                var result = await _proxyService.RelayRequestAsync("rest/getTranscodeDecision", Request, HttpContext.RequestAborted);
+                if (result.StatusCode >= 400)
+                {
+                    return StatusCode(result.StatusCode);
+                }
+                var contentType = result.ContentType ?? $"application/{format}";
+                return File(result.Body, contentType);
+            }
+            catch (HttpRequestException ex)
+            {
+                return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+            }
+        }
+
+        var protocol = Request.Headers["X-Forwarded-Proto"].FirstOrDefault() ?? Request.Scheme;
+        var song = await _metadataService.GetSongAsync(provider!, externalId!);
+        if (song != null)
+        {
+            var mapping = await _localLibraryService.GetMappingForExternalSongAsync(provider!, externalId!);
+            if (mapping != null)
+            {
+                song.LocalPath = mapping.LocalPath;
+            }
+        }
+
+        return _responseBuilder.CreateTranscodeDecisionResponse(song, protocol);
+    }
+
+    /// <summary>
     /// Returns external song info if needed.
     /// </summary>
     [HttpGet, HttpPost]
@@ -305,10 +356,7 @@ public class SubsonicController : ControllerBase
                     {
                         album.Artist = artistName;
                     }
-                    if (string.IsNullOrEmpty(album.ArtistId))
-                    {
-                        album.ArtistId = localArtistId;
-                    }
+                    album.ArtistId = localArtistId;
                 }
             }
         }
@@ -898,8 +946,7 @@ public class SubsonicController : ControllerBase
         var scrobbleResolution = await ResolveExternalSongIdIfPossible(parameters, "scrobble");
         if (scrobbleResolution is { IsExternalSong: true, Resolved: false })
         {
-            return _responseBuilder.CreateError(format, 70,
-                "External song could not be scrobbled because it is not available locally yet.");
+            return _responseBuilder.CreateResponse(format, "scrobble", new { });
         }
 
         try
@@ -1072,7 +1119,10 @@ public class SubsonicController : ControllerBase
         }
 
         _logger.LogInformation("Song {SongId} is not available locally yet. Downloading before playlist update.", songId);
-        await _downloadService.DownloadSongAsync(provider, externalId, cancellationToken);
+        if (!await _downloadService.PermanentizeCachedSongAsync(provider, externalId, cancellationToken))
+        {
+           await _downloadService.DownloadSongToPermanentAsync(provider, externalId, cancellationToken);
+        }
 
         localId = await _localLibraryService.WaitForLocalIdAfterScanAsync(provider, externalId, cancellationToken);
         if (!string.IsNullOrEmpty(localId))

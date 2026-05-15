@@ -80,7 +80,9 @@ public class TidalTrack
     
     [JsonPropertyName("title")]
     public string? Title { get; set; }
-    
+    [JsonPropertyName("version")]
+    public string? Version { get; set; }
+
     [JsonPropertyName("duration")]
     public int Duration { get; set; }
     
@@ -137,7 +139,10 @@ public class TidalAlbum
     
     [JsonPropertyName("explicit")]
     public bool Explicit { get; set; }
-    
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
     [JsonPropertyName("artist")]
     public TidalArtist? Artist { get; set; }
     
@@ -382,7 +387,10 @@ public class TidalAlbumData
     
     [JsonPropertyName("copyright")]
     public string? Copyright { get; set; }
-    
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
     [JsonPropertyName("artist")]
     public TidalArtist? Artist { get; set; }
     

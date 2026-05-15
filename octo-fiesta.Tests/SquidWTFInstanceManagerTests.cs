@@ -10,7 +10,8 @@ namespace octo_fiesta.Tests;
 
 public class SquidWTFInstanceManagerTests
 {
-    private const string InstancesJsonUrl = "https://monochrome.tf/instances.json";
+    private const string InstancesJsonUrl = "https://tidal-uptime.geeked.wtf/";
+    private const string FallbackInstance = "https://monochrome-api.samidy.com";
 
     private static readonly string[] TestInstances = 
     [
@@ -22,10 +23,22 @@ public class SquidWTFInstanceManagerTests
     private static string BuildInstancesJson() =>
         $$"""{"api":["{{string.Join("\",\"", TestInstances)}}"]}""";
 
+    private static string BuildInstancesObjectJson() =>
+        """
+        {
+          "api": [
+            { "url": "https://object-instance1.example.com", "version": "2.10" },
+            { "url": "https://object-instance2.example.com", "version": "2.9" }
+          ]
+        }
+        """;
+
     private static SquidWTFInstanceManager CreateManager(
         Mock<HttpMessageHandler> handlerMock,
         string source = "Tidal",
-        int timeoutSeconds = 30)
+        int timeoutSeconds = 30,
+        List<string>? instances = null,
+        string? instancesUrl = null)
     {
         var httpClient = new HttpClient(handlerMock.Object);
         var factoryMock = new Mock<IHttpClientFactory>();
@@ -34,7 +47,9 @@ public class SquidWTFInstanceManagerTests
         var settings = Options.Create(new SquidWTFSettings
         {
             Source = source,
-            InstanceTimeoutSeconds = timeoutSeconds
+            InstanceTimeoutSeconds = timeoutSeconds,
+            Instances = instances,
+            InstancesUrl = instancesUrl
         });
 
         var loggerMock = new Mock<ILogger<SquidWTFInstanceManager>>();
@@ -146,6 +161,104 @@ public class SquidWTFInstanceManagerTests
     }
 
     [Fact]
+    public async Task LoadInstances_WithConfiguredInstances_SkipsRemoteFetch()
+    {
+        var fetchedRemote = false;
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                if (request.RequestUri?.ToString() == InstancesJsonUrl)
+                {
+                    fetchedRemote = true;
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(
+            handlerMock,
+            instances: ["https://my-hifi-api.example.com/", "https://backup.example.com"]);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(fetchedRemote, "Remote instances.json must not be fetched when Instances is configured");
+        Assert.Equal("https://my-hifi-api.example.com", manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithConfiguredInstances_FailsOverWithinList()
+    {
+        var callCount = 0;
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage _, CancellationToken _) =>
+            {
+                callCount++;
+                return callCount == 1
+                    ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+                    : new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(
+            handlerMock,
+            instances: ["https://primary.example.com", "https://secondary.example.com"]);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("https://secondary.example.com", manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithCustomInstancesUrl_FetchesFromOverride()
+    {
+        const string customUrl = "https://my-mirror.example.com/instances.json";
+        var fetchedUrls = new List<string>();
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var url = request.RequestUri?.ToString() ?? "";
+                fetchedUrls.Add(url);
+
+                if (url == customUrl)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(BuildInstancesJson())
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(handlerMock, instancesUrl: customUrl);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(customUrl, fetchedUrls);
+        Assert.DoesNotContain(InstancesJsonUrl, fetchedUrls);
+        Assert.Equal(TestInstances[0], manager.GetCurrentInstance());
+    }
+
+    [Fact]
     public async Task SendWithFailoverAsync_FirstTwoFail_ThirdSucceeds()
     {
         var callCount = 0;
@@ -164,5 +277,72 @@ public class SquidWTFInstanceManagerTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(TestInstances[2], manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithObjectApiFormat_ParsesUrls()
+    {
+        const string customUrl = "https://my-mirror.example.com/uptime.json";
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var url = request.RequestUri?.ToString();
+
+                if (url == customUrl)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(BuildInstancesObjectJson())
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(handlerMock, instancesUrl: customUrl);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("https://object-instance1.example.com", manager.GetCurrentInstance());
+    }
+
+    [Fact]
+    public async Task LoadInstances_WithInvalidApiFormat_UsesFallbackInstance()
+    {
+        var handlerMock = new Mock<HttpMessageHandler>();
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
+            {
+                var url = request.RequestUri?.ToString();
+
+                if (url == InstancesJsonUrl)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"api\":[{\"version\":\"2.10\"}]}")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+        var manager = CreateManager(handlerMock);
+
+        var response = await manager.SendWithFailoverAsync(
+            baseUrl => new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/test"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(FallbackInstance, manager.GetCurrentInstance());
     }
 }

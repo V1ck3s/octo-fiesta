@@ -377,7 +377,8 @@ public class SubsonicResponseBuilder
             ["year"] = album.Year ?? 0,
             ["created"] = System.DateTime.UtcNow.ToString("o"),
             ["isExternal"] = !album.IsLocal,
-            ["displayArtist"] = album.Artist ?? ""
+            ["displayArtist"] = album.Artist ?? "",
+            ["releaseTypes"] = album.ReleaseType != null ? new List<string> { album.ReleaseType } : new List<string>(),
         };
 
         // Only include coverArt if the album has a cover URL (avoids broken images)
@@ -574,6 +575,44 @@ public class SubsonicResponseBuilder
         var newElement = new XElement(element);
         newElement.SetAttributeValue("isExternal", "false");
         return newElement;
+    }
+
+    /// <summary>
+    /// Creates an OpenSubsonic transcodeDecision response indicating direct-play is possible.
+    /// Format info is derived from the song's local file (if present) or defaults to mp3.
+    /// Pass the request scheme ("http"/"https") so the client gets the right protocol.
+    /// Passing a null song yields a safe best-effort response (mp3, 128kbps).
+    /// </summary>
+    public IActionResult CreateTranscodeDecisionResponse(Song? song, string protocol)
+    {
+        string container = "mp3";
+        int bitRate = 128;
+        if (song != null)
+        {
+            var (suffix, _, br) = GetSuffixContentTypeAndBitrate(song);
+            container = suffix == "Remote" ? "mp3" : suffix;
+            bitRate = br > 0 ? br : 128;
+        }
+
+        return CreateJsonResponse(new
+        {
+            status = "ok",
+            version = SubsonicVersion,
+            openSubsonic = true,
+            transcodeDecision = new
+            {
+                canDirectPlay = true,
+                canTranscode = false,
+                sourceStream = new
+                {
+                    protocol,
+                    container,
+                    codec = container,
+                    audioChannels = 2,
+                    audioBitrate = bitRate * 1000
+                }
+            }
+        });
     }
 
     /// <summary>

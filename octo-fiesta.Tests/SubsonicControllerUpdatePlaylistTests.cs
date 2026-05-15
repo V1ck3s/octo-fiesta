@@ -146,7 +146,7 @@ public class SubsonicControllerUpdatePlaylistTests
     }
 
     [Fact]
-    public async Task UpdatePlaylist_WithExternalSongId_DownloadsThenUsesResolvedLocalId()
+    public async Task UpdatePlaylist_WithExternalSongId_NotInCache_DownloadsToPermanent()
     {
         // Arrange
         _mockLocalLibraryService
@@ -158,7 +158,10 @@ public class SubsonicControllerUpdatePlaylistTests
             .ReturnsAsync("777");
 
         _mockDownloadService
-            .Setup(x => x.DownloadSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockDownloadService
+            .Setup(x => x.DownloadSongToPermanentAsync("deezer", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync("/tmp/downloads/song.flac");
         _mockLocalLibraryService
             .Setup(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()))
@@ -189,8 +192,69 @@ public class SubsonicControllerUpdatePlaylistTests
         Assert.Contains("songIdToAdd=777", requestUrl);
 
         _mockDownloadService.Verify(
-            x => x.DownloadSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
             Times.Once);
+        _mockDownloadService.Verify(
+            x => x.DownloadSongToPermanentAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockDownloadService.Verify(
+            x => x.DownloadSongAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+        Times.Never);
+        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdatePlaylist_WithExternalSongId_AlreadyInCache_PermanentizesInsteadOfDownloading()
+    {
+        // Arrange
+        _mockLocalLibraryService
+            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
+            .Returns((true, "deezer", "song", "456"));
+        _mockLocalLibraryService
+            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .ReturnsAsync((string?)null)
+            .ReturnsAsync("777");
+
+        _mockDownloadService
+            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockLocalLibraryService
+            .Setup(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("777");
+
+        HttpRequestMessage? capturedRequest = null;
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "playlistId", "42" },
+                { "songIdToAdd", "ext-deezer-song-456" },
+                { "f", "json" }
+            },
+            proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{}")
+            },
+            captureRequest: req => capturedRequest = req);
+
+        // Act
+        var result = await controller.UpdatePlaylist();
+
+        // Assert
+        Assert.IsType<FileContentResult>(result);
+        Assert.NotNull(capturedRequest);
+        var requestUrl = capturedRequest!.RequestUri!.ToString();
+        Assert.Contains("/rest/updatePlaylist", requestUrl);
+        Assert.Contains("songIdToAdd=777", requestUrl);
+
+        _mockDownloadService.Verify(
+            x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockDownloadService.Verify(
+            x => x.DownloadSongToPermanentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _mockDownloadService.Verify(
+            x => x.DownloadSongAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
         _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()), Times.Once);
     }
 

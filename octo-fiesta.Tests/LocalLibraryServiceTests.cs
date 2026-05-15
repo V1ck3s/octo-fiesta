@@ -575,4 +575,466 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.NotNull(scanUri);
         Assert.Contains("u=realuser", scanUri!.Query);
     }
+
+    // --- FindPlaylistsContainingSongAsync tests ---
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_WithoutCredentials_ReturnsEmptyList()
+    {
+        var result = await _service.FindPlaylistsContainingSongAsync("some-id");
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongInOnePlaylist_ReturnsThatPlaylist()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "My Playlist", new[] { "song-a", "song-b", "song-c" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-b");
+
+        Assert.Single(result);
+        Assert.Equal("pl-1", result[0].PlaylistId);
+        Assert.Equal("My Playlist", result[0].PlaylistName);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongInMultiplePlaylists_ReturnsAll()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "Playlist One", new[] { "song-a", "song-x" }),
+            ("pl-2", "Playlist Two", new[] { "song-x", "song-b" }),
+            ("pl-3", "Playlist Three", new[] { "song-c" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-x");
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, p => p.PlaylistId == "pl-1");
+        Assert.Contains(result, p => p.PlaylistId == "pl-2");
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_SongNotInAnyPlaylist_ReturnsEmptyList()
+    {
+        SetupCredentials();
+        SetupPlaylistResponses(new[]
+        {
+            ("pl-1", "Playlist", new[] { "song-a", "song-b" })
+        });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("nonexistent");
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task FindPlaylistsContainingSongAsync_GetPlaylistsFails_ReturnsEmptyList()
+    {
+        SetupCredentials();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylists"))
+                    return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await _service.FindPlaylistsContainingSongAsync("song-a");
+
+        Assert.Empty(result);
+    }
+
+    // --- MigratePlaylistEntriesAsync tests ---
+
+    [Fact]
+    public async Task MigratePlaylistEntriesAsync_RebuildsPlaylistWithCorrectOrder()
+    {
+        SetupCredentials();
+        var capturedUris = new List<Uri?>();
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"subsonic-response\":{\"playlist\":{\"entry\":[" +
+                            "{\"id\":\"song-a\",\"title\":\"A\"}," +
+                            "{\"id\":\"old-id\",\"title\":\"B\"}," +
+                            "{\"id\":\"song-c\",\"title\":\"C\"}" +
+                            "]}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        await _service.MigratePlaylistEntriesAsync("old-id", "new-id",
+            new List<(string, string)> { ("pl-1", "Test Playlist") });
+
+        var updateUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("updatePlaylist") == true);
+        Assert.NotNull(updateUri);
+        var query = updateUri!.ToString();
+
+        // Verify all 3 entries removed by index
+        Assert.Contains("songIndexToRemove=0", query);
+        Assert.Contains("songIndexToRemove=1", query);
+        Assert.Contains("songIndexToRemove=2", query);
+
+        // Verify re-added in correct order with replacement
+        var addParams = query.Split("songIdToAdd=").Skip(1).Select(s => s.Split('&')[0]).ToList();
+        Assert.Equal(3, addParams.Count);
+        Assert.Equal("song-a", addParams[0]);
+        Assert.Equal("new-id", addParams[1]);
+        Assert.Equal("song-c", addParams[2]);
+    }
+
+    [Fact]
+    public async Task MigratePlaylistEntriesAsync_UpdateFails_ContinuesToNextPlaylist()
+    {
+        SetupCredentials();
+        var updateCallCount = 0;
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"subsonic-response\":{\"playlist\":{\"entry\":[{\"id\":\"old-id\",\"title\":\"Song\"}]}}}")
+                    };
+                }
+                if (url.Contains("updatePlaylist"))
+                {
+                    updateCallCount++;
+                    // First call fails, second succeeds
+                    if (updateCallCount == 1)
+                        return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Should not throw - processes both playlists even if first fails
+        await _service.MigratePlaylistEntriesAsync("old-id", "new-id",
+            new List<(string, string)> { ("pl-1", "Playlist 1"), ("pl-2", "Playlist 2") });
+
+        Assert.Equal(2, updateCallCount);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WithAdminSettings_UsesAdminCredentials()
+    {
+        // Arrange: service configured with an admin account
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+
+        // Also set user credentials with a DIFFERENT username so we can tell which one
+        // ends up in the scan request URL.
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: every getUser call returns adminRole=true (regardless of whose it asks about).
+        // Capture every outgoing URL so we can inspect later which one reached startScan.
+        var capturedUris = new List<Uri?>();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: scan was triggered using the admin account's username, not the request user's
+        Assert.True(result);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=configured-admin", scanUri!.Query);
+        Assert.DoesNotContain("u=request-user", scanUri.Query);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_AdminSettingsButNotAdmin_FallsBackToUserWhenUserIsAdmin()
+    {
+        // Scenario: admin account is configured, but Navidrome currently says it is NOT admin
+        // (e.g. privileges were revoked at runtime). The request user however IS admin.
+        // Expected: resolver falls back to the user's credentials.
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: inspect the 'username' query parameter and return adminRole per identity.
+        // - configured-admin -> adminRole=false
+        // - request-user     -> adminRole=true
+        var capturedUris = new List<Uri?>();
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => capturedUris.Add(req.RequestUri))
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    // CheckUserIsAdminAsync always queries itself (username == authenticating user),
+                    // so the 'username' param identifies which credential set is being verified.
+                    var isAdmin = url.Contains("username=request-user");
+                    var json = $"{{\"subsonic-response\":{{\"status\":\"ok\",\"user\":{{\"adminRole\":{isAdmin.ToString().ToLower()}}}}}}}";
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: scan went out with the user's credentials since the admin account failed the check
+        Assert.True(result);
+        var scanUri = capturedUris.FirstOrDefault(u => u?.ToString().Contains("startScan") == true);
+        Assert.NotNull(scanUri);
+        Assert.Contains("u=request-user", scanUri!.Query);
+        Assert.DoesNotContain("u=configured-admin", scanUri.Query);
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_NeitherAdminCapable_NoScanTriggered()
+    {
+        // Scenario: admin account configured but is NOT admin, and the request user is ALSO not admin.
+        // Expected: no credentials with admin rights -> resolver returns null -> no scan.
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret");
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        // Mock: every getUser call returns adminRole=false - nobody has admin rights.
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":false}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Act
+        var result = await service.TriggerLibraryScanAsync();
+
+        // Assert: function returns false AND no startScan request was sent.
+        // (getUser calls ARE allowed - we are checking that no SCAN went out specifically.)
+        Assert.False(result);
+        _mockHandler.Protected()
+            .Verify("SendAsync", Times.Never(),
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("startScan")),
+                ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_CachesUserAdminCheckAcrossCalls()
+    {
+        // Scenario: no admin account configured - resolver uses the user fallback path.
+        // After the first trigger, _userIsAdmin should be cached so subsequent triggers
+        // do not re-query getUser.
+        var service = BuildService();   // no admin settings -> user fallback path
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        var getUserCalls = 0;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    getUserCalls++;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        // Trigger twice. First call should hit getUser once; second call should NOT
+        // (the admin-status is cached in _userIsAdmin after the first check).
+        // The second call will take the debounce path for the actual scan, but that
+        // does not affect the admin-check caching we are asserting here.
+        await service.TriggerLibraryScanAsync();
+        await service.TriggerLibraryScanAsync();
+
+        Assert.Equal(1, getUserCalls);
+    }
+
+    // --- Helpers ---
+
+    private void SetupCredentials()
+    {
+        _service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "admin", ["t"] = "token", ["s"] = "salt", ["v"] = "1.16.1", ["c"] = "tests"
+        });
+    }
+
+    private void SetupPlaylistResponses((string Id, string Name, string[] SongIds)[] playlists)
+    {
+        var playlistListJson = string.Join(",", playlists.Select(p =>
+            $"{{\"id\":\"{p.Id}\",\"name\":\"{p.Name}\",\"songCount\":{p.SongIds.Length}}}"));
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+
+                if (url.Contains("getPlaylists"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            $"{{\"subsonic-response\":{{\"playlists\":{{\"playlist\":[{playlistListJson}]}}}}}}")
+                    };
+                }
+
+                if (url.Contains("getPlaylist") && !url.Contains("getPlaylists"))
+                {
+                    foreach (var p in playlists)
+                    {
+                        if (url.Contains($"id={p.Id}"))
+                        {
+                            var entriesJson = string.Join(",", p.SongIds.Select(id =>
+                                $"{{\"id\":\"{id}\",\"title\":\"Song {id}\"}}"));
+                            return new HttpResponseMessage(HttpStatusCode.OK)
+                            {
+                                Content = new StringContent(
+                                    $"{{\"subsonic-response\":{{\"playlist\":{{\"entry\":[{entriesJson}]}}}}}}")
+                            };
+                        }
+                    }
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+    }
+
+    private LocalLibraryService BuildService(
+        string? adminUsername = null,
+        string? adminPassword = null
+        )
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = _testDownloadPath
+        })
+        .Build();
+
+        var subsonicSettings = Options.Create(new SubsonicSettings
+        {
+            Url = "https://localhost:4533",
+            AdminUsername = adminUsername,
+            AdminPassword = adminPassword
+        });
+
+        var mockLogger = new Mock<ILogger<LocalLibraryService>>();
+
+        return new LocalLibraryService(
+            configuration,
+            _mockHttpClientFactory.Object,
+            _mockMetadataService.Object,
+            subsonicSettings,
+            mockLogger.Object
+        );
+    }
 }

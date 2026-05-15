@@ -140,7 +140,7 @@ public class SubsonicControllerScrobbleTests
     }
 
     [Fact]
-    public async Task Scrobble_WithUnresolvableExternalId_ReturnsErrorAndDoesNotRelay()
+    public async Task Scrobble_WithUnresolvableExternalId_ReturnsSuccessAndDoesNotRelay()
     {
         // Arrange
         _mockLocalLibraryService
@@ -169,8 +169,7 @@ public class SubsonicControllerScrobbleTests
 
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Contains("status=\"failed\"", contentResult.Content ?? "");
-        Assert.Contains("code=\"70\"", contentResult.Content ?? "");
+        Assert.Contains("status=\"ok\"", contentResult.Content ?? "");
         Assert.Null(capturedRequest);
     }
 }

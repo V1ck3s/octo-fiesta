@@ -11,6 +11,7 @@ public class Album
     public string? ArtistId { get; set; }
     public int? Year { get; set; }
     public int? SongCount { get; set; }
+    public string? ReleaseType { get; set; }
     public string? CoverArtUrl { get; set; }
     public string? CoverArtUrlLarge { get; set; }
     public string? Genre { get; set; }

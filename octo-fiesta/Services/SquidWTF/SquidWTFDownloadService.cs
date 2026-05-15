@@ -20,6 +20,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     private readonly HttpClient _httpClient;
     private readonly SquidWTFSettings _squidWTFSettings;
     private readonly SquidWTFInstanceManager _instanceManager;
+    private readonly SquidWTFCaptchaSolver _captchaSolver;
     
     // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
@@ -46,6 +47,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<SquidWTFSettings> squidWTFSettings,
         SquidWTFInstanceManager instanceManager,
+        SquidWTFCaptchaSolver captchaSolver,
         IServiceProvider serviceProvider,
         ILogger<SquidWTFDownloadService> logger)
         : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
@@ -53,6 +55,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         _httpClient = httpClientFactory.CreateClient();
         _squidWTFSettings = squidWTFSettings.Value;
         _instanceManager = instanceManager;
+        _captchaSolver = captchaSolver;
     }
 
     #region BaseDownloadService Implementation
@@ -128,17 +131,27 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-        // Get download URL
         var quality = GetQobuzQuality();
         var url = $"{QobuzBaseUrl}/api/download-music?track_id={trackId}&quality={quality}";
-        
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
-        
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+
+        var response = await SendQobuzDownloadRequestAsync(url, forceCaptchaRefresh: false, cancellationToken);
+
+        // Cached captcha cookie may be stale (>30 min server-side); refresh on 403 and retry once.
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (body.Contains("Captcha required", StringComparison.OrdinalIgnoreCase))
+            {
+                response.Dispose();
+                Logger.LogInformation("SquidWTF Qobuz captcha required, refreshing session and retrying");
+                response = await SendQobuzDownloadRequestAsync(url, forceCaptchaRefresh: true, cancellationToken);
+            }
+        }
+
         response.EnsureSuccessStatusCode();
-        
+
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        response.Dispose();
         var downloadResponse = JsonSerializer.Deserialize<QobuzDownloadResponse>(json);
         
         if (downloadResponse?.Success != true || string.IsNullOrEmpty(downloadResponse.Data?.Url))
@@ -163,6 +176,15 @@ public class SquidWTFDownloadService : BaseDownloadService
         };
 
         return new DownloadResult(downloadStream, extension, downloadedQuality);
+    }
+
+    private async Task<HttpResponseMessage> SendQobuzDownloadRequestAsync(string url, bool forceCaptchaRefresh, CancellationToken cancellationToken)
+    {
+        var cookie = await _captchaSolver.GetCaptchaCookieAsync(QobuzBaseUrl, forceCaptchaRefresh, cancellationToken);
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
+        request.Headers.Add("Cookie", cookie);
+        return await _httpClient.SendAsync(request, cancellationToken);
     }
 
     private string GetQobuzQuality()

@@ -25,4 +25,18 @@ public class SquidWTFSettings
     /// Only applies to Tidal source. Defaults to 5 seconds if not specified.
     /// </summary>
     public int InstanceTimeoutSeconds { get; set; } = 5;
+
+    /// <summary>
+    /// Explicit list of Tidal API instance URLs to use (e.g. a self-hosted hifi-api).
+    /// When set, the remote instances.json is NOT fetched and failover is restricted
+    /// to the provided URLs in order. Only applies to Tidal source.
+    /// </summary>
+    public List<string>? Instances { get; set; }
+
+    /// <summary>
+    /// Override URL for the remote instances.json file. When set, replaces the built-in
+    /// default (tidal-uptime.geeked.wtf) as the source of the Tidal instance list.
+    /// Ignored if <see cref="Instances"/> is provided. Only applies to Tidal source.
+    /// </summary>
+    public string? InstancesUrl { get; set; }
 }

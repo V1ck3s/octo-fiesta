@@ -86,6 +86,24 @@ public enum MusicService
 public class SubsonicSettings
 {
     public string? Url { get; set; }
+
+    /// <summary>
+    /// Admin username for server-to-server actions that require admin privileges.
+    /// Environment variable: SUBSONIC_ADMIN_USERNAME
+    /// Both admin username and password has to be set to use it.
+    /// If not set the user credentials will be used to perform server-to-server actions
+    /// (this may cause problems if the user has no admin permissions on the navidrome server)
+    /// </summary>
+    public string? AdminUsername { get; set; }
+
+    /// <summary>
+    /// Admin password for server-to-server actions that require admin privileges.
+    /// Environment variable: SUBSONIC_ADMIN_PASSWORD
+    /// Both admin username and password has to be set to use it.
+    /// If not set the user credentials will be used to perform server-to-server actions
+    /// (this may cause problems if the user has no admin permissions on the navidrome server)
+    /// </summary>
+    public string? AdminPassword { get; set; }
     
     /// <summary>
     /// Explicit content filter mode (default: All)
