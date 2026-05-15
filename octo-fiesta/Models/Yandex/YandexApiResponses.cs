@@ -99,6 +99,9 @@ public class YandexTrackAlbum
     [JsonPropertyName("title")]
     public string? Title { get; set; }
 
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
     [JsonPropertyName("year")]
     public int? Year { get; set; }
 
@@ -222,6 +225,9 @@ public class YandexAlbumWithTracks
 
     [JsonPropertyName("title")]
     public string? Title { get; set; }
+
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
 
     [JsonPropertyName("artists")]
     public List<YandexArtistShort>? Artists { get; set; }

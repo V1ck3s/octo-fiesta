@@ -334,6 +334,7 @@ public class YandexMetadataService : IMusicMetadataService
         {
             Id = SongPrefix + externalTrackId,
             Title = title,
+            ReleaseType = yandexAlbum?.Type,
             Artist = yandexArtist?.Name ?? string.Empty,
             ArtistId = string.IsNullOrEmpty(externalArtistId) ? null : ArtistPrefix + externalArtistId,
             Album = albumTitle,
@@ -406,6 +407,7 @@ public class YandexMetadataService : IMusicMetadataService
         {
             Id = AlbumPrefix + externalId,
             Title = title,
+            ReleaseType = yandexAlbum.Type,
             Artist = yandexArtist?.Name ?? string.Empty,
             ArtistId = string.IsNullOrEmpty(externalArtistId) ? null : ArtistPrefix + externalArtistId,
             Year = yandexAlbum.Year,
