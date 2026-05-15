@@ -275,6 +275,7 @@ public class DeezerMetadataServiceTests
         Assert.Equal(2, result.Songs.Count);
         Assert.Equal("Track 1", result.Songs[0].Title);
         Assert.Equal("Track 2", result.Songs[1].Title);
+        Assert.All(result.Songs, s => Assert.Equal("https://example.com/album.jpg", s.CoverArtUrl));
     }
 
     [Fact]
@@ -326,6 +327,7 @@ public class DeezerMetadataServiceTests
         Assert.Equal("Track 2", result.Songs[1].Title);
         Assert.Equal("Track 3", result.Songs[2].Title);
         Assert.Equal("Track 4", result.Songs[3].Title);
+        Assert.All(result.Songs, s => Assert.Equal("https://example.com/album.jpg", s.CoverArtUrl));
     }
 
     [Fact]
