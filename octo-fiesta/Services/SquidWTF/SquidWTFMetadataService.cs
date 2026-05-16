@@ -814,7 +814,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = performerName,
             Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
@@ -919,7 +918,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         return new Song
         {
-            Id = $"ext-squidwtf-song-{externalId}",
             Title = title,
             Artist = mainArtistName,
             Artists = artistNames,
@@ -975,7 +973,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-squidwtf-song-{externalId}",
             Title = track.Title ?? "",
             Artist = mainArtistName,
             Artists = artistNames,

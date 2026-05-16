@@ -4,13 +4,7 @@ namespace octo_fiesta.Models.Domain;
 /// Represents a song (local or external)
 /// </summary>
 public class Song
-{
-    /// <summary>
-    /// Unique ID. For external songs, prefixed with "ext-" + provider + "-" + external id
-    /// Example: "ext-deezer-123456" or "local-789"
-    /// </summary>
-    public string Id { get; set; } = string.Empty;
-    
+{    
     public string Title { get; set; } = string.Empty;
     public string Artist { get; set; } = string.Empty;
     public string? ArtistId { get; set; }

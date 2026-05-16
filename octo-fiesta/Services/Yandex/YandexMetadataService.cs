@@ -21,7 +21,6 @@ public class YandexMetadataService : IMusicMetadataService
     private readonly bool _includeUnavailable;
     private const string BaseUrl = "https://api.music.yandex.net";
     private const string ProviderName = "yandex";
-    private const string SongPrefix = "ext-yandex-song-";
     private const string AlbumPrefix = "ext-yandex-album-";
     private const string ArtistPrefix = "ext-yandex-artist-";
 
@@ -332,7 +331,6 @@ public class YandexMetadataService : IMusicMetadataService
 
         return new Song
         {
-            Id = SongPrefix + externalTrackId,
             Title = title,
             ReleaseType = yandexAlbum?.Type,
             Artist = yandexArtist?.Name ?? string.Empty,

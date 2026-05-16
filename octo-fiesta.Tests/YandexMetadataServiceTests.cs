@@ -343,7 +343,6 @@ public class YandexMetadataServiceTests
         Assert.Equal("Rock Forever!", result[0].Album); // Album should be playlist name
         Assert.Equal("pl-yandex-f3063016-5636-454e-916e-00a756e9b25d", result[0].AlbumId);
         Assert.Equal(1, result[0].Track); // Track index starts at 1
-        Assert.Equal("ext-yandex-song-100001:1000011", result[0].Id);
         Assert.Equal("yandex", result[0].ExternalProvider);
         Assert.Equal("100001:1000011", result[0].ExternalId);
         
@@ -352,7 +351,6 @@ public class YandexMetadataServiceTests
         Assert.Equal("Panic! At The Disco", result[1].Artist);
         Assert.Equal("Rock Forever!", result[1].Album); // Album should be playlist name
         Assert.Equal(2, result[1].Track); // Track index increments
-        Assert.Equal("ext-yandex-song-300003:3000033", result[1].Id);
     }
     
     [Fact]

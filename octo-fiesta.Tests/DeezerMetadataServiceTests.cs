@@ -65,7 +65,6 @@ public class DeezerMetadataServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Single(result);
-        Assert.Equal("ext-deezer-song-123456", result[0].Id);
         Assert.Equal("Test Song", result[0].Title);
         Assert.Equal("Test Artist", result[0].Artist);
         Assert.Equal("Test Album", result[0].Album);
@@ -180,7 +179,6 @@ public class DeezerMetadataServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("ext-deezer-song-123456", result.Id);
         Assert.Equal("Test Song", result.Title);
     }
 
@@ -892,7 +890,6 @@ public class DeezerMetadataServiceTests
         Assert.Equal(2, result.Count);
         Assert.Equal("Track 1", result[0].Title);
         Assert.Equal("Artist A", result[0].Artist);
-        Assert.Equal("ext-deezer-song-111", result[0].Id);
         Assert.Equal(1, result[0].Track);
         Assert.Equal(2, result[1].Track);
     }

@@ -368,7 +368,6 @@ public class DeezerMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-deezer-song-{externalId}",
             Title = track.GetProperty("title").GetString() ?? "",
             Artist = mainArtist,
             Artists = !string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>(),
@@ -502,7 +501,6 @@ public class DeezerMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-deezer-song-{externalId}",
             Title = track.GetProperty("title").GetString() ?? "",
             Artist = mainArtist,
             Artists = contributors.Count > 0 ? contributors : (!string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>()),
