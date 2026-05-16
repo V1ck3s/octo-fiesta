@@ -267,7 +267,6 @@ public class YandexDownloadServiceTests : IDisposable
             .Setup(s => s.GetSongAsync("yandex", "123456"))
             .ReturnsAsync(new Song
             {
-                Id = "ext-yandex-song-123456",
                 Title = "Test Song",
                 Artist = "Test Artist",
                 ArtistId = "ext-yandex-artist-123456",
@@ -379,7 +378,6 @@ public class YandexDownloadServiceTests : IDisposable
             .Setup(s => s.GetSongAsync("yandex", "123456"))
             .ReturnsAsync(new Song
             {
-                Id = "ext-yandex-song-123456",
                 Title = "Test Song",
                 Artist = "Test Artist",
                 ArtistId = "ext-yandex-artist-123456",
@@ -487,7 +485,6 @@ public class YandexDownloadServiceTests : IDisposable
             .Setup(s => s.GetSongAsync("yandex", "123456"))
             .ReturnsAsync(new Song
             {
-                Id = "ext-yandex-song-123456",
                 Title = "Test Song",
                 IsLocal = false,
                 ExternalProvider = "yandex",
@@ -540,7 +537,6 @@ public class YandexDownloadServiceTests : IDisposable
             .Setup(s => s.GetSongAsync("yandex", "123456"))
             .ReturnsAsync(new Song
             {
-                Id = "ext-yandex-song-123456",
                 Title = "Test Song",
                 IsLocal = false,
                 ExternalProvider = "yandex",
@@ -594,7 +590,6 @@ public class YandexDownloadServiceTests : IDisposable
             .Setup(s => s.GetSongAsync("yandex", "123456"))
             .ReturnsAsync(new Song
             {
-                Id = "ext-yandex-song-123456",
                 Title = "Test Song",
                 IsLocal = false,
                 ExternalProvider = "yandex",

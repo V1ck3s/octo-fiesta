@@ -297,7 +297,6 @@ public class QobuzMetadataServiceTests
         Assert.Equal("Dave Brubeck Quartet", result[0].Artist);
         Assert.Equal("My Jazz Playlist", result[0].Album); // Album should be playlist name
         Assert.Equal(1, result[0].Track); // Track index starts at 1
-        Assert.Equal("ext-qobuz-song-123456789", result[0].Id);
         Assert.Equal("qobuz", result[0].ExternalProvider);
         Assert.Equal("123456789", result[0].ExternalId);
         
@@ -306,7 +305,6 @@ public class QobuzMetadataServiceTests
         Assert.Equal("Miles Davis", result[1].Artist);
         Assert.Equal("My Jazz Playlist", result[1].Album); // Album should be playlist name
         Assert.Equal(2, result[1].Track); // Track index increments
-        Assert.Equal("ext-qobuz-song-987654321", result[1].Id);
     }
     
     [Fact]

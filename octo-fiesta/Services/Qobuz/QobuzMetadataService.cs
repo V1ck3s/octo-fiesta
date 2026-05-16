@@ -567,7 +567,6 @@ public class QobuzMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-qobuz-song-{externalId}",
             Title = title,
             Artist = performerName,
             Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),

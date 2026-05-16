@@ -269,7 +269,7 @@ public class PlaylistSyncService
         // Skip real-time updates during full playlist download (M3U will be created once at the end)
         if (isFullPlaylistDownload)
         {
-            _logger.LogDebug("Skipping M3U update for track {TrackId} (full playlist download in progress)", track.Id);
+            _logger.LogDebug("Skipping M3U update for track ext-{Provider}-song-{TrackId} (full playlist download in progress)", track.ExternalProvider, track.ExternalId);
             return;
         }
         
@@ -321,7 +321,7 @@ public class PlaylistSyncService
                 string? trackLocalPath = null;
                 
                 // If this is the track we just downloaded
-                if (playlistTrack.Id == track.Id)
+                if (playlistTrack.ExternalId == track.ExternalId)
                 {
                     trackLocalPath = localPath;
                 }
