@@ -120,15 +120,34 @@ public class DeezerMetadataService : IMusicMetadataService
         var songsTask = SearchSongsAsync(query, songLimit);
         var albumsTask = SearchAlbumsAsync(query, albumLimit);
         var artistsTask = SearchArtistsAsync(query, artistLimit);
-        
+
         await Task.WhenAll(songsTask, albumsTask, artistsTask);
-        
-        return new SearchResult
+
+        var songs = await songsTask;
+        var albums = await albumsTask;
+        var artists = await artistsTask;
+
+        // /search/album ranks by popularity — recent releases get pushed past the limit.
+        // For exact artist matches, pull the full discography so latest albums surface.
+        var matchedArtist = artists.FirstOrDefault(a =>
+            string.Equals(a.Name, query, StringComparison.OrdinalIgnoreCase));
+        if (matchedArtist != null && !string.IsNullOrEmpty(matchedArtist.ExternalId))
         {
-            Songs = await songsTask,
-            Albums = await albumsTask,
-            Artists = await artistsTask
-        };
+            var discography = await GetArtistAlbumsAsync("deezer", matchedArtist.ExternalId);
+            foreach (var a in discography)
+            {
+                if (string.IsNullOrEmpty(a.Artist)) a.Artist = matchedArtist.Name;
+                if (string.IsNullOrEmpty(a.ArtistId)) a.ArtistId = matchedArtist.Id;
+            }
+
+            var seen = new HashSet<string>(albums.Select(a => a.ExternalId ?? a.Id));
+            foreach (var a in discography)
+            {
+                if (seen.Add(a.ExternalId ?? a.Id)) albums.Add(a);
+            }
+        }
+
+        return new SearchResult { Songs = songs, Albums = albums, Artists = artists };
     }
 
     public async Task<Song?> GetSongAsync(string externalProvider, string externalId)
