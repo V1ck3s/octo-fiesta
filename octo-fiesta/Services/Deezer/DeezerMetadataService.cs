@@ -255,6 +255,8 @@ public class DeezerMetadataService : IMusicMetadataService
                         song.Genre ??= album.Genre;
                         song.ReleaseType ??= album.ReleaseType;
                         song.TotalTracks ??= album.SongCount;
+                        song.CoverArtUrl ??= album.CoverArtUrl;
+                        song.CoverArtUrlLarge ??= album.CoverArtUrlLarge;
 
                         if (ShouldIncludeSong(song))
                         {
@@ -291,6 +293,8 @@ public class DeezerMetadataService : IMusicMetadataService
                 song.Genre ??= album.Genre;
                 song.ReleaseType ??= album.ReleaseType;
                 song.TotalTracks ??= album.SongCount;
+                song.CoverArtUrl ??= album.CoverArtUrl;
+                song.CoverArtUrlLarge ??= album.CoverArtUrlLarge;
 
                 if (ShouldIncludeSong(song))
                 {
