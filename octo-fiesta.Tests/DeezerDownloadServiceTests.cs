@@ -232,8 +232,66 @@ public class DeezerDownloadServiceTests : IDisposable
 
         // Act - Should not throw (fire-and-forget)
         service.DownloadRemainingAlbumTracksInBackground("deezer", "123456", "111");
-        
+
         // Assert - Just verify it doesn't throw, actual download is async
         Assert.True(true);
+    }
+
+    [Fact]
+    public async Task GetTrackDownloadInfo_WhenMediaIsEmptyAndAlternativeExists_DoesNotDeadlock()
+    {
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((req, _) =>
+            {
+                var url = req.RequestUri!.ToString();
+                string body;
+
+                if (url.Contains("deezer.getUserData"))
+                {
+                    body = "{\"results\":{\"checkForm\":\"form\",\"USER\":{\"OPTIONS\":{\"license_token\":\"lic\"}}}}";
+                }
+                else if (url.EndsWith("/track/123") || url.EndsWith("/track/456"))
+                {
+                    body = "{\"title\":\"S\",\"artist\":{\"name\":\"A\"},\"readable\":true,\"track_token\":\"tok\"}";
+                }
+                else if (url.Contains("pageTrack"))
+                {
+                    body = "{\"results\":{\"DATA\":{\"FALLBACK\":{\"SNG_ID\":\"456\"},\"ISRC\":\"FOO\",\"TRACK_TOKEN\":\"pt\"}}}";
+                }
+                else if (url.Contains("get_url"))
+                {
+                    body = "{\"data\":[{}]}";
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected URL in mock: {url}");
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(body)
+                });
+            });
+
+        _metadataServiceMock
+            .Setup(s => s.GetSongAsync("deezer", "123"))
+            .ReturnsAsync(new Song { ExternalId = "123", ExternalProvider = "deezer", Title = "T" });
+        _localLibraryServiceMock
+            .Setup(s => s.GetMappingForExternalSongAsync("deezer", "123"))
+            .ReturnsAsync((LocalSongMapping?)null);
+
+        var service = CreateService(arl: "test-arl");
+
+        // Race against a timeout so a deadlock surfaces as a test failure rather than hanging the runner.
+        var downloadTask = service.DownloadSongAsync("deezer", "123");
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5));
+        var winner = await Task.WhenAny(downloadTask, timeoutTask);
+
+        Assert.True(winner == downloadTask,
+            "DownloadSongAsync did not complete within 5 seconds, likely deadlocked on _requestLock.");
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => downloadTask);
+        Assert.Contains("No media sources", ex.Message);
     }
 }
