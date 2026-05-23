@@ -24,6 +24,7 @@ public class LocalLibraryService : ILocalLibraryService
     private readonly ILogger<LocalLibraryService> _logger;
     private Dictionary<string, LocalSongMapping>? _mappings;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly SemaphoreSlim _credentialsLock = new(1, 1);
     
     // Debounce to avoid triggering too many scans
     private DateTime _lastScanTrigger = DateTime.MinValue;
@@ -32,14 +33,11 @@ public class LocalLibraryService : ILocalLibraryService
     // Primary subsonic auth parameters/credentials from config for server-to-server calls
     private SubsonicCredentials? _subsonicAdminCredentials;
 
-    // Whether the configured admin has admin rights (null = not checked yet)
-    private bool? _adminIsAdmin;
-
     // Secondary subsonic auth parameters/credentials for server-to-server calls
     private SubsonicCredentials? _subsonicUserCredentials;
-    
-    // Whether the captured user has admin rights (null = not checked yet)
-    private bool? _userIsAdmin;
+
+    // Cache of usernames already checked and confirmed as non-admin — avoids re-issuing getUser per request
+    private readonly HashSet<string> _knownNonAdminUsers = [];
 
     public LocalLibraryService(
         IConfiguration configuration,
@@ -620,28 +618,34 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     public string GetDownloadDirectory() => _downloadDirectory;
 
-    public void SetSubsonicCredentials(Dictionary<string, string> parameters)
+    public async Task SetSubsonicCredentials(Dictionary<string, string> parameters)
     {
-        if (_subsonicUserCredentials != null) return;
-        
-        var credentials = SubsonicCredentials.TryFromDictionary(parameters);
-        
-        if (credentials != null)
+        await _credentialsLock.WaitAsync();
+        try
         {
-            _subsonicUserCredentials = credentials;
-            _logger.LogInformation("Subsonic credentials captured for user '{User}'", credentials.Username);
+            _subsonicUserCredentials = SubsonicCredentials.TryFromDictionary(parameters);
+            
+            if (_subsonicAdminCredentials is not null || _subsonicUserCredentials is null || _knownNonAdminUsers.Contains(_subsonicUserCredentials.Username)) return;
+
+            if (await CheckUserIsAdminAsync(_subsonicUserCredentials))
+            {
+                _subsonicAdminCredentials = _subsonicUserCredentials;
+                _logger.LogInformation("Subsonic credentials for user '{User}' captured for server-to-server calls", _subsonicUserCredentials.Username);
+            }
+            else
+            {
+                _knownNonAdminUsers.Add(_subsonicUserCredentials.Username);
+            }
         }
-        else
+        finally
         {
-            _logger.LogWarning("Failed to capture subsonic credentials from request parameters. Invalid or empty parameters");
+            _credentialsLock.Release();
         }
     }
 
     public async Task<bool> TriggerLibraryScanAsync()
-    {
-        var requestCredentials = await ResolveAdminCapableCredentialsAsync();
-        
-        if (requestCredentials == null)
+    {   
+        if (_subsonicAdminCredentials == null)
         {
             _logger.LogWarning("Can not trigger library scan due to no available admin credentials");
             return false;
@@ -660,7 +664,7 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         
         try
         {
-            var authQuery = BuildAuthQuery(requestCredentials);
+            var authQuery = BuildAuthQuery(_subsonicAdminCredentials);
             var url = $"{_subsonicSettings.Url}/rest/startScan?f=json{authQuery}";
             
             _logger.LogInformation("Triggering Subsonic library scan...");
@@ -692,9 +696,8 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         {
             // Note: This endpoint works without authentication on most Subsonic/Navidrome servers
             // when called from localhost.
-            // current behavior: tries to find admin credentials otherwise tries with not admin credentials
-            var requestCredentials = await ResolveAdminCapableCredentialsAsync();
-
+            // current behavior: if no admin credentials set tries with not admin credentials
+            var requestCredentials = _subsonicAdminCredentials;
             if (requestCredentials == null) requestCredentials = _subsonicUserCredentials;
 
             var authQuery = BuildAuthQuery(requestCredentials);
@@ -756,33 +759,6 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
         }
 
         _logger.LogWarning("Timed out while waiting for library scan to finish");
-    }
-
-    private async Task<SubsonicCredentials?> ResolveAdminCapableCredentialsAsync()
-    {
-        // Check admin rights on first call
-        if (_adminIsAdmin == null)
-        {
-            _adminIsAdmin = await CheckUserIsAdminAsync(_subsonicAdminCredentials);
-        }
-
-        if (_userIsAdmin == null)
-        {
-            _userIsAdmin = await CheckUserIsAdminAsync(_subsonicUserCredentials);
-        }
-
-        if (_subsonicAdminCredentials != null && _adminIsAdmin == true)
-        {
-            return _subsonicAdminCredentials;
-        }
-        else if (_subsonicUserCredentials != null && _userIsAdmin == true)
-        {
-            return _subsonicUserCredentials;
-        }
-        else
-        {
-            return null;
-        }
     }
 }
 

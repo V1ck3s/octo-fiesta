@@ -74,7 +74,7 @@ public class SubsonicController : ControllerBase
     private async Task<Dictionary<string, string>> ExtractAllParameters()
     {
         var parameters = await _requestParser.ExtractAllParametersAsync(Request);
-        _localLibraryService.SetSubsonicCredentials(parameters);
+        await _localLibraryService.SetSubsonicCredentials(parameters);
         return parameters;
     }
 

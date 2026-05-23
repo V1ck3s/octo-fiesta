@@ -50,10 +50,9 @@ public interface ILocalLibraryService
     
     /// <summary>
     /// Stores Subsonic authentication parameters captured from a client request.
-    /// These credentials are reused for server-to-server calls (e.g., triggering library scans).
-    /// Only stores credentials on the first call, subsequent calls are ignored.
+    /// These credentials are reused for server-to-server calls if admin credentials not already set (e.g., triggering library scans).
     /// </summary>
-    void SetSubsonicCredentials(Dictionary<string, string> parameters);
+    Task SetSubsonicCredentials(Dictionary<string, string> parameters);
     
     /// <summary>
     /// Triggers a Subsonic library scan
