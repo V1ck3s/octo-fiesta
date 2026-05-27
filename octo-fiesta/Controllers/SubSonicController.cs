@@ -870,15 +870,27 @@ public class SubsonicController : ControllerBase
                 if (permanentized)
                 {
                     _logger.LogInformation("Successfully permanentized cached song {Provider}:{ExternalId}", provider, externalId);
-                    // Return success - the song will be available locally after Navidrome scans
-                    return _responseBuilder.CreateResponse(format, "starred", new { });
                 }
                 else
                 {
-                    // Song not in cache - user needs to play it first
-                    return _responseBuilder.CreateError(format, 70, 
-                        "Song is not in cache yet. Play it first, then star it to save permanently.");
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            _logger.LogInformation("Scheduling downloading a song {Provider}:{ExternalId}", provider, externalId);
+                            await _downloadService.DownloadSongToPermanentAsync(provider, externalId, _hostApplicationLifetime.ApplicationStopping);
+                            _logger.LogInformation("Successfully downloaded song {Provider}:{ExternalId}", provider,
+                                externalId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex,"Failed to download starred song");
+                        }
+                    });
+
                 }
+                // Return success - the song will be available locally after Navidrome scans
+                return _responseBuilder.CreateResponse(format, "starred", new { });
             }
         }
 
