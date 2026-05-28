@@ -1,4 +1,3 @@
-
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml.Serialization;
@@ -10,80 +9,80 @@ namespace octo_fiesta.Models.Yandex;
 /// May contain either actual response or an error object.
 /// </summary>
 /// <typeparam name="T">Type of actual response payload</typeparam>
-public class YandexResponse<T> where T: class
+public record YandexResponse<T> where T: class
 {
     [JsonPropertyName("error")]
-    public YandexResponseError? Error { get; set; }
+    public YandexResponseError? Error { get; init; }
 
     [JsonPropertyName("result")]
-    public T? Result { get; set; }
+    public T? Result { get; init; }
 }
 
 /// <summary>
 /// Top level response error.
 /// </summary>
-public class YandexResponseError
+public record YandexResponseError
 {
     [JsonPropertyName("name")]
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 
     [JsonPropertyName("message")]
-    public string? Message { get; set; }
+    public string? Message { get; init; }
 }
 
 /// <summary>
 /// Representation of a track in Yandex Music API.
 /// Used in all places where tracks appear.
 /// </summary>
-public class YandexTrack
+public record YandexTrack
 {
     [JsonPropertyName("error")]
-    public string? Error { get; set; }
+    public string? Error { get; init; }
 
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 
     [JsonPropertyName("title")]
-    public string? Title { get; set; } = string.Empty;
+    public string? Title { get; init; } = string.Empty;
 
     [JsonPropertyName("version")]
-    public string? Version { get; set; }
+    public string? Version { get; init; }
 
     /// <summary>
     /// Content warning. Known values: 'explicit', 'clean'
     /// </summary>
     [JsonPropertyName("contentWarning")]
-    public string? ContentWarning { get; set; }
+    public string? ContentWarning { get; init; }
 
     /// <summary>
     /// Is tracks available for listening
     /// </summary>
     [JsonPropertyName("available")]
-    public bool? Available { get; set; }
+    public bool? Available { get; init; }
 
     /// <summary>
     /// Disclaimers may contain another 'explicit' tag.
     /// </summary>
     [JsonPropertyName("disclaimers")]
-    public List<string>? Disclaimers { get; set; } = new();
+    public List<string>? Disclaimers { get; init; } = new();
 
     [JsonPropertyName("durationMs")]
-    public int? DurationMs { get; set; }
+    public int? DurationMs { get; init; }
 
     [JsonPropertyName("coverUri")]
-    public string? CoverUri { get; set; }
+    public string? CoverUri { get; init; }
 
     /// <summary>
     /// Fallback uri for cover images.
     /// </summary>
     [JsonPropertyName("ogImage")]
-    public string? OgImage { get; set; }
+    public string? OgImage { get; init; }
     
     [JsonPropertyName("artists")]
-    public List<YandexArtistShort>? Artists { get; set; } = new();
+    public List<YandexArtistShort>? Artists { get; init; } = new();
 
     [JsonPropertyName("albums")]
-    public List<YandexTrackAlbum>? Albums { get; set; } = new();
+    public List<YandexTrackAlbum>? Albums { get; init; } = new();
 }
 
 /// <summary>
@@ -91,306 +90,306 @@ public class YandexTrack
 /// Contains necessary details for tagging such as track position in album
 /// and total tracks count.
 /// </summary>
-public class YandexTrackAlbum
+public record YandexTrackAlbum
 {
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 
     [JsonPropertyName("title")]
-    public string? Title { get; set; }
+    public string? Title { get; init; }
 
     [JsonPropertyName("type")]
-    public string? Type { get; set; }
+    public string? Type { get; init; }
 
     [JsonPropertyName("year")]
-    public int? Year { get; set; }
+    public int? Year { get; init; }
 
     [JsonPropertyName("version")]
-    public string? Version { get; set; }
+    public string? Version { get; init; }
 
     [JsonPropertyName("releaseDate")]
-    public string? ReleaseDate { get; set; }
+    public string? ReleaseDate { get; init; }
 
     [JsonPropertyName("trackPosition")]
-    public YandexTrackPosition? TrackPosition { get; set; }
+    public YandexTrackPosition? TrackPosition { get; init; }
 
     [JsonPropertyName("trackCount")]
-    public int TrackCount { get; set; } = 0;
+    public int TrackCount { get; init; } = 0;
 
     [JsonPropertyName("artists")]
-    public List<YandexArtistShort> Artists { get; set; } = new();
+    public List<YandexArtistShort> Artists { get; init; } = new();
 
     [JsonPropertyName("labels")]
-    public List<YandexLabel> Labels { get; set; } = new();
+    public List<YandexLabel> Labels { get; init; } = new();
 }
 
 /// <summary>
 /// Disc number and track number of a Track inside in an Album.
 /// </summary>
-public class YandexTrackPosition
+public record YandexTrackPosition
 {
     [JsonPropertyName("volume")]
-    public int? Volume { get; set; }
+    public int? Volume { get; init; }
 
     [JsonPropertyName("index")]
-    public int? Index { get; set; }
+    public int? Index { get; init; }
 }
 
 /// <summary>
 /// Label name.
 /// </summary>
 [JsonConverter(typeof(YandexLabelConverter))]
-public class YandexLabel
+public record YandexLabel
 {
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 }
 
 /// <summary>
 /// Short version of Artist payload. Appers inside of Tracks and Albums.
 /// </summary>
-public class YandexArtistShort
+public record YandexArtistShort
 {
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 
     [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
 }
 
 /// <summary>
 /// Full version of Artist payload from /artists/ endpoint.
 /// </summary>
-public class YandexArtist
+public record YandexArtist
 {
     [JsonPropertyName("error")]
-    public string? Error { get; set; }
+    public string? Error { get; init; }
 
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 
     [JsonPropertyName("name")]
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 
     [JsonPropertyName("cover")]
-    public YandexCover? Cover { get; set; }
+    public YandexCover? Cover { get; init; }
     /// <summary>
     /// Fallback uri for cover images.
     /// </summary>
     [JsonPropertyName("ogImage")]
-    public string? OgImage { get; set; }
+    public string? OgImage { get; init; }
 
     [JsonPropertyName("counts")]
-    public YandexArtistCounts? Counts { get; set; }
+    public YandexArtistCounts? Counts { get; init; }
 }
 
 /// <summary>
 /// Actual YandexArtist object from /artists/ endpoint
 /// is wrapped by this wrapper.
 /// </summary>
-public class YandexArtistWrapper
+public record YandexArtistWrapper
 {
     [JsonPropertyName("artist")]
-    public required YandexArtist Artist { get; set; }
+    public required YandexArtist Artist { get; init; }
 }
 
 /// <summary>
 /// Counts of different types of media produced by Artist.
 /// </summary>
-public class YandexArtistCounts
+public record YandexArtistCounts
 {
     [JsonPropertyName("directAlbums")]
-    public int DirectAlbums { get; set; } = 0;
+    public int DirectAlbums { get; init; } = 0;
 }
 
 /// <summary>
 /// General type of Cover object included in Tracks, Albums and Artists.
 /// </summary>
-public class YandexCover
+public record YandexCover
 {
     [JsonPropertyName("uri")]
-    public string? Uri { get; set; }
+    public string? Uri { get; init; }
 }
 
 /// <summary>
 /// Full version of Album response containing Album Tracks.
 /// /albums/{id}/with-tracks
 /// </summary>
-public class YandexAlbumWithTracks
+public record YandexAlbumWithTracks
 {
     [JsonPropertyName("error")]
-    public string? Error { get; set; }
+    public string? Error { get; init; }
 
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 
     [JsonPropertyName("title")]
-    public string? Title { get; set; }
+    public string? Title { get; init; }
 
     [JsonPropertyName("type")]
-    public string? Type { get; set; }
+    public string? Type { get; init; }
 
     [JsonPropertyName("artists")]
-    public List<YandexArtistShort>? Artists { get; set; }
+    public List<YandexArtistShort>? Artists { get; init; }
 
     [JsonPropertyName("year")]
-    public int? Year { get; set; }
+    public int? Year { get; init; }
 
     [JsonPropertyName("version")]
-    public string? Version { get; set; }
+    public string? Version { get; init; }
 
     [JsonPropertyName("trackCount")]
-    public int? TrackCount { get; set; }
+    public int? TrackCount { get; init; }
 
     [JsonPropertyName("coverUri")]
-    public string? CoverUri { get; set; }
+    public string? CoverUri { get; init; }
 
     [JsonPropertyName("cover")]
-    public YandexCover? Cover { get; set; }
+    public YandexCover? Cover { get; init; }
 
     /// <summary>
     /// Fallback uri for cover images.
     /// </summary>
     [JsonPropertyName("ogImage")]
-    public string? OgImage { get; set; }
+    public string? OgImage { get; init; }
 
     [JsonPropertyName("genre")]
-    public string? Genre { get; set; }
+    public string? Genre { get; init; }
     
     /// <summary>
     /// Nested list representing disks with tracks.
     /// </summary>
     [JsonPropertyName("volumes")]
-    public  List<List<YandexTrack>>? Volumes { get; set; }
+    public  List<List<YandexTrack>>? Volumes { get; init; }
 }
 
 /// <summary>
 /// List of Albums made by Artist. 
 /// /artist/{id}/direct-albums
 /// </summary>
-public class YandexArtistDirectAlbums
+public record YandexArtistDirectAlbums
 {
     [JsonPropertyName("albums")]
-    public List<YandexAlbumId>? Albums { get; set; }
+    public List<YandexAlbumId>? Albums { get; init; }
 }
 
 /// <summary>
 /// Special short version of Album for places where you can't obtain full Album
 /// and where having only Album ID is enough.
 /// </summary>
-public class YandexAlbumId
+public record YandexAlbumId
 {
     [JsonPropertyName("id")]
-    public int Id { get; set; }
+    public int Id { get; init; }
 }
 
 /// <summary>
 /// Search results response from /search endpoint.
 /// </summary>
-public class YandexSearchResults
+public record YandexSearchResults
 {
     [JsonPropertyName("tracks")]
-    public  YandexSearchResult<YandexTrack>? Tracks { get; set; }
+    public  YandexSearchResult<YandexTrack>? Tracks { get; init; }
 
     [JsonPropertyName("artists")]
-    public YandexSearchResult<YandexArtist>? Artists { get; set; }
+    public YandexSearchResult<YandexArtist>? Artists { get; init; }
 
     [JsonPropertyName("albums")]
-    public YandexSearchResult<YandexAlbumId>? Albums { get; set; }
+    public YandexSearchResult<YandexAlbumId>? Albums { get; init; }
     
     [JsonPropertyName("playlists")]
-    public YandexSearchResult<YandexPlaylist>? Playlists { get; set; }
+    public YandexSearchResult<YandexPlaylist>? Playlists { get; init; }
 
     [JsonPropertyName("best")]
-    public YandexSearchBestResult? Best { get; set; }
+    public YandexSearchBestResult? Best { get; init; }
 }
 
 /// <summary>
 /// Common wrapper for different types of search results.
 /// </summary>
 /// <typeparam name="T">Type of result. Track, Artist, Album or Playlist.</typeparam>
-public class YandexSearchResult<T>
+public record YandexSearchResult<T>
 {
     [JsonPropertyName("results")]
-    public List<T>? Results { get; set; }
+    public List<T>? Results { get; init; }
 
     [JsonPropertyName("perPage")]
-    public int PerPage { get; set; }
+    public int PerPage { get; init; }
 }
 
 /// <summary>
 /// Playlist response or search result payload.
 /// </summary>
-public class YandexPlaylist
+public record YandexPlaylist
 {
     [JsonPropertyName("playlistUuid")]
-    public required string Id { get; set; }
+    public required string Id { get; init; }
 
     [JsonPropertyName("title")]
-    public string? Title { get; set; }
+    public string? Title { get; init; }
 
     [JsonPropertyName("description")]
-    public string? Description { get; set; }
+    public string? Description { get; init; }
 
     [JsonPropertyName("owner")]
-    public YandexPlaylistOwner? Owner { get; set; }
+    public YandexPlaylistOwner? Owner { get; init; }
 
     [JsonPropertyName("trackCount")]
-    public int TrackCount { get; set; }
+    public int TrackCount { get; init; }
 
     [JsonPropertyName("durationMs")]
-    public int DurationMs { get; set; }
+    public int DurationMs { get; init; }
 
     [JsonPropertyName("created")]
-    public  string? CreatedAt { get; set; }
+    public  string? CreatedAt { get; init; }
 
     [JsonPropertyName("ogImage")]
-    public string? OgImage { get; set; }
+    public string? OgImage { get; init; }
 
     [JsonPropertyName("cover")]
-    public YandexPlaylistCover? Cover { get; set; }
+    public YandexPlaylistCover? Cover { get; init; }
 
 }
 
 /// <summary>
 /// Simple model for /playlist endpoint response containing only list if Tracks.
 /// </summary>
-public class YandexPlaylistTracks
+public record YandexPlaylistTracks
 {
     [JsonPropertyName("tracks")]
-    public List<YandexPlaylistTrackWrapper> Tracks { get; set; } = new();
+    public List<YandexPlaylistTrackWrapper> Tracks { get; init; } = new();
 
     [JsonPropertyName("title")]
-    public string? Title { get; set; }
+    public string? Title { get; init; }
 }
 
-public class YandexPlaylistTrackWrapper
+public record YandexPlaylistTrackWrapper
 {
     [JsonPropertyName("track")]
-    public required YandexTrack Track { get; set; }
+    public required YandexTrack Track { get; init; }
 
     [JsonPropertyName("originalIndex")]
-    public int Index { get; set; }
+    public int Index { get; init; }
 }
 
 /// <summary>
 /// Special type of cover. May contains multiple images inside.
 /// </summary>
-public class YandexPlaylistCover : YandexCover
+public record YandexPlaylistCover : YandexCover
 {
     [JsonPropertyName("itemsUri")]
-    public  List<string>? ItemsUri { get; set; }
+    public  List<string>? ItemsUri { get; init; }
 }
 
 /// <summary>
 /// Owner of playlist. Maps to Subsonic Curator Name.
 /// </summary>
-public class YandexPlaylistOwner
+public record YandexPlaylistOwner
 {
     [JsonPropertyName("login")]
-    public required string Login { get; set; }
+    public required string Login { get; init; }
 
     [JsonPropertyName("name")]
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 }
 
 
@@ -400,13 +399,13 @@ public class YandexPlaylistOwner
 /// This class holds JsonElement for the result and tries to provide "Best Result"
 /// with appropriate type based on "type" field value.
 /// </summary>
-public class YandexSearchBestResult
+public record YandexSearchBestResult
 {
     [JsonPropertyName("type")]
-    public required string Type { get; set; }
+    public required string Type { get; init; }
 
     [JsonPropertyName("result")]
-    public required JsonElement Result { get; set; }
+    public required JsonElement Result { get; init; }
 
     [JsonIgnore]
     public YandexTrack? Track 
@@ -444,37 +443,37 @@ public class YandexSearchBestResult
 
 }
 
-public class YandexDownloadInfoWrapper
+public record YandexDownloadInfoWrapper
 {
     [JsonPropertyName("name")]
-    public string? ErrorName { get; set; }
+    public string? ErrorName { get; init; }
 
     [JsonPropertyName("message")]
-    public string? ErrorMessage { get; set; }
+    public string? ErrorMessage { get; init; }
 
     [JsonPropertyName("downloadInfo")]
-    public YandexDownloadInfo? DownloadInfo { get; set; }
+    public YandexDownloadInfo? DownloadInfo { get; init; }
 }
 
-public class YandexDownloadInfo
+public record YandexDownloadInfo
 {
     [JsonPropertyName("bitrate")]
-    public int Bitrate { get; set; }
+    public int Bitrate { get; init; }
 
     [JsonPropertyName("codec")]
-    public required string Codec { get; set; }
+    public required string Codec { get; init; }
 
     [JsonPropertyName("quality")]
-    public required string Quality { get; set; }
+    public required string Quality { get; init; }
 
     [JsonPropertyName("url")]
-    public required string Url { get; set; }
+    public required string Url { get; init; }
 
     [JsonPropertyName("urls")]
-    public List<string> Urls { get; set; } = new();
+    public List<string> Urls { get; init; } = new();
 
     [JsonPropertyName("key")]
-    public required string Key { get; set; }
+    public required string Key { get; init; }
 }
 
 
@@ -483,16 +482,16 @@ public class YandexDownloadInfo
 /// This class represents a single option in that list.
 /// This is used in legacy method of downloading. 
 /// </summary>
-public class YandexDownloadOptionLegacy
+public record YandexDownloadOptionLegacy
 {
     [JsonPropertyName("downloadInfoUrl")]
-    public required string Url { get; set; }
+    public required string Url { get; init; }
 
     [JsonPropertyName("bitrateInKbps")]
-    public required int BitRate { get; set; }
+    public required int BitRate { get; init; }
 
     [JsonPropertyName("codec")]
-    public required string Codec { get; set; }
+    public required string Codec { get; init; }
 }
 
 /// <summary>
@@ -513,16 +512,16 @@ public class YandexDownloadInfoLegacy
     public required string S { get; set; }
 }
 
-public class YandexUserAccountStatus
+public record YandexUserAccountStatus
 {
     [JsonPropertyName("plus")]
-    public YandexPlusStatus? PlusStatus { get; set; }
+    public YandexPlusStatus? PlusStatus { get; init; }
 }
 
-public class YandexPlusStatus
+public record YandexPlusStatus
 {
     [JsonPropertyName("hasPlus")]
-    public bool HasPlus { get; set; }
+    public bool HasPlus { get; init; }
 }
 
 /// <summary>
