@@ -1,7 +1,6 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Xml.Serialization;
 
 namespace octo_fiesta.Models.Yandex;
 
@@ -500,17 +499,12 @@ public class YandexDownloadOptionLegacy
 /// Obtained from an URL provided by YandexTrackDownloadOptionLegacy
 /// This is used in legacy method of downloading
 /// </summary>
-[XmlRoot("download-info")]
-public class YandexDownloadInfoLegacy
+public record YandexDownloadInfoLegacy
 {
-    [XmlElement("host")]
-    public required string Host { get; set; }
-    [XmlElement("path")]
-    public required string Path { get; set; }
-    [XmlElement("ts")]
-    public required string Ts { get; set; }
-    [XmlElement("s")]
-    public required string S { get; set; }
+    public required string Host { get; init; }
+    public required string Path { get; init; }
+    public required string Ts { get; init; }
+    public required string S { get; init; }
 }
 
 public class YandexUserAccountStatus

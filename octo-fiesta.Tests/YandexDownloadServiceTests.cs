@@ -99,6 +99,82 @@ public class YandexDownloadServiceTests : IDisposable
             _loggerMock.Object);
     }
 
+    private void SetupLegacyApiScenario(string legacyDownloadInfoXml)
+    {
+        _metadataServiceMock
+            .Setup(s => s.GetSongAsync("yandex", "123456"))
+            .ReturnsAsync(new Song
+            {
+                Title = "Test Song",
+                IsLocal = false,
+                ExternalProvider = "yandex",
+                ExternalId = "123456"
+            });
+
+        // Modern API errors out -> triggers legacy fallback
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/get-file-info/")),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""
+                {
+                    "result": {
+                        "name": "track-download-info-error",
+                        "message": "no-rights"
+                    }
+                }
+                """)
+            });
+
+        // Legacy options endpoint
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/download-info")),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""
+                {
+                    "result": [{
+                        "codec": "mp3",
+                        "downloadInfoUrl": "https://example.org/get-mp3",
+                        "bitrateInKbps": 128
+                    }]
+                }
+                """)
+            });
+
+        // The variable part — the XML response that our XDocument parser handles
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("https://example.org/get-mp3")),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(legacyDownloadInfoXml)
+            });
+
+        // Actual track download (only hit if legacy parsing succeeds)
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("get-example-file.org")),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("test-song-content")
+            });
+    }
+
     #region IsAvailableAsync Tests
 
     [Fact]
@@ -261,103 +337,14 @@ public class YandexDownloadServiceTests : IDisposable
     [Fact]
     public async Task DownloadSongAsync_WhenModernApiErrors_DownloadsFromLegacyApi()
     {
-        // Arrange
-
-        _metadataServiceMock
-            .Setup(s => s.GetSongAsync("yandex", "123456"))
-            .ReturnsAsync(new Song
-            {
-                Title = "Test Song",
-                Artist = "Test Artist",
-                ArtistId = "ext-yandex-artist-123456",
-                Album = "Test Album",
-                AlbumId = "ext-yandex-album-123456",
-                Duration = 15,
-                IsLocal = false,
-                ExternalProvider = "yandex",
-                ExternalId = "123456"
-            });
-
-        var mockResponseModernApi = new HttpResponseMessage
-        {
-            StatusCode = HttpStatusCode.OK,
-            Content = new StringContent("""
-            {
-                "result": {
-                    "name": "track-download-info-error",
-                    "message": "no-rights"
-                }
-            }
-            """)
-        };
-
-        _httpMessageHandlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>(
-                "SendAsync",
-                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/get-file-info/")),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(mockResponseModernApi);
-
-
-        var mockResponseLegacyApi = new HttpResponseMessage
-        {
-            StatusCode = HttpStatusCode.OK,
-            Content = new StringContent("""
-            {
-                "result": [
-                    {
-                        "codec": "mp3",
-                        "downloadInfoUrl": "https://example.org/get-mp3",
-                        "bitrateInKbps": 128
-                    }
-                ]
-            }
-            """)
-        };
-
-        _httpMessageHandlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>(
-                "SendAsync",
-                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/download-info")),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(mockResponseLegacyApi);
-        
-        var mockResponseLegacyDownloadInfo = new HttpResponseMessage
-        {
-            StatusCode = HttpStatusCode.OK,
-            Content = new StringContent("""
-            <download-info>
-                <host>get-example-file.org</host>
-                <path>/tes-test
-            </path>
-                <ts>19cde9597e0</ts>
-                <s>abracadabra</s>
-            </download-info>
-            """)
-        };
-
-        _httpMessageHandlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>(
-                "SendAsync",
-                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("https://example.org/get-mp3")),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(mockResponseLegacyDownloadInfo);
-        
-        string testSongContent = "test-song-content";
-        var mockResponseLegacyDownloadTrack = new HttpResponseMessage
-        {
-            StatusCode = HttpStatusCode.OK,
-            Content = new StringContent(testSongContent)
-        };
-
-        _httpMessageHandlerMock.Protected()
-            .Setup<Task<HttpResponseMessage>>(
-                "SendAsync",
-                ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("get-example-file.org")),
-                ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(mockResponseLegacyDownloadTrack);
-
-
+        SetupLegacyApiScenario("""
+        <download-info>
+            <host>get-example-file.org</host>
+            <path>/tes-test</path>
+            <ts>19cde9597e0</ts>
+            <s>abracadabra</s>
+        </download-info>
+        """);
 
         var service = CreateService(oAuthToken: "test-token");
 
@@ -366,7 +353,40 @@ public class YandexDownloadServiceTests : IDisposable
         string result = File.ReadAllText(resultPath);
 
         // Assert
-        Assert.Equal(testSongContent, result);
+        Assert.Equal("test-song-content", result);
+    }
+
+    [Fact]
+    public async Task DownloadSongAsync_WhenLegacyXmlMissingRequiredField_ThrowsDownloadFailedException()
+    {
+        SetupLegacyApiScenario("""
+        <download-info>
+            <path>/tes-test</path>
+            <ts>19cde9597e0</ts>
+            <s>abracadabra</s>
+        </download-info>
+        """);
+
+        var service = CreateService(oAuthToken: "test-token");
+        await Assert.ThrowsAsync<Exception>(() => service.DownloadSongAsync("yandex", "123456"));
+    }
+
+    [Fact]
+    public async Task DownloadSongAsync_WhenLegacyXmlIsMalformed_ThrowsDownloadFailedException()
+    {
+        SetupLegacyApiScenario("not xml at all");
+
+        var service = CreateService(oAuthToken: "test-token");
+        await Assert.ThrowsAsync<Exception>(() => service.DownloadSongAsync("yandex", "123456"));
+    }
+
+    [Fact]
+    public async Task DownloadSongAsync_WhenLegacyXmlIsEmpty_ThrowsDownloadFailedException()
+    {
+        SetupLegacyApiScenario("");
+
+        var service = CreateService(oAuthToken: "test-token");
+        await Assert.ThrowsAsync<Exception>(() => service.DownloadSongAsync("yandex", "123456"));
     }
 
     [Fact]
