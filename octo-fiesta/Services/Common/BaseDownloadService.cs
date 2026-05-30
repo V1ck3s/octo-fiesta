@@ -364,9 +364,11 @@ public abstract class BaseDownloadService : IDownloadService
     #region Template Methods (to be implemented by subclasses)
 
     /// <summary>
-    /// Result of a track download containing Stream with track content, preferred filename extension and quality
+    /// Result of a track download containing Stream with track content, preferred filename extension and quality.
+    /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
+    /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -691,12 +693,48 @@ public abstract class BaseDownloadService : IDownloadService
             // Write metadata
             await WriteMetadataAsync(outputPath, song, cancellationToken);
 
+            // Fragmented MP4 (Tidal HI_RES FLAC-in-MP4) carries no top-level duration; patch it
+            // so tag scanners don't report 0:00. Done last so it survives the metadata write.
+            PatchMp4DurationIfNeeded(outputPath, result);
+
             return outputPath;
         }
         catch
         {
             TryDeleteIncompleteFile(outputPath);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Writes the known duration into an MP4/M4A file's moov so fragmented MP4 (which stores
+    /// timing only in per-fragment boxes) doesn't report a 0:00 length. No-op for other formats.
+    /// Failures are logged but never abort the download — the audio is already on disk.
+    /// </summary>
+    private void PatchMp4DurationIfNeeded(string outputPath, DownloadResult result)
+    {
+        if (result.Mp4DurationSeconds is not > 0)
+        {
+            return;
+        }
+
+        var ext = Path.GetExtension(outputPath);
+        if (!ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) &&
+            !ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Mp4DurationPatcher.PatchDuration(outputPath, result.Mp4DurationSeconds.Value))
+            {
+                Logger.LogInformation("Patched MP4 duration ({Duration:F3}s) for {Path}", result.Mp4DurationSeconds.Value, outputPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to patch MP4 duration for {Path}", outputPath);
         }
     }
 

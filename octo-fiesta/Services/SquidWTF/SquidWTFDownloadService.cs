@@ -241,7 +241,13 @@ public class SquidWTFDownloadService : BaseDownloadService
         var extension = GetExtensionFromMimeType(manifest.MimeType, manifest.Codecs);
         var downloadedQuality = GetDownloadedQuality(actualQuality, manifest.MimeType, manifest.Codecs);
 
-        return new DownloadResult(downloadStream, extension, downloadedQuality);
+        // fMP4 (FLAC-in-MP4 DASH) assembles into a file whose moov duration is 0; pass the
+        // known duration so it can be patched, otherwise scanners report 0:00. (see #251)
+        var mp4Duration = extension == ".m4a"
+            ? manifest.DurationSeconds ?? (double?)song.Duration
+            : null;
+
+        return new DownloadResult(downloadStream, extension, downloadedQuality, mp4Duration);
     }
 
     /// <summary>
@@ -288,6 +294,7 @@ public class SquidWTFDownloadService : BaseDownloadService
                     MimeType = parsed.MimeType ?? "audio/mp4",
                     Codecs = parsed.Codecs,
                     Urls = parsed.Urls.ToList(),
+                    DurationSeconds = parsed.DurationSeconds,
                 };
                 return (manifest, quality);
             }

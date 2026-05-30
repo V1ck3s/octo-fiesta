@@ -81,6 +81,61 @@ public class SquidWTFTidalDashTests : IDisposable
     }
 
     [Fact]
+    public void Parser_TidalHiResDash_ComputesDurationFromSegmentTimeline()
+    {
+        // Σ d·(r+1) / timescale = (220500·2 + 22050) / 44100 = 10.5s
+        var parsed = TidalDashManifestParser.Parse(TidalHiResDashXml);
+        Assert.NotNull(parsed.DurationSeconds);
+        Assert.Equal(10.5, parsed.DurationSeconds!.Value, precision: 3);
+    }
+
+    [Fact]
+    public void Parser_FixedDurationTemplate_FallsBackToMediaPresentationDuration()
+    {
+        var xml = """
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
+                 type="static"
+                 mediaPresentationDuration="PT3M47.339S">
+              <Period>
+                <AdaptationSet mimeType="audio/mp4">
+                  <Representation id="1" codecs="flac">
+                    <SegmentTemplate timescale="1" duration="5"
+                                     initialization="https://cdn.example/init.mp4"
+                                     media="https://cdn.example/seg-$Number$.mp4"
+                                     startNumber="1"/>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            """;
+
+        var parsed = TidalDashManifestParser.Parse(xml);
+        Assert.NotNull(parsed.DurationSeconds);
+        Assert.Equal(227.339, parsed.DurationSeconds!.Value, precision: 3);
+    }
+
+    [Fact]
+    public void Parser_SegmentList_HasNoDuration()
+    {
+        var xml = """
+            <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static">
+              <Period>
+                <AdaptationSet mimeType="audio/mp4">
+                  <Representation id="1" codecs="flac">
+                    <SegmentList>
+                      <Initialization sourceURL="https://cdn.example/init.mp4"/>
+                      <SegmentURL media="https://cdn.example/seg-1.mp4"/>
+                    </SegmentList>
+                  </Representation>
+                </AdaptationSet>
+              </Period>
+            </MPD>
+            """;
+
+        Assert.Null(TidalDashManifestParser.Parse(xml).DurationSeconds);
+    }
+
+    [Fact]
     public void Parser_HandlesSegmentList()
     {
         var xml = """

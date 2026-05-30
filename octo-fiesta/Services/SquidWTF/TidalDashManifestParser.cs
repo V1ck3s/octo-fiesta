@@ -10,7 +10,7 @@ namespace octo_fiesta.Services.SquidWTF;
 /// </summary>
 public static class TidalDashManifestParser
 {
-    public sealed record ParsedDashManifest(string? Codecs, string? MimeType, IReadOnlyList<string> Urls);
+    public sealed record ParsedDashManifest(string? Codecs, string? MimeType, IReadOnlyList<string> Urls, double? DurationSeconds);
 
     public static ParsedDashManifest Parse(string xml)
     {
@@ -26,27 +26,59 @@ public static class TidalDashManifestParser
         var codecs = representation.Attribute("codecs")?.Value;
         var mimeType = adaptationSet?.Attribute("mimeType")?.Value
             ?? representation.Attribute("mimeType")?.Value;
+        var duration = ComputeDurationSeconds(root, representation, ns);
 
         var template = representation.Element(ns + "SegmentTemplate");
         if (template != null)
         {
-            return new ParsedDashManifest(codecs, mimeType, BuildFromSegmentTemplate(template, ns));
+            return new ParsedDashManifest(codecs, mimeType, BuildFromSegmentTemplate(template, ns), duration);
         }
 
         var segmentList = representation.Element(ns + "SegmentList");
         if (segmentList != null)
         {
-            return new ParsedDashManifest(codecs, mimeType, BuildFromSegmentList(segmentList, ns));
+            return new ParsedDashManifest(codecs, mimeType, BuildFromSegmentList(segmentList, ns), duration);
         }
 
         var baseUrl = representation.Element(ns + "BaseURL")?.Value;
         if (!string.IsNullOrWhiteSpace(baseUrl))
         {
-            return new ParsedDashManifest(codecs, mimeType, new[] { baseUrl.Trim() });
+            return new ParsedDashManifest(codecs, mimeType, new[] { baseUrl.Trim() }, duration);
         }
 
         throw new InvalidOperationException(
             "DASH manifest has no SegmentTemplate, SegmentList or BaseURL");
+    }
+
+    /// <summary>
+    /// Total media duration in seconds. Prefers the sample-accurate SegmentTimeline sum
+    /// (Σ d·(r+1) / timescale); falls back to the MPD <c>mediaPresentationDuration</c>.
+    /// </summary>
+    private static double? ComputeDurationSeconds(XElement root, XElement representation, XNamespace ns)
+    {
+        var template = representation.Element(ns + "SegmentTemplate");
+        var timeline = template?.Element(ns + "SegmentTimeline");
+        if (template != null && timeline != null)
+        {
+            var timescale = ParseIntAttribute(template, "timescale", 0);
+            if (timescale > 0)
+            {
+                long units = 0;
+                foreach (var s in timeline.Elements(ns + "S"))
+                {
+                    var d = ParseIntAttribute(s, "d", 0);
+                    var repeat = ParseIntAttribute(s, "r", 0) + 1;
+                    units += (long)d * repeat;
+                }
+                if (units > 0)
+                {
+                    return (double)units / timescale;
+                }
+            }
+        }
+
+        var mpd = ParseIsoDurationSeconds(root.Attribute("mediaPresentationDuration")?.Value);
+        return mpd > 0 ? mpd : null;
     }
 
     private static List<string> BuildFromSegmentTemplate(XElement template, XNamespace ns)
