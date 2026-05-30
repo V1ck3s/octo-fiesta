@@ -334,6 +334,11 @@ public class SubsonicResponseBuilder
             ["artist"] = song.Artist ?? "",
             ["albumId"] = song.AlbumId ?? "",
             ["artistId"] = song.ArtistId ?? "",
+            ["artists"] = song.Artists.Select(a => new Dictionary<string, object>
+            {
+                ["id"] = a.Id,
+                ["name"] = a.Name
+            }).ToList(),
             ["duration"] = song.Duration ?? 0,
             ["track"] = song.Track ?? 0,
             ["discNumber"] = song.DiscNumber ?? 0,
@@ -483,6 +488,14 @@ public class SubsonicResponseBuilder
             new XAttribute("displayAlbumArtist", song.Artist ?? ""),
             new XAttribute("displayComposer", "")
         );
+
+        // OpenSubsonic multi-artist support: one <artists> element per performing artist
+        foreach (var a in song.Artists)
+        {
+            songElement.Add(new XElement(ns + "artists",
+                new XAttribute("id", a.Id),
+                new XAttribute("name", a.Name)));
+        }
 
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
         if (song.IsLocal || !string.IsNullOrEmpty(song.CoverArtUrl))
