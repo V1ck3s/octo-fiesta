@@ -389,21 +389,23 @@ public class DeezerMetadataService : IMusicMetadataService
         {
             Title = track.GetProperty("title").GetString() ?? "",
             Artist = mainArtist,
-            Artists = !string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>(),
-            ArtistId = track.TryGetProperty("artist", out var artistForId) 
-                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
+            Artists = track.TryGetProperty("artist", out var artistForList)
+                ? new List<Artist> { ParseDeezerArtist(artistForList) }
+                : new List<Artist>(),
+            ArtistId = track.TryGetProperty("artist", out var artistForId)
+                ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}"
                 : null,
-            Album = track.TryGetProperty("album", out var album) 
-                ? album.GetProperty("title").GetString() ?? "" 
+            Album = track.TryGetProperty("album", out var album)
+                ? album.GetProperty("title").GetString() ?? ""
                 : "",
-            AlbumId = track.TryGetProperty("album", out var albumForId) 
-                ? $"ext-deezer-album-{albumForId.GetProperty("id").GetInt64()}" 
+            AlbumId = track.TryGetProperty("album", out var albumForId)
+                ? $"ext-deezer-album-{albumForId.GetProperty("id").GetInt64()}"
                 : null,
-            Duration = track.TryGetProperty("duration", out var duration) 
-                ? duration.GetInt32() 
+            Duration = track.TryGetProperty("duration", out var duration)
+                ? duration.GetInt32()
                 : null,
             Track = trackNumber,
-            CoverArtUrl = track.TryGetProperty("album", out var albumForCover) && 
+            CoverArtUrl = track.TryGetProperty("album", out var albumForCover) &&
                           albumForCover.TryGetProperty("cover_medium", out var cover)
                 ? cover.GetString()
                 : null,
@@ -471,8 +473,10 @@ public class DeezerMetadataService : IMusicMetadataService
             }
         }
         
-        // Contributors
+        // Contributors. Deezer lists all performing artists here (with their ids),
+        // so we use them both for the Contributors names and the typed Artists list.
         var contributors = new List<string>();
+        var contributorArtists = new List<Artist>();
         if (track.TryGetProperty("contributors", out var contribs))
         {
             foreach (var contrib in contribs.EnumerateArray())
@@ -481,7 +485,10 @@ public class DeezerMetadataService : IMusicMetadataService
                 {
                     var name = contribName.GetString();
                     if (!string.IsNullOrEmpty(name))
+                    {
                         contributors.Add(name);
+                        contributorArtists.Add(ParseDeezerArtist(contrib));
+                    }
                 }
             }
         }
@@ -522,8 +529,12 @@ public class DeezerMetadataService : IMusicMetadataService
         {
             Title = track.GetProperty("title").GetString() ?? "",
             Artist = mainArtist,
-            Artists = contributors.Count > 0 ? contributors : (!string.IsNullOrEmpty(mainArtist) ? new List<string> { mainArtist } : new List<string>()),
-            ArtistId = track.TryGetProperty("artist", out var artistForId) 
+            Artists = contributorArtists.Count > 0
+                ? contributorArtists
+                : (track.TryGetProperty("artist", out var mainArtistForList)
+                    ? new List<Artist> { ParseDeezerArtist(mainArtistForList) }
+                    : new List<Artist>()),
+            ArtistId = track.TryGetProperty("artist", out var artistForId)
                 ? $"ext-deezer-artist-{artistForId.GetProperty("id").GetInt64()}" 
                 : null,
             Album = track.TryGetProperty("album", out var album) 

@@ -349,7 +349,14 @@ public class YandexMetadataService : IMusicMetadataService
             AlbumArtist = yandexAlbum?.Artists.FirstOrDefault()?.Name,
             Composer = null,
             Label = yandexAlbum?.Labels?.FirstOrDefault()?.Name,
-            Artists = yandexTrack.Artists?.Select(a => a.Name)?.ToList() ?? [],
+            Artists = yandexTrack.Artists?.Select(a => new Artist
+            {
+                Id = ArtistPrefix + a.Id,
+                Name = a.Name,
+                IsLocal = false,
+                ExternalProvider = ProviderName,
+                ExternalId = a.Id.ToString()
+            }).ToList() ?? [],
             Contributors = [],
             IsLocal = false,
             ExternalProvider = ProviderName,

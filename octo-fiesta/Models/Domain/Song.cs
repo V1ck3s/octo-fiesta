@@ -59,10 +59,11 @@ public class Song
     public string? Copyright { get; set; }
     
     /// <summary>
-    /// All performing artists (for multi-artist tracks).
-    /// First entry should match Artist. Used for file tagging (Performers field).
+    /// All performing artists (for multi-artist tracks), with id + name so clients
+    /// can link each one. First entry should match Artist. Used for file tagging
+    /// (Performers field) and the OpenSubsonic `artists` field.
     /// </summary>
-    public List<string> Artists { get; set; } = new();
+    public List<Artist> Artists { get; set; } = new();
     
     /// <summary>
     /// Contributing artists (features, etc.)
