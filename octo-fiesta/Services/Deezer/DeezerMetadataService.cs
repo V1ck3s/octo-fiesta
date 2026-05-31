@@ -3,6 +3,7 @@ using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 
@@ -15,12 +16,30 @@ public class DeezerMetadataService : IMusicMetadataService
 {
     private readonly HttpClient _httpClient;
     private readonly SubsonicSettings _settings;
+    private readonly string? _arl;
+    private readonly ILogger<DeezerMetadataService> _logger;
     private const string BaseUrl = "https://api.deezer.com";
 
-    public DeezerMetadataService(IHttpClientFactory httpClientFactory, IOptions<SubsonicSettings> settings)
+    // Deezer's private gateway (the same one the downloader uses). Unlike the
+    // public api.deezer.com, it is NOT filtered by the server's outbound IP
+    // country, so search returns the full catalog even from regions where Deezer
+    // is closed (e.g. RU/BY). See issue #232.
+    private const string GatewayUrl = "https://www.deezer.com/ajax/gw-light.php";
+    private const string ImageCdnUrl = "https://e-cdns-images.dzcdn.net/images";
+    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private string? _apiToken;
+    private DateTime _apiTokenExpiry = DateTime.MinValue;
+
+    public DeezerMetadataService(
+        IHttpClientFactory httpClientFactory,
+        IOptions<SubsonicSettings> settings,
+        IOptions<DeezerSettings> deezerSettings,
+        ILogger<DeezerMetadataService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
+        _arl = deezerSettings.Value.Arl;
+        _logger = logger;
     }
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
@@ -116,6 +135,15 @@ public class DeezerMetadataService : IMusicMetadataService
 
     public async Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20)
     {
+        // Prefer the private gateway: the public API is filtered by the server's
+        // IP country and returns truncated results from regions where Deezer is
+        // closed. The gateway uses the account/session instead. See issue #232.
+        var privateResult = await SearchViaGatewayAsync(query, songLimit, albumLimit, artistLimit);
+        if (privateResult != null)
+        {
+            return privateResult;
+        }
+
         // Execute searches in parallel
         var songsTask = SearchSongsAsync(query, songLimit);
         var albumsTask = SearchAlbumsAsync(query, albumLimit);
@@ -149,6 +177,282 @@ public class DeezerMetadataService : IMusicMetadataService
 
         return new SearchResult { Songs = songs, Albums = albums, Artists = artists };
     }
+
+    #region Private gateway search (issue #232)
+
+    /// <summary>
+    /// Searches via Deezer's private gateway (deezer.pageSearch). Returns null on
+    /// any failure so the caller can fall back to the public API.
+    /// </summary>
+    private async Task<SearchResult?> SearchViaGatewayAsync(string query, int songLimit, int albumLimit, int artistLimit)
+    {
+        try
+        {
+            var token = await EnsureApiTokenAsync();
+            if (string.IsNullOrEmpty(token)) return null;
+
+            var nb = Math.Max(1, Math.Max(songLimit, Math.Max(albumLimit, artistLimit)));
+            var results = await CallPageSearchAsync(query, nb, token);
+
+            // Token can expire; retry once with a fresh one.
+            if (results == null)
+            {
+                _apiTokenExpiry = DateTime.MinValue;
+                token = await EnsureApiTokenAsync();
+                if (string.IsNullOrEmpty(token)) return null;
+                results = await CallPageSearchAsync(query, nb, token);
+                if (results == null) return null;
+            }
+
+            var resultsEl = results.Value;
+            var songs = ParseGatewaySection(resultsEl, "TRACK", songLimit, ParseGatewayTrack);
+            var albums = ParseGatewaySection(resultsEl, "ALBUM", albumLimit, ParseGatewayAlbum);
+            var artists = ParseGatewaySection(resultsEl, "ARTIST", artistLimit, ParseGatewayArtist);
+
+            songs = songs.Where(ShouldIncludeSong).ToList();
+
+            return new SearchResult { Songs = songs, Albums = albums, Artists = artists };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Deezer gateway search failed for '{Query}', falling back to public API", query);
+            return null;
+        }
+    }
+
+    private async Task<JsonElement?> CallPageSearchAsync(string query, int nb, string token)
+    {
+        var url = $"{GatewayUrl}?method=deezer.pageSearch&input=3&api_version=1.0&api_token={Uri.EscapeDataString(token)}";
+        using var request = new HttpRequestMessage(HttpMethod.Post, url);
+        if (!string.IsNullOrEmpty(_arl))
+        {
+            request.Headers.Add("Cookie", $"arl={_arl}");
+        }
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { query, start = 0, nb, top_tracks = true }),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode) return null;
+
+        var json = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // A non-empty error (e.g. expired token) means we should retry/fall back.
+        if (root.TryGetProperty("error", out var error) &&
+            (error.ValueKind != JsonValueKind.Array || error.GetArrayLength() > 0) &&
+            (error.ValueKind != JsonValueKind.Object || error.EnumerateObject().Any()))
+        {
+            return null;
+        }
+
+        if (!root.TryGetProperty("results", out var results)) return null;
+
+        // Clone so the JsonElement stays valid after the JsonDocument is disposed.
+        return results.Clone();
+    }
+
+    /// <summary>
+    /// Obtains and caches a gateway api_token. Uses the configured ARL when present
+    /// (account session), otherwise an anonymous guest token — both bypass the
+    /// public API's IP geo-filtering.
+    /// </summary>
+    private async Task<string?> EnsureApiTokenAsync()
+    {
+        if (!string.IsNullOrEmpty(_apiToken) && DateTime.UtcNow < _apiTokenExpiry)
+        {
+            return _apiToken;
+        }
+
+        await _tokenLock.WaitAsync();
+        try
+        {
+            if (!string.IsNullOrEmpty(_apiToken) && DateTime.UtcNow < _apiTokenExpiry)
+            {
+                return _apiToken;
+            }
+
+            var url = $"{GatewayUrl}?method=deezer.getUserData&input=3&api_version=1.0&api_token=null";
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            if (!string.IsNullOrEmpty(_arl))
+            {
+                request.Headers.Add("Cookie", $"arl={_arl}");
+            }
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("results", out var results) &&
+                results.TryGetProperty("checkForm", out var checkForm))
+            {
+                _apiToken = checkForm.GetString();
+                _apiTokenExpiry = DateTime.UtcNow.AddMinutes(50);
+                return _apiToken;
+            }
+
+            return null;
+        }
+        finally
+        {
+            _tokenLock.Release();
+        }
+    }
+
+    private static List<T> ParseGatewaySection<T>(JsonElement results, string section, int limit, Func<JsonElement, T> parse)
+    {
+        var items = new List<T>();
+        if (limit <= 0) return items;
+        if (results.TryGetProperty(section, out var sectionEl) &&
+            sectionEl.TryGetProperty("data", out var data) &&
+            data.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in data.EnumerateArray())
+            {
+                items.Add(parse(item));
+                if (items.Count >= limit) break;
+            }
+        }
+        return items;
+    }
+
+    private Song ParseGatewayTrack(JsonElement t)
+    {
+        var sngId = GwString(t, "SNG_ID") ?? "";
+        var albId = GwString(t, "ALB_ID");
+        var artId = GwString(t, "ART_ID");
+        var albPicture = GwString(t, "ALB_PICTURE");
+
+        return new Song
+        {
+            Title = GwString(t, "SNG_TITLE") ?? "",
+            Artist = GwString(t, "ART_NAME") ?? "",
+            Artists = ParseGatewayArtistList(t),
+            ArtistId = artId != null ? $"ext-deezer-artist-{artId}" : null,
+            Album = GwString(t, "ALB_TITLE") ?? "",
+            AlbumId = albId != null ? $"ext-deezer-album-{albId}" : null,
+            Duration = GwInt(t, "DURATION"),
+            Track = GwInt(t, "TRACK_NUMBER"),
+            DiscNumber = GwInt(t, "DISK_NUMBER"),
+            Isrc = GwString(t, "ISRC"),
+            CoverArtUrl = BuildImageUrl("cover", albPicture, 250),
+            CoverArtUrlLarge = BuildImageUrl("cover", albPicture, 1000),
+            IsLocal = false,
+            ExternalProvider = "deezer",
+            ExternalId = sngId,
+            ExplicitContentLyrics = GwInt(t, "EXPLICIT_LYRICS")
+        };
+    }
+
+    private Album ParseGatewayAlbum(JsonElement a)
+    {
+        var albId = GwString(a, "ALB_ID") ?? "";
+        var artId = GwString(a, "ART_ID");
+        var picture = GwString(a, "ALB_PICTURE");
+        var releaseDate = GwString(a, "ORIGINAL_RELEASE_DATE")
+            ?? GwString(a, "PHYSICAL_RELEASE_DATE")
+            ?? GwString(a, "DIGITAL_RELEASE_DATE");
+
+        return new Album
+        {
+            Id = $"ext-deezer-album-{albId}",
+            Title = GwString(a, "ALB_TITLE") ?? "",
+            Artist = GwString(a, "ART_NAME") ?? "",
+            ArtistId = artId != null ? $"ext-deezer-artist-{artId}" : null,
+            Year = ParseYear(releaseDate),
+            SongCount = GwInt(a, "NUMBER_TRACK"),
+            CoverArtUrl = BuildImageUrl("cover", picture, 250),
+            CoverArtUrlLarge = BuildImageUrl("cover", picture, 1000),
+            IsLocal = false,
+            ExternalProvider = "deezer",
+            ExternalId = albId
+        };
+    }
+
+    private Artist ParseGatewayArtist(JsonElement a)
+    {
+        var artId = GwString(a, "ART_ID") ?? "";
+        var picture = GwString(a, "ART_PICTURE");
+
+        return new Artist
+        {
+            Id = $"ext-deezer-artist-{artId}",
+            Name = GwString(a, "ART_NAME") ?? "",
+            ImageUrl = BuildImageUrl("artist", picture, 250),
+            IsLocal = false,
+            ExternalProvider = "deezer",
+            ExternalId = artId
+        };
+    }
+
+    private List<Artist> ParseGatewayArtistList(JsonElement t)
+    {
+        var list = new List<Artist>();
+        if (t.TryGetProperty("ARTISTS", out var artists) && artists.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var a in artists.EnumerateArray())
+            {
+                list.Add(ParseGatewayArtist(a));
+            }
+        }
+
+        if (list.Count == 0)
+        {
+            var artId = GwString(t, "ART_ID");
+            if (artId != null)
+            {
+                list.Add(new Artist
+                {
+                    Id = $"ext-deezer-artist-{artId}",
+                    Name = GwString(t, "ART_NAME") ?? "",
+                    IsLocal = false,
+                    ExternalProvider = "deezer",
+                    ExternalId = artId
+                });
+            }
+        }
+
+        return list;
+    }
+
+    private static string? BuildImageUrl(string type, string? md5, int size)
+    {
+        if (string.IsNullOrEmpty(md5)) return null;
+        return $"{ImageCdnUrl}/{type}/{md5}/{size}x{size}-000000-80-0-0.jpg";
+    }
+
+    private static int? ParseYear(string? date)
+    {
+        if (string.IsNullOrEmpty(date)) return null;
+        return int.TryParse(date.Split('-')[0], out var year) && year > 0 ? year : null;
+    }
+
+    // Gateway fields are inconsistently typed (numbers arrive as strings).
+    private static string? GwString(JsonElement t, string name)
+    {
+        if (!t.TryGetProperty(name, out var el)) return null;
+        return el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString(),
+            JsonValueKind.Number => el.GetRawText(),
+            _ => null
+        };
+    }
+
+    private static int? GwInt(JsonElement t, string name)
+    {
+        if (!t.TryGetProperty(name, out var el)) return null;
+        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var n)) return n;
+        if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s)) return s;
+        return null;
+    }
+
+    #endregion
 
     public async Task<Song?> GetSongAsync(string externalProvider, string externalId)
     {

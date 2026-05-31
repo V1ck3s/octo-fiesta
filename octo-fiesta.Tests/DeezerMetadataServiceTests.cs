@@ -31,10 +31,15 @@ public class DeezerMetadataServiceTests
         _service = CreateService(_settings);
     }
 
-    private DeezerMetadataService CreateService(SubsonicSettings settings)
+    private DeezerMetadataService CreateService(SubsonicSettings settings, DeezerSettings? deezerSettings = null)
     {
         var options = Options.Create(settings);
-        return new DeezerMetadataService(_httpClientFactoryMock.Object, options);
+        var deezerOptions = Options.Create(deezerSettings ?? new DeezerSettings());
+        return new DeezerMetadataService(
+            _httpClientFactoryMock.Object,
+            options,
+            deezerOptions,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DeezerMetadataService>.Instance);
     }
 
     [Fact]
@@ -1002,6 +1007,119 @@ public class DeezerMetadataServiceTests
 
         // Assert
         Assert.Empty(result);
+    }
+
+    #endregion
+
+    #region Private gateway search (issue #232)
+
+    // Dispatches gw-light getUserData (token) + deezer.pageSearch, and falls through
+    // to a public-API responder for anything else.
+    private void SetupGatewaySearch(string pageSearchJson, string? userDataJson = null, Func<string, string?>? publicResponder = null)
+    {
+        userDataJson ??= JsonSerializer.Serialize(new { error = Array.Empty<object>(), results = new { checkForm = "test-token" } });
+
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((req, _) =>
+            {
+                var url = req.RequestUri!.ToString();
+                string body;
+                if (url.Contains("method=deezer.getUserData")) body = userDataJson;
+                else if (url.Contains("method=deezer.pageSearch")) body = pageSearchJson;
+                else body = publicResponder?.Invoke(url) ?? "{\"data\":[]}";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+            });
+    }
+
+    private static string BuildPageSearchJson()
+    {
+        var payload = new
+        {
+            error = Array.Empty<object>(),
+            results = new
+            {
+                ARTIST = new { count = 1, data = new[] { new { ART_ID = "119", ART_NAME = "Metallica", ART_PICTURE = "artmd5" } } },
+                ALBUM = new
+                {
+                    count = 2,
+                    data = new[]
+                    {
+                        new { ALB_ID = "100", ALB_TITLE = "Master Of Puppets (Remastered)", ART_ID = "119", ART_NAME = "Metallica", ALB_PICTURE = "albmd5a", NUMBER_TRACK = "8", ORIGINAL_RELEASE_DATE = "1986-03-03" },
+                        new { ALB_ID = "428391407", ALB_TITLE = "72 Seasons", ART_ID = "119", ART_NAME = "Metallica", ALB_PICTURE = "albmd5b", NUMBER_TRACK = "12", ORIGINAL_RELEASE_DATE = "2023-04-14" }
+                    }
+                },
+                TRACK = new
+                {
+                    count = 1,
+                    data = new[]
+                    {
+                        new
+                        {
+                            SNG_ID = "555", SNG_TITLE = "Lux Æterna", ALB_ID = "428391407", ALB_TITLE = "72 Seasons",
+                            ALB_PICTURE = "albmd5b", ART_ID = "119", ART_NAME = "Metallica", DURATION = "228",
+                            TRACK_NUMBER = "1", DISK_NUMBER = "1", ISRC = "USXXX2300001", EXPLICIT_LYRICS = "0",
+                            ARTISTS = new[] { new { ART_ID = "119", ART_NAME = "Metallica", ART_PICTURE = "artmd5" } }
+                        }
+                    }
+                }
+            }
+        };
+        return JsonSerializer.Serialize(payload);
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_UsesGateway_SurfacesLatestRelease()
+    {
+        // Public API would be IP-geo-filtered (no 72 Seasons); the gateway returns it.
+        SetupGatewaySearch(BuildPageSearchJson(), publicResponder: _ => "{\"data\":[]}");
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All }, new DeezerSettings { Arl = "fake-arl" });
+
+        var result = await _service.SearchAllAsync("Metallica", 20, 20, 20);
+
+        Assert.Contains(result.Albums, a => a.ExternalId == "428391407" && a.Title == "72 Seasons" && a.Year == 2023);
+        var latest = result.Albums.Single(a => a.ExternalId == "428391407");
+        Assert.Equal("Metallica", latest.Artist);
+        Assert.Equal("ext-deezer-artist-119", latest.ArtistId);
+        Assert.Equal(12, latest.SongCount);
+        Assert.StartsWith("https://e-cdns-images.dzcdn.net/images/cover/albmd5b/", latest.CoverArtUrl);
+
+        Assert.Single(result.Artists, a => a.ExternalId == "119" && a.Name == "Metallica");
+        var song = Assert.Single(result.Songs);
+        Assert.Equal("555", song.ExternalId);
+        Assert.Equal("Lux Æterna", song.Title);
+        Assert.Equal(228, song.Duration);
+        Assert.Equal("ext-deezer-album-428391407", song.AlbumId);
+        Assert.Equal("USXXX2300001", song.Isrc);
+        Assert.Single(song.Artists, a => a.ExternalId == "119");
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_GatewayRespectsPerSectionLimits()
+    {
+        SetupGatewaySearch(BuildPageSearchJson());
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All });
+
+        var result = await _service.SearchAllAsync("Metallica", songLimit: 0, albumLimit: 1, artistLimit: 20);
+
+        Assert.Empty(result.Songs);          // songLimit 0
+        Assert.Single(result.Albums);        // albumLimit 1
+        Assert.Single(result.Artists);
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_FallsBackToPublicApi_WhenGatewayTokenUnavailable()
+    {
+        // getUserData without checkForm -> no token -> fall back to the public API.
+        var noToken = JsonSerializer.Serialize(new { error = Array.Empty<object>(), results = new { } });
+        var publicAlbum = JsonSerializer.Serialize(new { data = new[] { new { id = 999, title = "Public Album", nb_tracks = 10, release_date = "2020-01-01", artist = new { id = 7, name = "Pub Artist" } } } });
+
+        SetupGatewaySearch("{}", userDataJson: noToken, publicResponder: url => url.Contains("/search/album") ? publicAlbum : "{\"data\":[]}");
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All });
+
+        var result = await _service.SearchAllAsync("anything", 20, 20, 20);
+
+        Assert.Single(result.Albums, a => a.ExternalId == "999" && a.Title == "Public Album");
     }
 
     #endregion

@@ -78,7 +78,9 @@ public class MultiArtistMatrixTests
     // ---- per-provider service builders ----
 
     private static DeezerMetadataService Deezer(string json) =>
-        new(Factory(JsonHandler(json)), Options.Create(new SubsonicSettings()));
+        new(Factory(JsonHandler(json)), Options.Create(new SubsonicSettings()),
+            Options.Create(new DeezerSettings()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DeezerMetadataService>.Instance);
 
     private static QobuzMetadataService Qobuz(string json)
     {
