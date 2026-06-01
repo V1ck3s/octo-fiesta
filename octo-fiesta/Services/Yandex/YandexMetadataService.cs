@@ -282,21 +282,13 @@ public class YandexMetadataService : IMusicMetadataService
     /// Maps Yandex Track to Song domain model.
     /// </summary>
     /// <param name="yandexTrack">Yandex API Track payload.</param>
-    /// <param name="linkedAlbum">If a track as acquired from an album, that album's details
-    /// will be used to populate album-related Song details.
-    /// </param>
     /// <returns>Song Domain Model</returns>
-    private static Song MapYandexTrackToSong(YandexTrack yandexTrack, YandexAlbumWithTracks? linkedAlbum = null)
-    {   
+    private static Song MapYandexTrackToSong(YandexTrack yandexTrack)
+    {
         YandexArtistShort? yandexArtist = yandexTrack.Artists?.FirstOrDefault();
         string? externalArtistId = yandexArtist?.Id.ToString();
 
-        YandexTrackAlbum? yandexAlbum = null;
-        if (linkedAlbum is not null && linkedAlbum.Error is null)
-        {
-            yandexAlbum = yandexTrack.Albums?.Find(a => a.Id == linkedAlbum.Id);
-        }
-        yandexAlbum ??= yandexTrack.Albums?.FirstOrDefault();
+        YandexTrackAlbum? yandexAlbum = yandexTrack.Albums?.FirstOrDefault();
 
         string? externalAlbumId = yandexAlbum?.Id.ToString();
 
@@ -423,11 +415,11 @@ public class YandexMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = ProviderName,
             ExternalId = externalId,
-            Songs = yandexAlbum.Volumes?.SelectMany(trackList => 
-                trackList.Where(IsTrackAvailable).Select(track =>
-                    MapYandexTrackToSong(track, yandexAlbum)
-                )
-            ).ToList() ?? [],
+            Songs = yandexAlbum.Volumes?
+                .SelectMany(trackList => trackList.Where(IsTrackAvailable))
+                .Select(track => track with { Albums = MoveAlbumToFront(track.Albums, yandexAlbum.Id) })
+                .Select(MapYandexTrackToSong)
+                .ToList() ?? [],
         };
     }
 
@@ -627,6 +619,26 @@ public class YandexMetadataService : IMusicMetadataService
     private bool IsTrackAvailable(YandexTrack track)
     {
         return track.Available != false || _includeUnavailable;
+    }
+
+    /// <summary>
+    /// Returns a new list with the entry matching <paramref name="albumId"/> moved to the front.
+    /// Does not mutate the input list. Returns the original reference unchanged if <paramref name="albums"/>
+    /// is null, the id is not found, or the matching entry is already first.
+    /// </summary>
+    /// <param name="albums">Source list to reorder. Not mutated.</param>
+    /// <param name="albumId">Id of the album entry to move to the front.</param>
+    /// <returns>A new list with the matching entry at index 0, or the original list when no reordering is needed.</returns>
+    private static List<YandexTrackAlbum>? MoveAlbumToFront(List<YandexTrackAlbum>? albums, int albumId)
+    {
+        if (albums is null) return albums;
+
+        int idx = albums.FindIndex(a => a.Id == albumId);
+        if (idx <= 0) return albums;
+
+        var reordered = new List<YandexTrackAlbum>(albums.Count) { albums[idx] };
+        reordered.AddRange(albums.Where((_, i) => i != idx));
+        return reordered;
     }
 
     #endregion
