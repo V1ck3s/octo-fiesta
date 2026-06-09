@@ -141,6 +141,7 @@ public class DeezerMetadataService : IMusicMetadataService
         var privateResult = await SearchViaGatewayAsync(query, songLimit, albumLimit, artistLimit);
         if (privateResult != null)
         {
+            await EnrichWithArtistDiscographyAsync(privateResult, query);
             return privateResult;
         }
 
@@ -151,31 +152,40 @@ public class DeezerMetadataService : IMusicMetadataService
 
         await Task.WhenAll(songsTask, albumsTask, artistsTask);
 
-        var songs = await songsTask;
-        var albums = await albumsTask;
-        var artists = await artistsTask;
-
-        // /search/album ranks by popularity — recent releases get pushed past the limit.
-        // For exact artist matches, pull the full discography so latest albums surface.
-        var matchedArtist = artists.FirstOrDefault(a =>
-            string.Equals(a.Name, query, StringComparison.OrdinalIgnoreCase));
-        if (matchedArtist != null && !string.IsNullOrEmpty(matchedArtist.ExternalId))
+        var result = new SearchResult
         {
-            var discography = await GetArtistAlbumsAsync("deezer", matchedArtist.ExternalId);
-            foreach (var a in discography)
-            {
-                if (string.IsNullOrEmpty(a.Artist)) a.Artist = matchedArtist.Name;
-                if (string.IsNullOrEmpty(a.ArtistId)) a.ArtistId = matchedArtist.Id;
-            }
+            Songs = await songsTask,
+            Albums = await albumsTask,
+            Artists = await artistsTask
+        };
+        await EnrichWithArtistDiscographyAsync(result, query);
+        return result;
+    }
 
-            var seen = new HashSet<string>(albums.Select(a => a.ExternalId ?? a.Id));
-            foreach (var a in discography)
-            {
-                if (seen.Add(a.ExternalId ?? a.Id)) albums.Add(a);
-            }
+    /// <summary>
+    /// Deezer search ranks albums by popularity, so recent releases get pushed past
+    /// the limit. When the query exactly matches an artist, merge that artist's full
+    /// discography into the album results so latest releases surface (issue #232).
+    /// Applies to both the gateway and public-API search paths.
+    /// </summary>
+    private async Task EnrichWithArtistDiscographyAsync(SearchResult result, string query)
+    {
+        var matchedArtist = result.Artists.FirstOrDefault(a =>
+            string.Equals(a.Name, query, StringComparison.OrdinalIgnoreCase));
+        if (matchedArtist == null || string.IsNullOrEmpty(matchedArtist.ExternalId)) return;
+
+        var discography = await GetArtistAlbumsAsync("deezer", matchedArtist.ExternalId);
+        foreach (var a in discography)
+        {
+            if (string.IsNullOrEmpty(a.Artist)) a.Artist = matchedArtist.Name;
+            if (string.IsNullOrEmpty(a.ArtistId)) a.ArtistId = matchedArtist.Id;
         }
 
-        return new SearchResult { Songs = songs, Albums = albums, Artists = artists };
+        var seen = new HashSet<string>(result.Albums.Select(a => a.ExternalId ?? a.Id));
+        foreach (var a in discography)
+        {
+            if (seen.Add(a.ExternalId ?? a.Id)) result.Albums.Add(a);
+        }
     }
 
     #region Private gateway search (issue #232)
@@ -188,21 +198,11 @@ public class DeezerMetadataService : IMusicMetadataService
     {
         try
         {
-            var token = await EnsureApiTokenAsync();
-            if (string.IsNullOrEmpty(token)) return null;
-
             var nb = Math.Max(1, Math.Max(songLimit, Math.Max(albumLimit, artistLimit)));
-            var results = await CallPageSearchAsync(query, nb, token);
-
-            // Token can expire; retry once with a fresh one.
-            if (results == null)
-            {
-                _apiTokenExpiry = DateTime.MinValue;
-                token = await EnsureApiTokenAsync();
-                if (string.IsNullOrEmpty(token)) return null;
-                results = await CallPageSearchAsync(query, nb, token);
-                if (results == null) return null;
-            }
+            var results = await CallGatewayWithRetryAsync(
+                "deezer.pageSearch",
+                new { query, start = 0, nb, top_tracks = true });
+            if (results == null) return null;
 
             var resultsEl = results.Value;
             var songs = ParseGatewaySection(resultsEl, "TRACK", songLimit, ParseGatewayTrack);
@@ -220,16 +220,37 @@ public class DeezerMetadataService : IMusicMetadataService
         }
     }
 
-    private async Task<JsonElement?> CallPageSearchAsync(string query, int nb, string token)
+    /// <summary>
+    /// Calls a gateway method, retrying once with a fresh token if the first call
+    /// fails (the cached token may have expired). Returns null on any failure so
+    /// callers can fall back to the public API.
+    /// </summary>
+    private async Task<JsonElement?> CallGatewayWithRetryAsync(string method, object payload)
     {
-        var url = $"{GatewayUrl}?method=deezer.pageSearch&input=3&api_version=1.0&api_token={Uri.EscapeDataString(token)}";
+        var token = await EnsureApiTokenAsync();
+        if (string.IsNullOrEmpty(token)) return null;
+
+        var results = await CallGatewayMethodAsync(method, payload, token);
+        if (results == null)
+        {
+            _apiTokenExpiry = DateTime.MinValue;
+            token = await EnsureApiTokenAsync();
+            if (string.IsNullOrEmpty(token)) return null;
+            results = await CallGatewayMethodAsync(method, payload, token);
+        }
+        return results;
+    }
+
+    private async Task<JsonElement?> CallGatewayMethodAsync(string method, object payload, string token)
+    {
+        var url = $"{GatewayUrl}?method={method}&input=3&api_version=1.0&api_token={Uri.EscapeDataString(token)}";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         if (!string.IsNullOrEmpty(_arl))
         {
             request.Headers.Add("Cookie", $"arl={_arl}");
         }
         request.Content = new StringContent(
-            JsonSerializer.Serialize(new { query, start = 0, nb, top_tracks = true }),
+            JsonSerializer.Serialize(payload),
             Encoding.UTF8,
             "application/json");
 
@@ -252,6 +273,40 @@ public class DeezerMetadataService : IMusicMetadataService
 
         // Clone so the JsonElement stays valid after the JsonDocument is disposed.
         return results.Clone();
+    }
+
+    /// <summary>
+    /// Fetches an artist's full discography via the private gateway
+    /// (album.getDiscography), bypassing the public API's IP geo-filtering.
+    /// Returns null on any failure so the caller can fall back to the public API.
+    /// </summary>
+    private async Task<List<Album>?> GetArtistAlbumsViaGatewayAsync(string artistId)
+    {
+        try
+        {
+            var results = await CallGatewayWithRetryAsync(
+                "album.getDiscography",
+                new { art_id = artistId, discography_mode = "all", nb = 500, nb_songs = 0, start = 0 });
+            if (results == null) return null;
+
+            if (!results.Value.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var albums = new List<Album>();
+            foreach (var a in data.EnumerateArray())
+            {
+                albums.Add(ParseGatewayAlbum(a));
+            }
+            return albums;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Deezer gateway discography failed for artist '{ArtistId}', falling back to public API", artistId);
+            return null;
+        }
     }
 
     /// <summary>
@@ -650,10 +705,15 @@ public class DeezerMetadataService : IMusicMetadataService
     public async Task<List<Album>> GetArtistAlbumsAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "deezer") return new List<Album>();
-        
+
+        // Prefer the private gateway so the discography isn't truncated by the
+        // server's IP geo-filtering (issue #232). Fall back to the public API.
+        var gatewayAlbums = await GetArtistAlbumsViaGatewayAsync(externalId);
+        if (gatewayAlbums != null) return gatewayAlbums;
+
         var url = $"{BaseUrl}/artist/{externalId}/albums";
         var response = await _httpClient.GetAsync(url);
-        
+
         if (!response.IsSuccessStatusCode) return new List<Album>();
         
         var json = await response.Content.ReadAsStringAsync();

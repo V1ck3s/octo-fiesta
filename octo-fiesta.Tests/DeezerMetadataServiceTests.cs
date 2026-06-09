@@ -1013,9 +1013,9 @@ public class DeezerMetadataServiceTests
 
     #region Private gateway search (issue #232)
 
-    // Dispatches gw-light getUserData (token) + deezer.pageSearch, and falls through
-    // to a public-API responder for anything else.
-    private void SetupGatewaySearch(string pageSearchJson, string? userDataJson = null, Func<string, string?>? publicResponder = null)
+    // Dispatches gw-light getUserData (token) + deezer.pageSearch + album.getDiscography,
+    // and falls through to a public-API responder for anything else.
+    private void SetupGatewaySearch(string pageSearchJson, string? userDataJson = null, Func<string, string?>? publicResponder = null, string? discographyJson = null)
     {
         userDataJson ??= JsonSerializer.Serialize(new { error = Array.Empty<object>(), results = new { checkForm = "test-token" } });
 
@@ -1027,9 +1027,32 @@ public class DeezerMetadataServiceTests
                 string body;
                 if (url.Contains("method=deezer.getUserData")) body = userDataJson;
                 else if (url.Contains("method=deezer.pageSearch")) body = pageSearchJson;
+                else if (url.Contains("method=album.getDiscography")) body = discographyJson ?? "{}";
                 else body = publicResponder?.Invoke(url) ?? "{\"data\":[]}";
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
             });
+    }
+
+    private static string BuildDiscographyJson(params (string Id, string Title, string Date)[] albums)
+    {
+        var payload = new
+        {
+            error = Array.Empty<object>(),
+            results = new
+            {
+                data = albums.Select(a => new
+                {
+                    ALB_ID = a.Id,
+                    ALB_TITLE = a.Title,
+                    ART_ID = "119",
+                    ART_NAME = "Metallica",
+                    ALB_PICTURE = "albmd5",
+                    NUMBER_TRACK = "10",
+                    ORIGINAL_RELEASE_DATE = a.Date
+                }).ToArray()
+            }
+        };
+        return JsonSerializer.Serialize(payload);
     }
 
     private static string BuildPageSearchJson()
@@ -1120,6 +1143,65 @@ public class DeezerMetadataServiceTests
         var result = await _service.SearchAllAsync("anything", 20, 20, 20);
 
         Assert.Single(result.Albums, a => a.ExternalId == "999" && a.Title == "Public Album");
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_GatewayPath_MergesDiscographyForExactArtist()
+    {
+        // pageSearch (popularity-ranked) only surfaces the classic album; the recent
+        // release lives in the artist's full discography and must be merged in (#232).
+        var pageSearch = JsonSerializer.Serialize(new
+        {
+            error = Array.Empty<object>(),
+            results = new
+            {
+                ARTIST = new { count = 1, data = new[] { new { ART_ID = "119", ART_NAME = "Metallica", ART_PICTURE = "artmd5" } } },
+                ALBUM = new { count = 1, data = new[] { new { ALB_ID = "100", ALB_TITLE = "Master Of Puppets", ART_ID = "119", ART_NAME = "Metallica", ALB_PICTURE = "a", NUMBER_TRACK = "8", ORIGINAL_RELEASE_DATE = "1986-03-03" } } },
+                TRACK = new { count = 0, data = Array.Empty<object>() }
+            }
+        });
+        var discography = BuildDiscographyJson(("100", "Master Of Puppets", "1986-03-03"), ("428391407", "72 Seasons", "2023-04-14"));
+
+        SetupGatewaySearch(pageSearch, discographyJson: discography);
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All }, new DeezerSettings { Arl = "fake-arl" });
+
+        var result = await _service.SearchAllAsync("Metallica", 20, 20, 20);
+
+        // Recent release only present in the discography surfaces, no duplicate of the classic.
+        Assert.Contains(result.Albums, a => a.ExternalId == "428391407" && a.Title == "72 Seasons" && a.Year == 2023);
+        Assert.Single(result.Albums, a => a.ExternalId == "100");
+    }
+
+    [Fact]
+    public async Task GetArtistAlbumsAsync_UsesGateway_BypassingPublicApi()
+    {
+        var discography = BuildDiscographyJson(("100", "Master Of Puppets", "1986-03-03"), ("428391407", "72 Seasons", "2023-04-14"));
+        var publicHit = false;
+        SetupGatewaySearch("{}", discographyJson: discography, publicResponder: url =>
+        {
+            if (url.Contains("/artist/")) publicHit = true;
+            return "{\"data\":[]}";
+        });
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All }, new DeezerSettings { Arl = "fake-arl" });
+
+        var albums = await _service.GetArtistAlbumsAsync("deezer", "119");
+
+        Assert.Equal(2, albums.Count);
+        Assert.Contains(albums, a => a.ExternalId == "428391407" && a.Title == "72 Seasons" && a.Year == 2023);
+        Assert.False(publicHit, "the public /artist/{id}/albums endpoint should not be hit when the gateway succeeds");
+    }
+
+    [Fact]
+    public async Task GetArtistAlbumsAsync_FallsBackToPublicApi_WhenGatewayFails()
+    {
+        // Gateway discography returns no results -> fall back to the geo-filtered public API.
+        var publicAlbums = JsonSerializer.Serialize(new { data = new[] { new { id = 100, title = "Master Of Puppets", nb_tracks = 8, release_date = "1986-03-03", artist = new { id = 119, name = "Metallica" } } } });
+        SetupGatewaySearch("{}", discographyJson: "{}", publicResponder: url => url.Contains("/artist/") ? publicAlbums : "{\"data\":[]}");
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All }, new DeezerSettings { Arl = "fake-arl" });
+
+        var albums = await _service.GetArtistAlbumsAsync("deezer", "119");
+
+        Assert.Single(albums, a => a.ExternalId == "100" && a.Title == "Master Of Puppets");
     }
 
     #endregion
