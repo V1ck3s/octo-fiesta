@@ -84,7 +84,7 @@ public class SubsonicControllerStreamTests
         downloadServiceMock
             .Setup(x => x.DownloadAndStreamAsync("deezer", "123", It.IsAny<CancellationToken>()))
             .Callback<string, string, CancellationToken>((_, _, token) => capturedToken = token)
-            .ReturnsAsync(new MemoryStream([1, 2, 3]));
+            .ReturnsAsync(((Stream)new MemoryStream([1, 2, 3]), "song.mp3"));
 
         var appStoppingCts = new CancellationTokenSource();
         var hostLifetimeMock = new Mock<IHostApplicationLifetime>();
@@ -102,6 +102,37 @@ public class SubsonicControllerStreamTests
         Assert.True(capturedToken.CanBeCanceled);
     }
 
+    [Theory]
+    [InlineData("01 - Song.flac", "audio/flac")]
+    [InlineData("01 - Song.m4a", "audio/mp4")]
+    [InlineData("01 - Song.mp3", "audio/mpeg")]
+    public async Task Stream_SetsContentTypeFromDownloadedFileExtension(string filePath, string expectedContentType)
+    {
+        var localLibraryServiceMock = new Mock<ILocalLibraryService>();
+        localLibraryServiceMock
+            .Setup(x => x.ParseSongId(It.IsAny<string>()))
+            .Returns((true, "deezer", "123"));
+
+        var downloadServiceMock = new Mock<IDownloadService>();
+        downloadServiceMock
+            .Setup(x => x.DownloadAndStreamAsync("deezer", "123", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(((Stream)new MemoryStream([1, 2, 3]), filePath));
+
+        var hostLifetimeMock = new Mock<IHostApplicationLifetime>();
+        hostLifetimeMock.SetupGet(x => x.ApplicationStopping).Returns(CancellationToken.None);
+
+        var controller = CreateController(
+            localLibraryServiceMock,
+            downloadServiceMock,
+            hostLifetimeMock.Object,
+            CancellationToken.None);
+
+        var result = await controller.Stream();
+
+        var fileResult = Assert.IsType<FileStreamResult>(result);
+        Assert.Equal(expectedContentType, fileResult.ContentType);
+    }
+
     [Fact]
     public async Task Stream_WhenApplicationStoppingTokenIsCanceled_PassesCanceledTokenToDownload()
     {
@@ -116,7 +147,7 @@ public class SubsonicControllerStreamTests
             .Returns<string, string, CancellationToken>((_, _, token) =>
             {
                 token.ThrowIfCancellationRequested();
-                return Task.FromResult<Stream>(new MemoryStream(new byte[] { 1 }));
+                return Task.FromResult(((Stream)new MemoryStream(new byte[] { 1 }), "song.mp3"));
             });
 
         var appStoppingCts = new CancellationTokenSource();
