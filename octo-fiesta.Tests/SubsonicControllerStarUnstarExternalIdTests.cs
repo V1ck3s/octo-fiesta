@@ -141,15 +141,21 @@ public class SubsonicControllerStarUnstarExternalIdTests
     }
 
     [Fact]
-    public async Task Star_WithUnresolvableExternalSongId_ReturnsErrorAndDoesNotRelay()
+    public async Task Star_WithUnresolvableExternalSongId_InPermanentMode_StartsDownloadAndReturnsSuccess()
     {
-        // Arrange
+        // Permanent mode (default), song not local yet: starring triggers a download and returns success.
+        var downloadCompleted = new ManualResetEventSlim(false);
+
         _mockLocalLibraryService
             .Setup(x => x.ParseExternalId("ext-deezer-song-999"))
             .Returns((true, "deezer", "song", "999"));
         _mockLocalLibraryService
             .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "999"))
             .ReturnsAsync((string?)null);
+        _mockDownloadService
+            .Setup(x => x.DownloadSongToPermanentAsync("deezer", "999", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("local-id-999")
+            .Callback(downloadCompleted.Set);
 
         HttpRequestMessage? capturedRequest = null;
         var controller = CreateController(
@@ -168,10 +174,13 @@ public class SubsonicControllerStarUnstarExternalIdTests
         var result = await controller.Star();
 
         // Assert
+        Assert.True(downloadCompleted.Wait(TimeSpan.FromSeconds(1)), "Download was not scheduled within timeout.");
+
         var contentResult = Assert.IsType<ContentResult>(result);
-        Assert.Contains("status=\"failed\"", contentResult.Content ?? "");
-        Assert.Contains("code=\"70\"", contentResult.Content ?? "");
-        Assert.Null(capturedRequest);
+        Assert.Contains("status=\"ok\"", contentResult.Content ?? "");
+        Assert.Null(capturedRequest); // does not relay to the backend
+        _mockDownloadService.Verify(
+            x => x.DownloadSongToPermanentAsync("deezer", "999", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
