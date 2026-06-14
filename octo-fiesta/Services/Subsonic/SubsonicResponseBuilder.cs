@@ -91,6 +91,80 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
+    /// Creates an OpenSubsonic getLyricsBySongId response (a <c>lyricsList</c> with a single
+    /// <c>structuredLyrics</c> entry). A null or empty <paramref name="lyrics"/> yields an empty
+    /// lyrics list, which clients treat as "no lyrics available".
+    /// </summary>
+    public IActionResult CreateLyricsBySongIdResponse(string format, SongLyrics? lyrics)
+    {
+        var hasContent = lyrics is { HasContent: true };
+
+        if (format == "json")
+        {
+            object lyricsList = hasContent
+                ? new
+                {
+                    structuredLyrics = new[]
+                    {
+                        new
+                        {
+                            displayArtist = lyrics!.DisplayArtist,
+                            displayTitle = lyrics.DisplayTitle,
+                            lang = string.IsNullOrEmpty(lyrics.Lang) ? "xxx" : lyrics.Lang,
+                            offset = lyrics.Offset,
+                            synced = lyrics.Synced,
+                            line = lyrics.Lines.Select(l => lyrics.Synced
+                                ? (object)new { start = l.StartMs, value = l.Text }
+                                : new { value = l.Text }).ToList()
+                        }
+                    }
+                }
+                : new { };
+
+            return CreateJsonResponse(new
+            {
+                status = "ok",
+                version = SubsonicVersion,
+                lyricsList
+            });
+        }
+
+        var ns = XNamespace.Get(SubsonicNamespace);
+        var lyricsListElement = new XElement(ns + "lyricsList");
+
+        if (hasContent)
+        {
+            var structured = new XElement(ns + "structuredLyrics",
+                new XAttribute("displayArtist", lyrics!.DisplayArtist),
+                new XAttribute("displayTitle", lyrics.DisplayTitle),
+                new XAttribute("lang", string.IsNullOrEmpty(lyrics.Lang) ? "xxx" : lyrics.Lang),
+                new XAttribute("offset", lyrics.Offset),
+                new XAttribute("synced", lyrics.Synced.ToString().ToLowerInvariant()));
+
+            foreach (var line in lyrics.Lines)
+            {
+                var lineElement = new XElement(ns + "line", line.Text);
+                if (lyrics.Synced)
+                {
+                    lineElement.Add(new XAttribute("start", line.StartMs));
+                }
+                structured.Add(lineElement);
+            }
+
+            lyricsListElement.Add(structured);
+        }
+
+        var doc = new XDocument(
+            new XElement(ns + "subsonic-response",
+                new XAttribute("status", "ok"),
+                new XAttribute("version", SubsonicVersion),
+                lyricsListElement
+            )
+        );
+        return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
+    }
+
+    /// <summary>
     /// Creates a Subsonic response containing an album with songs.
     /// </summary>
     public IActionResult CreateAlbumResponse(string format, Album album)
