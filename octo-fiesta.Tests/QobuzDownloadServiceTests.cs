@@ -43,7 +43,8 @@ public class QobuzDownloadServiceTests : IDisposable
         _loggerMock = new Mock<ILogger<QobuzDownloadService>>();
 
         // Create a real QobuzBundleService for testing (it will use the mocked HttpClient)
-        _bundleService = new QobuzBundleService(_httpClientFactoryMock.Object, _bundleServiceLoggerMock.Object);
+        _bundleService = new QobuzBundleService(_httpClientFactoryMock.Object, _bundleServiceLoggerMock.Object,
+            Options.Create(new QobuzSettings()));
 
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>

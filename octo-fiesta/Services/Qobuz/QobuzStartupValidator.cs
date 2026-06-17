@@ -67,8 +67,10 @@ public class QobuzStartupValidator : BaseStartupValidator
             }
 
             // Try to validate with a simple API call
-            // We'll use the user favorites endpoint which requires authentication
-            var appId = "798273057"; // Fallback app ID
+            // We'll use the user favorites endpoint which requires authentication.
+            // Honour a configured App ID so tokens issued by a non-web-player app validate.
+            var appId = _qobuzSettings.Value.AppId;
+            if (string.IsNullOrWhiteSpace(appId)) appId = "798273057"; // Fallback app ID
             var apiUrl = $"https://www.qobuz.com/api.json/0.2/favorite/getUserFavorites?user_id={userId}&app_id={appId}";
             
             using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);

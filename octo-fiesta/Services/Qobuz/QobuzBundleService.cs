@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
+using octo_fiesta.Models.Settings;
 
 namespace octo_fiesta.Services.Qobuz;
 
@@ -11,7 +13,8 @@ public class QobuzBundleService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<QobuzBundleService> _logger;
-    
+    private readonly QobuzSettings _settings;
+
     private const string BaseUrl = "https://play.qobuz.com";
     private const string LoginPageUrl = "https://play.qobuz.com/login";
     
@@ -29,12 +32,14 @@ public class QobuzBundleService
     private List<string>? _cachedSecrets;
     private readonly SemaphoreSlim _initLock = new(1, 1);
 
-    public QobuzBundleService(IHttpClientFactory httpClientFactory, ILogger<QobuzBundleService> logger)
+    public QobuzBundleService(IHttpClientFactory httpClientFactory, ILogger<QobuzBundleService> logger,
+        IOptions<QobuzSettings> qobuzSettings)
     {
         _httpClient = httpClientFactory.CreateClient();
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", 
+        _httpClient.DefaultRequestHeaders.Add("User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:83.0) Gecko/20100101 Firefox/83.0");
         _logger = logger;
+        _settings = qobuzSettings.Value;
     }
 
     /// <summary>
@@ -85,6 +90,18 @@ public class QobuzBundleService
             // Double-check after acquiring lock
             if (_cachedAppId != null && _cachedSecrets != null)
             {
+                return;
+            }
+
+            // If an App ID and secret are explicitly configured, use them directly and
+            // skip scraping the web bundle. This is needed for user_auth_tokens that were
+            // issued by an app other than the web player (a token is only valid with the
+            // app_id that created it).
+            if (!string.IsNullOrWhiteSpace(_settings.AppId) && !string.IsNullOrWhiteSpace(_settings.AppSecret))
+            {
+                _cachedAppId = _settings.AppId;
+                _cachedSecrets = new List<string> { _settings.AppSecret };
+                _logger.LogInformation("Using configured Qobuz App ID {AppId} (bundle extraction skipped)", _cachedAppId);
                 return;
             }
 
