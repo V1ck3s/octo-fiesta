@@ -215,7 +215,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         var requestedQuality = GetTidalQuality();
-        var (manifest, actualQuality) = await GetTidalManifestAsync(trackId, requestedQuality, cancellationToken);
+        var (manifest, actualQuality) = await GetTidalManifestAsync(trackId, requestedQuality, song.Duration, cancellationToken);
 
         if (manifest?.Urls == null || manifest.Urls.Count == 0)
         {
@@ -257,7 +257,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     /// Uses the instance manager for automatic failover.
     /// </summary>
     internal async Task<(TidalManifest? manifest, string quality)> GetTidalManifestAsync(
-        string trackId, string quality, CancellationToken cancellationToken)
+        string trackId, string quality, int? expectedDurationSeconds, CancellationToken cancellationToken)
     {
         var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
         {
@@ -289,6 +289,19 @@ public class SquidWTFDownloadService : BaseDownloadService
                 Logger.LogInformation(
                     "Parsed DASH manifest for track {TrackId}: {SegmentCount} segments, codecs={Codecs}",
                     trackId, parsed.Urls.Count, parsed.Codecs);
+
+                // Account without HI_RES entitlement gets a ~30s preview, not the full track;
+                // fall back to LOSSLESS which it can stream in full. (see #269)
+                if (quality == "HI_RES_LOSSLESS"
+                    && IsPreviewManifest(parsed.DurationSeconds, expectedDurationSeconds))
+                {
+                    Logger.LogWarning(
+                        "HI_RES_LOSSLESS returned a ~{PreviewDuration:0}s preview for track {TrackId} " +
+                        "(expected ~{Expected}s), falling back to LOSSLESS",
+                        parsed.DurationSeconds, trackId, expectedDurationSeconds);
+                    return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
+                }
+
                 var manifest = new TidalManifest
                 {
                     MimeType = parsed.MimeType ?? "audio/mp4",
@@ -303,13 +316,23 @@ public class SquidWTFDownloadService : BaseDownloadService
                 Logger.LogWarning(ex,
                     "Failed to parse HI_RES_LOSSLESS DASH manifest for track {TrackId}, falling back to LOSSLESS",
                     trackId);
-                return await GetTidalManifestAsync(trackId, "LOSSLESS", cancellationToken);
+                return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
             }
         }
 
         var jsonManifest = JsonSerializer.Deserialize<TidalManifest>(manifestText);
         return (jsonManifest, quality);
     }
+
+    // Only flag a preview when a meaningfully longer track is expected, to avoid false
+    // positives on genuinely short tracks.
+    private const int PreviewMinExpectedDurationSeconds = 45;
+    private const double PreviewMaxDurationRatio = 0.5;
+
+    private static bool IsPreviewManifest(double? manifestDurationSeconds, int? expectedDurationSeconds)
+        => manifestDurationSeconds is > 0
+           && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
+           && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio;
 
     private string GetTidalQuality()
     {

@@ -237,7 +237,7 @@ public class SquidWTFTidalDashTests : IDisposable
             return BuildResponse(HttpStatusCode.OK, trackJson);
         });
 
-        var (manifest, quality) = await service.GetTidalManifestAsync("414221994", "HI_RES_LOSSLESS", CancellationToken.None);
+        var (manifest, quality) = await service.GetTidalManifestAsync("414221994", "HI_RES_LOSSLESS", null, CancellationToken.None);
 
         Assert.NotNull(manifest);
         Assert.Equal("HI_RES_LOSSLESS", quality);
@@ -270,7 +270,7 @@ public class SquidWTFTidalDashTests : IDisposable
 
         var (service, _) = BuildService(_ => BuildResponse(HttpStatusCode.OK, trackJson));
 
-        var (manifest, quality) = await service.GetTidalManifestAsync("1", "LOSSLESS", CancellationToken.None);
+        var (manifest, quality) = await service.GetTidalManifestAsync("1", "LOSSLESS", null, CancellationToken.None);
 
         Assert.NotNull(manifest);
         Assert.Equal("LOSSLESS", quality);
@@ -306,11 +306,64 @@ public class SquidWTFTidalDashTests : IDisposable
 
         var (service, _) = BuildService(req => responses.Dequeue()(req));
 
-        var (manifest, quality) = await service.GetTidalManifestAsync("1", "HI_RES_LOSSLESS", CancellationToken.None);
+        var (manifest, quality) = await service.GetTidalManifestAsync("1", "HI_RES_LOSSLESS", null, CancellationToken.None);
 
         Assert.NotNull(manifest);
         Assert.Equal("LOSSLESS", quality);
         Assert.Equal("https://cdn.example/lossless.flac", manifest!.Urls![0]);
+    }
+
+    [Fact]
+    public async Task GetTidalManifestAsync_HiResPreviewClip_FallsBackToLossless()
+    {
+        // Valid DASH manifest, but only a ~10.5s preview of a ~4min track (#269).
+        var previewB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(TidalHiResDashXml));
+
+        var losslessJson = """{"mimeType":"audio/flac","codecs":"flac","urls":["https://cdn.example/lossless.flac"]}""";
+        var losslessB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(losslessJson));
+
+        var previewTrackJson = "{\"data\":{\"manifest\":\"" + previewB64 + "\",\"manifestMimeType\":\"application/dash+xml\"}}";
+        var losslessTrackJson = "{\"data\":{\"manifest\":\"" + losslessB64 + "\",\"manifestMimeType\":\"application/vnd.tidal.bts\"}}";
+
+        var responses = new Queue<Func<HttpRequestMessage, HttpResponseMessage>>(new Func<HttpRequestMessage, HttpResponseMessage>[]
+        {
+            req =>
+            {
+                Assert.Contains("quality=HI_RES_LOSSLESS", req.RequestUri!.Query);
+                return BuildResponse(HttpStatusCode.OK, previewTrackJson);
+            },
+            req =>
+            {
+                Assert.Contains("quality=LOSSLESS", req.RequestUri!.Query);
+                return BuildResponse(HttpStatusCode.OK, losslessTrackJson);
+            },
+        });
+
+        var (service, _) = BuildService(req => responses.Dequeue()(req));
+
+        // expected full length 240s; preview is 10.5s (< 50%) → fall back to LOSSLESS.
+        var (manifest, quality) = await service.GetTidalManifestAsync("1", "HI_RES_LOSSLESS", 240, CancellationToken.None);
+
+        Assert.NotNull(manifest);
+        Assert.Equal("LOSSLESS", quality);
+        Assert.Equal("https://cdn.example/lossless.flac", manifest!.Urls![0]);
+    }
+
+    [Fact]
+    public async Task GetTidalManifestAsync_ShortTrackNotAPreview_KeepsHiRes()
+    {
+        // A genuinely short track (~10.5s) must NOT be mistaken for a preview.
+        var dashB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(TidalHiResDashXml));
+        var trackJson = "{\"data\":{\"manifest\":\"" + dashB64 + "\",\"manifestMimeType\":\"application/dash+xml\"}}";
+
+        var (service, _) = BuildService(_ => BuildResponse(HttpStatusCode.OK, trackJson));
+
+        // expected length 11s ≈ manifest length → not a preview, keep HI_RES.
+        var (manifest, quality) = await service.GetTidalManifestAsync("1", "HI_RES_LOSSLESS", 11, CancellationToken.None);
+
+        Assert.NotNull(manifest);
+        Assert.Equal("HI_RES_LOSSLESS", quality);
+        Assert.Equal("flac", manifest!.Codecs);
     }
 
     // --- helpers --------------------------------------------------------------------------
