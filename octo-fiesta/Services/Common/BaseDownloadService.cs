@@ -391,8 +391,10 @@ public abstract class BaseDownloadService : IDownloadService
     /// <paramref name="CencKey"/>, when set, is a 32-hex-char AES-128 key for a CENC-encrypted CMAF
     /// stream (Amazon Music via squid.wtf). The encrypted file is written to disk first, then decrypted
     /// in-place with ffmpeg before metadata is tagged.
+    /// <paramref name="CencTargetExtension"/>, when set alongside <paramref name="CencKey"/>, tells the
+    /// decrypt step to also remux into a different container (e.g. ".flac" to demux FLAC-in-MP4 → raw FLAC).
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? CencKey = null);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? CencKey = null, string? CencTargetExtension = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -719,7 +721,7 @@ public abstract class BaseDownloadService : IDownloadService
 
             // CENC-encrypted CMAF (Amazon Music via squid.wtf): decrypt in-place with ffmpeg.
             if (!string.IsNullOrEmpty(result.CencKey))
-                outputPath = await DecryptCencAsync(outputPath, result.CencKey, cancellationToken);
+                outputPath = await DecryptCencAsync(outputPath, result.CencKey, result.CencTargetExtension, cancellationToken);
 
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
@@ -793,22 +795,30 @@ public abstract class BaseDownloadService : IDownloadService
     // Decrypt a CENC-encrypted CMAF file in-place using ffmpeg -decryption_key.
     // Amazon Music via squid.wtf delivers CMAF with AES-128-CTR CENC encryption;
     // the per-sample IV and subsample structure are in the moov senc/saiz boxes.
-    private async Task<string> DecryptCencAsync(string path, string hexKey, CancellationToken cancellationToken)
+    private async Task<string> DecryptCencAsync(string path, string hexKey, string? targetExtension, CancellationToken cancellationToken)
     {
+        var outExt = targetExtension ?? Path.GetExtension(path);
         var dir = Path.GetDirectoryName(path)!;
-        var tempPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(path) + ".decrypting" + Path.GetExtension(path));
+        var tempPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(path) + ".decrypting" + outExt);
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo
+            var psi = new System.Diagnostics.ProcessStartInfo { FileName = "ffmpeg", RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+
+            if (outExt == ".flac")
             {
-                FileName = "ffmpeg",
+                // Decrypt CENC and demux FLAC-in-MP4 → raw FLAC in one pass.
+                // -vn drops the cover art thumbnail stream (TagLib embeds cover separately).
+                foreach (var arg in new[] { "-y", "-decryption_key", hexKey, "-i", path, "-vn", "-c:a", "copy", "-f", "flac", tempPath })
+                    psi.ArgumentList.Add(arg);
+            }
+            else
+            {
                 // Force mp4 muxer: the ipod muxer (.m4a) rejects FLAC.
                 // -strict -2 required for FLAC-in-MP4 on older ffmpeg (Debian 12 ships 5.1.x).
-                ArgumentList = { "-y", "-decryption_key", hexKey, "-i", path, "-c", "copy", "-f", "mp4", "-strict", "-2", "-movflags", "+faststart", tempPath },
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
+                foreach (var arg in new[] { "-y", "-decryption_key", hexKey, "-i", path, "-c", "copy", "-f", "mp4", "-strict", "-2", "-movflags", "+faststart", tempPath })
+                    psi.ArgumentList.Add(arg);
+            }
+
             using var proc = System.Diagnostics.Process.Start(psi)
                 ?? throw new Exception("ffmpeg process failed to start");
 
@@ -819,13 +829,14 @@ public abstract class BaseDownloadService : IDownloadService
                 throw new Exception($"ffmpeg CENC decryption failed (exit {proc.ExitCode}): {stderr}");
 
             IOFile.Delete(path);
-            IOFile.Move(tempPath, path);
-            Logger.LogInformation("CENC decryption complete for {File}", Path.GetFileName(path));
-            return path;
+            var finalPath = Path.ChangeExtension(path, outExt);
+            IOFile.Move(tempPath, finalPath);
+            Logger.LogInformation("CENC decryption complete for {File}", Path.GetFileName(finalPath));
+            return finalPath;
         }
         catch (Exception ex)
         {
-            IOFile.Delete(tempPath);
+            if (IOFile.Exists(tempPath)) IOFile.Delete(tempPath);
             Logger.LogError(ex, "CENC decryption failed for {Path} — file left encrypted", path);
             return path;
         }

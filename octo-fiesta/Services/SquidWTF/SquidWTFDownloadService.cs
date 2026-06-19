@@ -253,7 +253,8 @@ public class SquidWTFDownloadService : BaseDownloadService
                 var downloadStream = await GetAmazonStreamAsync(streamUrl, token, cancellationToken);
                 var codec = (trackResponse.Stream.Codec ?? "").ToLowerInvariant();
                 var (extension, quality) = GetAmazonExtensionAndQuality(codec, tier);
-                return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey);
+                var cencTarget = codec == "flac" && cencKey != null ? ".flac" : null;
+                return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey, CencTargetExtension: cencTarget);
             }
             catch (TimeoutException ex)
             {
