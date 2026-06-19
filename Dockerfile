@@ -19,6 +19,8 @@ RUN dotnet publish octo-fiesta/octo-fiesta.csproj -c Release -p:Version=$VERSION
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /app/downloads
 
 COPY --from=build /app/publish .

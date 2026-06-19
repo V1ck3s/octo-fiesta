@@ -7,18 +7,26 @@ namespace octo_fiesta.Models.Settings;
 public class SquidWTFSettings
 {
     /// <summary>
-    /// The backend source to use: "Qobuz" or "Tidal"
+    /// The backend source to use: "Qobuz", "Tidal", or "AmazonMusic"
     /// Defaults to "Qobuz" if not specified
     /// </summary>
     public string Source { get; set; } = "Qobuz";
-    
+
     /// <summary>
     /// Preferred audio quality
     /// For Qobuz: 27 (FLAC 24-bit/192kHz), 7 (FLAC 24-bit/96kHz), 6 (FLAC 16-bit), 5 (MP3 320kbps)
     /// For Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
+    /// For AmazonMusic: FLAC_24 / ultrahd (24-bit), FLAC_16 / hd (16-bit), AAC / high (256kbps), OPUS, ATMOS
     /// If not specified, highest quality will be used
     /// </summary>
     public string? Quality { get; set; }
+
+    /// <summary>
+    /// Regional catalog to use for Amazon Music searches and downloads.
+    /// Values: "US" (default), "DE" (Germany), "AU" (Australia)
+    /// Only applies to AmazonMusic source.
+    /// </summary>
+    public string Country { get; set; } = "US";
     
     /// <summary>
     /// Timeout in seconds for API instance requests before switching to next instance

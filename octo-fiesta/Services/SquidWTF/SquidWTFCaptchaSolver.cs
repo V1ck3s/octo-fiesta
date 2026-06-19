@@ -20,6 +20,12 @@ public class SquidWTFCaptchaSolver
     private string? _cookieHeader;
     private DateTimeOffset _cookieExpiresAt = DateTimeOffset.MinValue;
 
+    // Token-based captcha cache (Amazon Music uses X-Captcha-Token instead of a cookie)
+    private string? _captchaToken;
+    private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
+    private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
+    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+
     public SquidWTFCaptchaSolver(
         IHttpClientFactory httpClientFactory,
         ILogger<SquidWTFCaptchaSolver> logger)
@@ -54,6 +60,90 @@ public class SquidWTFCaptchaSolver
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Returns an X-Captcha-Token value for Amazon Music (amz.squid.wtf).
+    /// Uses /api/captcha/challenge + /api/captcha/verify → { token }.
+    /// </summary>
+    public async Task<string> GetAmazonCaptchaTokenAsync(
+        string baseUrl,
+        bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
+            return _captchaToken;
+
+        await _tokenLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
+                return _captchaToken;
+
+            _captchaToken = await SolveAndVerifyAmazonAsync(baseUrl, cancellationToken);
+            _tokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
+            return _captchaToken;
+        }
+        finally
+        {
+            _tokenLock.Release();
+        }
+    }
+
+    private async Task<string> SolveAndVerifyAmazonAsync(string baseUrl, CancellationToken ct)
+    {
+        var http = _httpClientFactory.CreateClient();
+        var trimmed = baseUrl.TrimEnd('/');
+
+        using var challengeResp = await http.GetAsync($"{trimmed}/api/captcha/challenge", ct);
+        var challengeJson = await challengeResp.Content.ReadAsStringAsync(ct);
+        challengeResp.EnsureSuccessStatusCode();
+
+        using var challengeDoc = JsonDocument.Parse(challengeJson);
+        var root = challengeDoc.RootElement;
+
+        // Support both { parameters: {...} } and flat { nonce, salt, ... }
+        JsonElement parameters;
+        if (root.TryGetProperty("parameters", out var parametersEl))
+            parameters = parametersEl;
+        else
+            parameters = root;
+
+        var (counter, derivedKeyHex, elapsedMs) = SolveChallenge(parameters, ct);
+
+        var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = elapsedMs });
+        var payloadJson = $"{{\"challenge\":{challengeJson.TrimEnd()},\"solution\":{solutionJson}}}";
+        var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
+        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64 });
+
+        _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
+        using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
+        using var verifyResp = await http.PostAsync($"{trimmed}/api/captcha/verify", content, ct);
+
+        var verifyJson = await verifyResp.Content.ReadAsStringAsync(ct);
+        _logger.LogDebug("Amazon captcha verify response ({Status}): {Json}", (int)verifyResp.StatusCode, verifyJson);
+
+        if (!verifyResp.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Amazon captcha verify returned {(int)verifyResp.StatusCode}: {verifyJson}");
+        }
+
+        using var verifyDoc = JsonDocument.Parse(verifyJson);
+        if (!verifyDoc.RootElement.TryGetProperty("token", out var tokenElement) ||
+            tokenElement.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException($"Amazon captcha verify did not return a token. Response: {verifyJson}");
+        }
+
+        var token = tokenElement.GetString()
+            ?? throw new InvalidOperationException("Amazon captcha token is null");
+
+        _logger.LogInformation(
+            "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~13 min",
+            elapsedMs, counter);
+
+        return token;
     }
 
     private async Task<string> SolveAndVerifyAsync(string baseUrl, CancellationToken ct)
@@ -93,7 +183,12 @@ public class SquidWTFCaptchaSolver
         return captchaCookie;
     }
 
-    /// <summary>ALTCHA v2 web variant: SHA-256 chained `cost` times, truncated to keyLength each iteration.</summary>
+    /// <summary>
+    /// ALTCHA v2 solver. Supports two algorithm variants:
+    ///   - "PBKDF2/SHA-256": password = nonce+counter, PBKDF2 derive, check prefix (amz.squid.wtf)
+    ///   - chained SHA-256 (legacy, no algorithm field): salt+nonce+counter hashed `cost` times (qobuz.squid.wtf)
+    /// The server picks a solution counter in advance; we find it by iterating from 0.
+    /// </summary>
     public static (int Counter, string DerivedKeyHex, long ElapsedMs) SolveChallenge(
         JsonElement parameters,
         CancellationToken ct)
@@ -104,35 +199,60 @@ public class SquidWTFCaptchaSolver
         var keyLength = parameters.GetProperty("keyLength").GetInt32();
         var keyPrefix = Convert.FromHexString(parameters.GetProperty("keyPrefix").GetString()!);
 
+        var algorithm = parameters.TryGetProperty("algorithm", out var algEl) ? algEl.GetString() : null;
+
+        // password buf: nonce bytes followed by 4-byte big-endian counter
         var password = new byte[nonce.Length + 4];
         Array.Copy(nonce, password, nonce.Length);
 
-        var initial = new byte[salt.Length + password.Length];
-        Array.Copy(salt, 0, initial, 0, salt.Length);
-
-        var derived = new byte[keyLength];
-        Span<byte> hashBuf = stackalloc byte[32];
-
         var sw = Stopwatch.StartNew();
-        for (var counter = 0; counter < MaxSolverIterations; counter++)
+
+        if (algorithm?.StartsWith("PBKDF2", StringComparison.OrdinalIgnoreCase) == true)
         {
-            ct.ThrowIfCancellationRequested();
-
-            BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
-            Array.Copy(password, 0, initial, salt.Length, password.Length);
-
-            SHA256.HashData(initial, hashBuf);
-            hashBuf[..keyLength].CopyTo(derived);
-
-            for (var i = 1; i < cost; i++)
+            // PBKDF2/SHA-256 variant (amz.squid.wtf)
+            for (var counter = 0; counter < MaxSolverIterations; counter++)
             {
-                SHA256.HashData(derived, hashBuf);
-                hashBuf[..keyLength].CopyTo(derived);
+                ct.ThrowIfCancellationRequested();
+                BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
+
+                var derived = Rfc2898DeriveBytes.Pbkdf2(
+                    password,
+                    salt,
+                    cost,
+                    HashAlgorithmName.SHA256,
+                    keyLength);
+
+                if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
+                    return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
             }
+        }
+        else
+        {
+            // Chained SHA-256 variant (qobuz.squid.wtf, no algorithm field)
+            var initial = new byte[salt.Length + password.Length];
+            Array.Copy(salt, 0, initial, 0, salt.Length);
 
-            if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
+            var derived = new byte[keyLength];
+            Span<byte> hashBuf = stackalloc byte[32];
+
+            for (var counter = 0; counter < MaxSolverIterations; counter++)
             {
-                return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
+                ct.ThrowIfCancellationRequested();
+
+                BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
+                Array.Copy(password, 0, initial, salt.Length, password.Length);
+
+                SHA256.HashData(initial, hashBuf);
+                hashBuf[..keyLength].CopyTo(derived);
+
+                for (var i = 1; i < cost; i++)
+                {
+                    SHA256.HashData(derived, hashBuf);
+                    hashBuf[..keyLength].CopyTo(derived);
+                }
+
+                if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
+                    return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
             }
         }
 
