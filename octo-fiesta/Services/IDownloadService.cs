@@ -36,8 +36,8 @@ public interface IDownloadService
     /// <param name="externalProvider">The provider (deezer, spotify)</param>
     /// <param name="externalId">The ID on the external provider</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>A stream of the audio file</returns>
-    Task<Stream> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
+    /// <returns>A stream of the audio file together with its local path (used to determine the content type)</returns>
+    Task<(Stream Stream, string FilePath)> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Downloads remaining tracks from an album in background (excluding the specified track)

@@ -4,6 +4,7 @@ using octo_fiesta.Models.Download;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
 using octo_fiesta.Services.Local;
+using octo_fiesta.Services.Lyrics;
 using octo_fiesta.Services.Subsonic;
 using TagLib;
 using IOFile = System.IO.File;
@@ -59,6 +60,14 @@ public abstract class BaseDownloadService : IDownloadService
     }
 
     /// <summary>
+    /// Lazy-loaded lyrics service (optional). Used to drop a .lrc sidecar next to
+    /// permanently downloaded tracks so the backing server serves synced lyrics.
+    /// </summary>
+    private ILyricsService? _lyricsService;
+    protected ILyricsService? LyricsService
+        => _lyricsService ??= _serviceProvider.GetService<ILyricsService>();
+
+    /// <summary>
     /// Provider name (e.g., "deezer", "qobuz")
     /// </summary>
     protected abstract string ProviderName { get; }
@@ -106,11 +115,12 @@ public abstract class BaseDownloadService : IDownloadService
         return await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: true, forcePermanent: true, cancellationToken);
     }
 
-    public async Task<Stream> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
+    public async Task<(Stream Stream, string FilePath)> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
     {
         var localPath = await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: true, forcePermanent: false, cancellationToken);
         // FileShare.Delete allows move/rename operations while the file is being streamed (required for cache-to-permanent on star)
-        return new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        var stream = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        return (stream, localPath);
     }
 
     public DownloadInfo? GetDownloadStatus(string songId)
@@ -325,6 +335,15 @@ public abstract class BaseDownloadService : IDownloadService
         song.LocalPath = permanentPath;
         await LocalLibraryService.RegisterDownloadedSongAsync(song, permanentPath, downloadedQuality);
 
+        // Drop a .lrc sidecar next to the now-permanent file (best-effort, fire-and-forget).
+        if (LyricsService is { Enabled: true })
+        {
+            var sidecarService = LyricsService;
+            var sidecarPath = permanentPath;
+            var sidecarSong = song;
+            _ = Task.Run(() => sidecarService.TryWriteSidecarAsync(sidecarPath, sidecarSong, CancellationToken.None));
+        }
+
         // Trigger library scan and migrate playlists in background
         var capturedOldId = oldNavidromeId;
         var capturedPlaylists = affectedPlaylists;
@@ -364,9 +383,11 @@ public abstract class BaseDownloadService : IDownloadService
     #region Template Methods (to be implemented by subclasses)
 
     /// <summary>
-    /// Result of a track download containing Stream with track content, preferred filename extension and quality
+    /// Result of a track download containing Stream with track content, preferred filename extension and quality.
+    /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
+    /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -691,12 +712,59 @@ public abstract class BaseDownloadService : IDownloadService
             // Write metadata
             await WriteMetadataAsync(outputPath, song, cancellationToken);
 
+            // Fragmented MP4 (Tidal HI_RES FLAC-in-MP4) carries no top-level duration; patch it
+            // so tag scanners don't report 0:00. Done last so it survives the metadata write.
+            PatchMp4DurationIfNeeded(outputPath, result);
+
+            // For permanent files, drop a .lrc sidecar so the backing server serves synced
+            // lyrics on later listens and to other clients. Fire-and-forget: never delay or
+            // fail the download (the audio is already on disk).
+            if (!toCache && LyricsService is { Enabled: true })
+            {
+                var sidecarService = LyricsService;
+                var sidecarPath = outputPath;
+                var sidecarSong = song;
+                _ = Task.Run(() => sidecarService.TryWriteSidecarAsync(sidecarPath, sidecarSong, CancellationToken.None));
+            }
+
             return outputPath;
         }
         catch
         {
             TryDeleteIncompleteFile(outputPath);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Writes the known duration into an MP4/M4A file's moov so fragmented MP4 (which stores
+    /// timing only in per-fragment boxes) doesn't report a 0:00 length. No-op for other formats.
+    /// Failures are logged but never abort the download — the audio is already on disk.
+    /// </summary>
+    private void PatchMp4DurationIfNeeded(string outputPath, DownloadResult result)
+    {
+        if (result.Mp4DurationSeconds is not > 0)
+        {
+            return;
+        }
+
+        var ext = Path.GetExtension(outputPath);
+        if (!ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) &&
+            !ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Mp4DurationPatcher.PatchDuration(outputPath, result.Mp4DurationSeconds.Value))
+            {
+                Logger.LogInformation("Patched MP4 duration ({Duration:F3}s) for {Path}", result.Mp4DurationSeconds.Value, outputPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to patch MP4 duration for {Path}", outputPath);
         }
     }
 
@@ -793,8 +861,8 @@ public abstract class BaseDownloadService : IDownloadService
 
             // Basic metadata
             tagFile.Tag.Title = song.Title;
-            tagFile.Tag.Performers = song.Artists.Count > 0 
-                ? song.Artists.ToArray() 
+            tagFile.Tag.Performers = song.Artists.Count > 0
+                ? song.Artists.Select(a => a.Name).ToArray()
                 : new[] { song.Artist };
             tagFile.Tag.Album = song.Album;
             tagFile.Tag.AlbumArtists = new[] { !string.IsNullOrEmpty(song.AlbumArtist) ? song.AlbumArtist : song.Artist };

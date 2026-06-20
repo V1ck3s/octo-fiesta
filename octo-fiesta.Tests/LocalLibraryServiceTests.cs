@@ -127,7 +127,6 @@ public class LocalLibraryServiceTests : IDisposable
         // Arrange
         var song = new Song
         {
-            Id = "ext-deezer-123456",
             Title = "Test Song",
             Artist = "Test Artist",
             Album = "Test Album",
@@ -153,7 +152,6 @@ public class LocalLibraryServiceTests : IDisposable
         // Arrange
         var song = new Song
         {
-            Id = "ext-deezer-999999",
             Title = "Deleted Song",
             Artist = "Test Artist",
             Album = "Test Album",
@@ -180,7 +178,6 @@ public class LocalLibraryServiceTests : IDisposable
         // Arrange
         var song = new Song
         {
-            Id = "local-123",
             Title = "Local Song",
             Artist = "Local Artist",
             Album = "Local Album",

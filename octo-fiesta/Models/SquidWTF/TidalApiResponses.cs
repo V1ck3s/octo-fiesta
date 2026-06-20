@@ -287,6 +287,13 @@ public class TidalManifest
     
     [JsonPropertyName("urls")]
     public List<string>? Urls { get; set; }
+
+    /// <summary>
+    /// Total media duration in seconds, parsed from the DASH manifest. Null for the legacy
+    /// BTS JSON manifest. Used to patch the fMP4 moov duration (see <see cref="octo_fiesta.Services.Common.Mp4DurationPatcher"/>).
+    /// </summary>
+    [JsonIgnore]
+    public double? DurationSeconds { get; set; }
 }
 
 /// <summary>

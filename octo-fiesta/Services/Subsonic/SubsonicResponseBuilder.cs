@@ -91,6 +91,80 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
+    /// Creates an OpenSubsonic getLyricsBySongId response (a <c>lyricsList</c> with a single
+    /// <c>structuredLyrics</c> entry). A null or empty <paramref name="lyrics"/> yields an empty
+    /// lyrics list, which clients treat as "no lyrics available".
+    /// </summary>
+    public IActionResult CreateLyricsBySongIdResponse(string format, SongLyrics? lyrics)
+    {
+        var hasContent = lyrics is { HasContent: true };
+
+        if (format == "json")
+        {
+            object lyricsList = hasContent
+                ? new
+                {
+                    structuredLyrics = new[]
+                    {
+                        new
+                        {
+                            displayArtist = lyrics!.DisplayArtist,
+                            displayTitle = lyrics.DisplayTitle,
+                            lang = string.IsNullOrEmpty(lyrics.Lang) ? "xxx" : lyrics.Lang,
+                            offset = lyrics.Offset,
+                            synced = lyrics.Synced,
+                            line = lyrics.Lines.Select(l => lyrics.Synced
+                                ? (object)new { start = l.StartMs, value = l.Text }
+                                : new { value = l.Text }).ToList()
+                        }
+                    }
+                }
+                : new { };
+
+            return CreateJsonResponse(new
+            {
+                status = "ok",
+                version = SubsonicVersion,
+                lyricsList
+            });
+        }
+
+        var ns = XNamespace.Get(SubsonicNamespace);
+        var lyricsListElement = new XElement(ns + "lyricsList");
+
+        if (hasContent)
+        {
+            var structured = new XElement(ns + "structuredLyrics",
+                new XAttribute("displayArtist", lyrics!.DisplayArtist),
+                new XAttribute("displayTitle", lyrics.DisplayTitle),
+                new XAttribute("lang", string.IsNullOrEmpty(lyrics.Lang) ? "xxx" : lyrics.Lang),
+                new XAttribute("offset", lyrics.Offset),
+                new XAttribute("synced", lyrics.Synced.ToString().ToLowerInvariant()));
+
+            foreach (var line in lyrics.Lines)
+            {
+                var lineElement = new XElement(ns + "line", line.Text);
+                if (lyrics.Synced)
+                {
+                    lineElement.Add(new XAttribute("start", line.StartMs));
+                }
+                structured.Add(lineElement);
+            }
+
+            lyricsListElement.Add(structured);
+        }
+
+        var doc = new XDocument(
+            new XElement(ns + "subsonic-response",
+                new XAttribute("status", "ok"),
+                new XAttribute("version", SubsonicVersion),
+                lyricsListElement
+            )
+        );
+        return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
+    }
+
+    /// <summary>
     /// Creates a Subsonic response containing an album with songs.
     /// </summary>
     public IActionResult CreateAlbumResponse(string format, Album album)
@@ -322,9 +396,11 @@ public class SubsonicResponseBuilder
             size = (long)bitRate * 125L * (long)(song.Duration ?? 0);
         }
 
+        string songId = $"ext-{song.ExternalProvider}-song-{song.ExternalId}";
+
         var result = new Dictionary<string, object>
         {
-            ["id"] = song.Id,
+            ["id"] = songId,
             ["parent"] = song.AlbumId ?? "",
             ["isDir"] = false,
             ["title"] = song.Title,
@@ -332,6 +408,11 @@ public class SubsonicResponseBuilder
             ["artist"] = song.Artist ?? "",
             ["albumId"] = song.AlbumId ?? "",
             ["artistId"] = song.ArtistId ?? "",
+            ["artists"] = song.Artists.Select(a => new Dictionary<string, object>
+            {
+                ["id"] = a.Id,
+                ["name"] = a.Name
+            }).ToList(),
             ["duration"] = song.Duration ?? 0,
             ["track"] = song.Track ?? 0,
             ["discNumber"] = song.DiscNumber ?? 0,
@@ -351,7 +432,7 @@ public class SubsonicResponseBuilder
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
         if (song.IsLocal || !string.IsNullOrEmpty(song.CoverArtUrl))
         {
-            result["coverArt"] = song.Id;
+            result["coverArt"] = songId;
         }
 
         if (created != null)
@@ -374,12 +455,13 @@ public class SubsonicResponseBuilder
             ["artist"] = album.Artist ?? "",
             ["artistId"] = album.ArtistId ?? "",
             ["songCount"] = album.SongCount ?? 0,
-            ["year"] = album.Year ?? 0,
             ["created"] = System.DateTime.UtcNow.ToString("o"),
             ["isExternal"] = !album.IsLocal,
             ["displayArtist"] = album.Artist ?? "",
             ["releaseTypes"] = album.ReleaseType != null ? new List<string> { album.ReleaseType } : new List<string>(),
         };
+
+        if (album.Year.HasValue) result["year"] = album.Year.Value;
 
         // Only include coverArt if the album has a cover URL (avoids broken images)
         if (album.IsLocal || !string.IsNullOrEmpty(album.CoverArtUrl))
@@ -455,8 +537,10 @@ public class SubsonicResponseBuilder
             size = (long)bitRate * 125L * duration;
         }
 
+        string songId = $"ext-{song.ExternalProvider}-song-{song.ExternalId}";
+
         var songElement = new XElement(ns + "song",
-            new XAttribute("id", song.Id),
+            new XAttribute("id", songId),
             new XAttribute("title", song.Title),
             new XAttribute("album", song.Album ?? ""),
             new XAttribute("albumId", albumId),
@@ -479,10 +563,18 @@ public class SubsonicResponseBuilder
             new XAttribute("displayComposer", "")
         );
 
+        // OpenSubsonic multi-artist support: one <artists> element per performing artist
+        foreach (var a in song.Artists)
+        {
+            songElement.Add(new XElement(ns + "artists",
+                new XAttribute("id", a.Id),
+                new XAttribute("name", a.Name)));
+        }
+
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
         if (song.IsLocal || !string.IsNullOrEmpty(song.CoverArtUrl))
         {
-            songElement.Add(new XAttribute("coverArt", song.Id));
+            songElement.Add(new XAttribute("coverArt", songId));
         }
 
         if (!string.IsNullOrEmpty(song.ArtistId))
@@ -512,11 +604,12 @@ public class SubsonicResponseBuilder
             new XAttribute("artistId", album.ArtistId ?? string.Empty),
             new XAttribute("songCount", album.Songs?.Count ?? album.SongCount ?? 0),
             new XAttribute("duration", totalDuration),
-            new XAttribute("year", album.Year ?? 0),
             new XAttribute("created", System.DateTime.UtcNow.ToString("o")),
             new XAttribute("isExternal", (!album.IsLocal).ToString().ToLower()),
             new XAttribute("displayArtist", album.Artist ?? "")
         );
+
+        if (album.Year.HasValue) element.Add(new XAttribute("year", album.Year.Value));
 
         // Only include coverArt if the album has a cover URL (avoids broken images)
         if (album.IsLocal || !string.IsNullOrEmpty(album.CoverArtUrl))

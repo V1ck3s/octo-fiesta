@@ -189,15 +189,18 @@ public class DeezerDownloadService : BaseDownloadService
     }
 
     private async Task<TrackDownloadInfo> GetTrackDownloadInfoInternalAsync(
-        string trackId, 
-        string arl, 
+        string trackId,
+        string arl,
         bool isRetryWithFallback,
         CancellationToken cancellationToken)
     {
         // Refresh token with specific ARL
         await InitializeAsync(arl);
 
-        return await QueueRequestAsync(async () =>
+        // The lambda runs under _requestLock. It must NOT re-enter GetTrackDownloadInfoInternalAsync
+        // (the lock is non-reentrant — that would deadlock). Instead it returns either a success
+        // or a retry instruction, and we orchestrate the recursion below, outside the lock.
+        var queueResult = await QueueRequestAsync<(TrackDownloadInfo? Info, string? RetryAltId, string? RetryArl)>(async () =>
         {
             // Get track info
             var trackResponse = await _httpClient.GetAsync($"{DeezerApiBase}/track/{trackId}", cancellationToken);
@@ -311,16 +314,16 @@ public class DeezerDownloadService : BaseDownloadService
                     if (alternativeTrackId != null && alternativeTrackId != trackId)
                     {
                         Logger.LogInformation("Retrying with alternative track: {AlternativeId}", alternativeTrackId);
-                        return await GetTrackDownloadInfoInternalAsync(alternativeTrackId, arl, isRetryWithFallback: true, cancellationToken);
+                        return (null, alternativeTrackId, null);
                     }
-                    
+
                     // If no alternative found but we have a fallback ARL, try that
                     if (!string.IsNullOrEmpty(_arlFallback) && arl != _arlFallback)
                     {
                         Logger.LogWarning("No alternative found, trying fallback ARL...");
-                        return await GetTrackDownloadInfoInternalAsync(trackId, _arlFallback, isRetryWithFallback: true, cancellationToken);
+                        return (null, null, _arlFallback);
                     }
-                    
+
                     throw new Exception("No media sources available - track may be unavailable in your region");
                 }
 
@@ -378,16 +381,31 @@ public class DeezerDownloadService : BaseDownloadService
 
                 Logger.LogInformation("Selected quality: {Format}", selectedFormat);
 
-                return new TrackDownloadInfo
+                return (new TrackDownloadInfo
                 {
                     DownloadUrl = downloadUrl,
                     Format = selectedFormat ?? "MP3_128",
                     Title = title,
                     Artist = artist,
                     TrackId = decryptionTrackId
-                };
+                }, null, null);
             }
         });
+
+        if (queueResult.Info != null)
+        {
+            return queueResult.Info;
+        }
+        if (queueResult.RetryAltId != null)
+        {
+            return await GetTrackDownloadInfoInternalAsync(queueResult.RetryAltId, arl, isRetryWithFallback: true, cancellationToken);
+        }
+        if (queueResult.RetryArl != null)
+        {
+            return await GetTrackDownloadInfoInternalAsync(trackId, queueResult.RetryArl, isRetryWithFallback: true, cancellationToken);
+        }
+
+        throw new InvalidOperationException("GetTrackDownloadInfoInternalAsync: lambda returned no info and no retry instruction");
     }
 
     #endregion

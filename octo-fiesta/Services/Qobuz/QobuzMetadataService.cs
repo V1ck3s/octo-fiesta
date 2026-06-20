@@ -550,7 +550,12 @@ public class QobuzMetadataService : IMusicMetadataService
         var performerName = track.TryGetProperty("performer", out var performer)
             ? performer.GetProperty("name").GetString() ?? ""
             : "";
-        
+
+        var performerRawId = track.TryGetProperty("performer", out var performerForId)
+            ? GetIdAsString(performerForId.GetProperty("id"))
+            : null;
+        var performerArtistId = performerRawId != null ? $"ext-qobuz-artist-{performerRawId}" : null;
+
         var albumTitle = track.TryGetProperty("album", out var album)
             ? album.GetProperty("title").GetString() ?? ""
             : "";
@@ -567,13 +572,12 @@ public class QobuzMetadataService : IMusicMetadataService
         
         return new Song
         {
-            Id = $"ext-qobuz-song-{externalId}",
             Title = title,
             Artist = performerName,
-            Artists = !string.IsNullOrEmpty(performerName) ? new List<string> { performerName } : new List<string>(),
-            ArtistId = track.TryGetProperty("performer", out var performerForId)
-                ? $"ext-qobuz-artist-{GetIdAsString(performerForId.GetProperty("id"))}"
-                : null,
+            Artists = !string.IsNullOrEmpty(performerName)
+                ? new List<Artist> { new Artist { Id = performerArtistId ?? "", Name = performerName, IsLocal = false, ExternalProvider = "qobuz", ExternalId = performerRawId } }
+                : new List<Artist>(),
+            ArtistId = performerArtistId,
             Album = albumTitle,
             AlbumId = albumId,
             AlbumArtist = albumArtist,

@@ -65,7 +65,6 @@ public class DeezerMetadataServiceTests
         // Assert
         Assert.NotNull(result);
         Assert.Single(result);
-        Assert.Equal("ext-deezer-song-123456", result[0].Id);
         Assert.Equal("Test Song", result[0].Title);
         Assert.Equal("Test Artist", result[0].Artist);
         Assert.Equal("Test Album", result[0].Album);
@@ -160,6 +159,85 @@ public class DeezerMetadataServiceTests
     }
 
     [Fact]
+    public async Task SearchAllAsync_WhenArtistMatchesExactly_MergesFullDiscography()
+    {
+        var albumSearch = new
+        {
+            data = new[]
+            {
+                new { id = 100, title = "Master Of Puppets (Remastered)", nb_tracks = 8, artist = new { id = 119, name = "Metallica" } }
+            }
+        };
+        var artistSearch = new
+        {
+            data = new[]
+            {
+                new { id = 119, name = "Metallica", nb_album = 68 }
+            }
+        };
+        var emptyTracks = new { data = Array.Empty<object>() };
+        var discography = new
+        {
+            data = new object[]
+            {
+                new { id = 428391407, title = "72 Seasons", nb_tracks = 12, release_date = "2023-04-14", record_type = "album" },
+                new { id = 100, title = "Master Of Puppets (Remastered)", nb_tracks = 8, release_date = "1986-03-03", record_type = "album" }
+            }
+        };
+
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((req, _) =>
+            {
+                var url = req.RequestUri!.ToString();
+                string body;
+                if (url.Contains("/search/track")) body = JsonSerializer.Serialize(emptyTracks);
+                else if (url.Contains("/search/album")) body = JsonSerializer.Serialize(albumSearch);
+                else if (url.Contains("/search/artist")) body = JsonSerializer.Serialize(artistSearch);
+                else if (url.Contains("/artist/119/albums")) body = JsonSerializer.Serialize(discography);
+                else throw new InvalidOperationException($"Unexpected URL: {url}");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+            });
+
+        var result = await _service.SearchAllAsync("Metallica", 5, 5, 5);
+
+        Assert.Contains(result.Albums, a => a.ExternalId == "428391407" && a.Year == 2023);
+        Assert.Equal(2, result.Albums.Count);
+        Assert.Single(result.Albums, a => a.ExternalId == "100");
+        var discographyAlbum = result.Albums.Single(a => a.ExternalId == "428391407");
+        Assert.Equal("Metallica", discographyAlbum.Artist);
+        Assert.Equal("ext-deezer-artist-119", discographyAlbum.ArtistId);
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_WhenNoArtistMatchesExactly_DoesNotFetchDiscography()
+    {
+        var albumSearch = new { data = new[] { new { id = 100, title = "Some Album", nb_tracks = 8, artist = new { id = 999, name = "Metallica Tribute Band" } } } };
+        var artistSearch = new { data = new[] { new { id = 999, name = "Metallica Tribute Band", nb_album = 0 } } };
+        var emptyTracks = new { data = Array.Empty<object>() };
+        var discographyCallCount = 0;
+
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .Returns<HttpRequestMessage, CancellationToken>((req, _) =>
+            {
+                var url = req.RequestUri!.ToString();
+                string body;
+                if (url.Contains("/search/track")) body = JsonSerializer.Serialize(emptyTracks);
+                else if (url.Contains("/search/album")) body = JsonSerializer.Serialize(albumSearch);
+                else if (url.Contains("/search/artist")) body = JsonSerializer.Serialize(artistSearch);
+                else if (url.Contains("/artist/") && url.Contains("/albums")) { discographyCallCount++; body = "{\"data\":[]}"; }
+                else throw new InvalidOperationException($"Unexpected URL: {url}");
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+            });
+
+        var result = await _service.SearchAllAsync("Metallica", 5, 5, 5);
+
+        Assert.Single(result.Albums);
+        Assert.Equal(0, discographyCallCount);
+    }
+
+    [Fact]
     public async Task GetSongAsync_WithDeezerProvider_ReturnsSong()
     {
         // Arrange
@@ -180,7 +258,6 @@ public class DeezerMetadataServiceTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("ext-deezer-song-123456", result.Id);
         Assert.Equal("Test Song", result.Title);
     }
 
@@ -892,7 +969,6 @@ public class DeezerMetadataServiceTests
         Assert.Equal(2, result.Count);
         Assert.Equal("Track 1", result[0].Title);
         Assert.Equal("Artist A", result[0].Artist);
-        Assert.Equal("ext-deezer-song-111", result[0].Id);
         Assert.Equal(1, result[0].Track);
         Assert.Equal(2, result[1].Track);
     }
