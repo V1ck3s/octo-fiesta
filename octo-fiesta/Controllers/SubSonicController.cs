@@ -506,10 +506,10 @@ public class SubsonicController : ControllerBase
 
         if (isExternal)
         {
-            // If the albumId is actually a song ID (happens when songs lack an album ASIN in search results,
-            // we set albumId=songId so the client can use it for cover art lookup), synthesise a
-            // single-track album from the song metadata so the client can still build a queue and play.
-            if (albumType == "song")
+            // Amazon Music via squidwtf: songs lacking an album ASIN use albumId=songId so clients
+            // can look up cover art. Synthesise a single-track album so the client can queue/play.
+            // Scoped to squidwtf to avoid touching the getAlbum path for other providers.
+            if (albumType == "song" && albumProvider == "squidwtf")
             {
                 var song = await _metadataService.GetSongAsync(albumProvider!, albumExternalId!);
                 if (song == null)

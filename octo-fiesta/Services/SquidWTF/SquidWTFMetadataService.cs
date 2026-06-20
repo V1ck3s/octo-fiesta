@@ -23,10 +23,19 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     // Cover URL cache: ASIN → cover URL, populated from search results so getCoverArt
     // can serve covers without making an extra /api/track call.
+    // Capped at 2000 entries; cleared when full to avoid unbounded growth on long-running instances.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _coverCache = new();
+    private const int CoverCacheMaxEntries = 2000;
 
     public string? GetCachedCoverUrl(string asin) =>
         _coverCache.TryGetValue(asin, out var url) ? url : null;
+
+    private void CacheCoverUrl(string asin, string url)
+    {
+        if (_coverCache.Count >= CoverCacheMaxEntries)
+            _coverCache.Clear();
+        _coverCache[asin] = url;
+    }
 
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
@@ -643,7 +652,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
         var artistName = track.PrimaryArtistName ?? track.ArtistName ?? track.AlbumArtistName ?? "";
         var albumTitle = track.Album?.Title ?? "";
         var coverUrl = ResolveAmazonCoverUrl(track.Album?.Image ?? track.Image ?? track.Cover);
-        if (coverUrl != null) _coverCache[externalId] = coverUrl;
+        if (coverUrl != null) CacheCoverUrl(externalId, coverUrl);
 
         // Use the song's own external ID as AlbumId so clients that use albumId for cover
         // art lookup (instead of the coverArt attribute) still call getCoverArt correctly.
@@ -703,7 +712,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         var year = ParseAmazonYear(item.Year, item.Date);
         var coverUrl = ResolveAmazonCoverUrl(item.Cover ?? item.Thumbnail);
-        if (coverUrl != null && item.Asin != null) _coverCache[item.Asin] = coverUrl;
+        if (coverUrl != null && item.Asin != null) CacheCoverUrl(item.Asin, coverUrl);
 
         return new Song
         {

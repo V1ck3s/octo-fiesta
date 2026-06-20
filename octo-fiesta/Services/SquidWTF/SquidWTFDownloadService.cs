@@ -253,8 +253,7 @@ public class SquidWTFDownloadService : BaseDownloadService
                 var downloadStream = await GetAmazonStreamAsync(streamUrl, token, cancellationToken);
                 var codec = (trackResponse.Stream.Codec ?? "").ToLowerInvariant();
                 var (extension, quality) = GetAmazonExtensionAndQuality(codec, tier);
-                var cencTarget = codec == "flac" && cencKey != null ? ".flac" : null;
-                return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey, CencTargetExtension: cencTarget);
+                return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey);
             }
             catch (TimeoutException ex)
             {
@@ -341,17 +340,15 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     private static (string Extension, string Quality) GetAmazonExtensionAndQuality(string codec, string tier)
     {
+        // All Amazon Music streams are CMAF/MP4; after in-place CENC decryption the
+        // container is preserved, so the extension is always .m4a.
+        // TagLib and Navidrome handle FLAC-in-MP4 and Opus-in-MP4 correctly.
         return codec switch
         {
-            "opus" => (".m4a", "OPUS_320"),
+            "flac"  => (".m4a", tier == "hd" ? "FLAC_16" : "FLAC_24"),
+            "opus"  => (".m4a", "OPUS_320"),
             "atmos" => (".m4a", "ATMOS"),
-            _ => tier switch
-            {
-                "best" => (".m4a", "FLAC_24"),
-                "hd" => (".m4a", "FLAC_16"),
-                "standard" => (".m4a", "AAC_256"),
-                _ => (".m4a", "FLAC_24")
-            }
+            _       => (".m4a", "AAC_256"),
         };
     }
 

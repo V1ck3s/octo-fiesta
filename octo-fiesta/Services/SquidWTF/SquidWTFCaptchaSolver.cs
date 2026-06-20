@@ -140,8 +140,8 @@ public class SquidWTFCaptchaSolver
             ?? throw new InvalidOperationException("Amazon captcha token is null");
 
         _logger.LogInformation(
-            "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~13 min",
-            elapsedMs, counter);
+            "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~{Minutes} min",
+            elapsedMs, counter, (int)TokenValidity.TotalMinutes);
 
         return token;
     }
