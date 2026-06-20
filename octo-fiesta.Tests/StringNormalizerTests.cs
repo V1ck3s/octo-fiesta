@@ -131,5 +131,66 @@ public class StringNormalizerTests
         Assert.Equal(key1, key2);
         Assert.Equal(key1, key3);
     }
+
+    [Fact]
+    public void NormalizeForComparison_WithEmDash_ReturnsHyphen()
+    {
+        // Arrange
+        var input = "Jack—Ass"; // Em dash (U+2014)
+        var expected = "Jack-Ass"; // Plain hyphen
+
+        // Act
+        var result = StringNormalizer.NormalizeForComparison(input);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void CreateComparisonKey_WithDifferentDashes_ReturnsSameKey()
+    {
+        // Arrange
+        var hyphen = "Jack-Ass"; // Hyphen-minus
+        var enDash = "Jack–Ass"; // En dash (U+2013)
+        var emDash = "Jack—Ass"; // Em dash (U+2014)
+
+        // Act
+        var key1 = StringNormalizer.CreateComparisonKey(hyphen);
+        var key2 = StringNormalizer.CreateComparisonKey(enDash);
+        var key3 = StringNormalizer.CreateComparisonKey(emDash);
+
+        // Assert
+        Assert.Equal(key1, key2);
+        Assert.Equal(key1, key3);
+    }
+
+    [Fact]
+    public void CreateComparisonKey_WithDiacritics_MatchesAsciiForm()
+    {
+        // Arrange
+        var accented = "Haïti";
+        var ascii = "Haiti";
+
+        // Act
+        var key1 = StringNormalizer.CreateComparisonKey(accented);
+        var key2 = StringNormalizer.CreateComparisonKey(ascii);
+
+        // Assert
+        Assert.Equal(key1, key2);
+        Assert.Equal("haiti", key1);
+    }
+
+    [Fact]
+    public void CreateComparisonKey_WithVariousDiacritics_StripsAllMarks()
+    {
+        // Arrange
+        var input = "Crème Brûlée Résumé Naïve";
+
+        // Act
+        var result = StringNormalizer.CreateComparisonKey(input);
+
+        // Assert
+        Assert.Equal("creme brulee resume naive", result);
+    }
 }
 

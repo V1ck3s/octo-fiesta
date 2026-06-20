@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace octo_fiesta.Services.Common;
@@ -9,7 +10,7 @@ namespace octo_fiesta.Services.Common;
 public static class StringNormalizer
 {
     // Mapping of various quote and apostrophe characters to their canonical forms
-    private static readonly Dictionary<char, char> QuoteNormalizations = new()
+    private static readonly Dictionary<char, char> CharNormalizations = new()
     {
         // Curly quotes to straight quotes
         { '‘', '\'' },
@@ -18,9 +19,19 @@ public static class StringNormalizer
         { '”', '"' },
         { '′', '\'' },
         { '″', '"' },
-        
+
         // Backticks to straight quotes
-        { '`', '\'' }
+        { '`', '\'' },
+
+        // Dash variants to a plain hyphen-minus
+        { '‐', '-' }, // U+2010 hyphen
+        { '‑', '-' }, // U+2011 non-breaking hyphen
+        { '‒', '-' }, // U+2012 figure dash
+        { '–', '-' }, // U+2013 en dash
+        { '—', '-' }, // U+2014 em dash
+        { '―', '-' }, // U+2015 horizontal bar
+        { '−', '-' }, // U+2212 minus sign
+        { '－', '-' }  // U+FF0D fullwidth hyphen-minus
     };
 
     /// <summary>
@@ -41,7 +52,7 @@ public static class StringNormalizer
 
         foreach (var c in input)
         {
-            if (QuoteNormalizations.TryGetValue(c, out var normalized))
+            if (CharNormalizations.TryGetValue(c, out var normalized))
             {
                 sb.Append(normalized);
             }
@@ -67,8 +78,22 @@ public static class StringNormalizer
             return "";
         }
 
-        return NormalizeForComparison(input).ToLowerInvariant();
+        return RemoveDiacritics(NormalizeForComparison(input)).ToLowerInvariant();
+    }
+
+    private static string RemoveDiacritics(string input)
+    {
+        var decomposed = input.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+
+        foreach (var c in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(c);
+            }
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 }
-
-
