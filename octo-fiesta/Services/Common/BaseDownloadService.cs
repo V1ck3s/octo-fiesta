@@ -387,7 +387,13 @@ public abstract class BaseDownloadService : IDownloadService
     /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
     /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
+    /// <summary>
+    /// <paramref name="CencKey"/>, when set, is a 32-hex-char AES-128 key for a CENC-encrypted CMAF
+    /// stream (Amazon Music via squid.wtf). The encrypted file is written to disk first, then decrypted
+    /// in-place via <see cref="CmafCencDecryptor"/> before metadata is tagged.
+    /// The MP4 container is preserved; no remux step is required.
+    /// </summary>
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? CencKey = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -703,10 +709,19 @@ public abstract class BaseDownloadService : IDownloadService
 
         try
         {
-            // Download the file
+            // Download the file with progress logging and stall detection
             await using var outputFile = IOFile.Create(outputPath);
-            await result.DownloadStream.CopyToAsync(outputFile, cancellationToken);
+            await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
             await outputFile.DisposeAsync();
+
+            // Detect actual audio format from magic bytes and rename if the extension is wrong.
+            // This catches cases where the stream is raw FLAC but we assumed MP4 container.
+            outputPath = CorrectExtensionIfNeeded(outputPath);
+
+            // CENC-encrypted CMAF (Amazon Music via squid.wtf): decrypt in-place in pure .NET.
+            if (!string.IsNullOrEmpty(result.CencKey))
+                outputPath = DecryptCenc(outputPath, result.CencKey);
+
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
             // Write metadata
@@ -734,6 +749,109 @@ public abstract class BaseDownloadService : IDownloadService
             TryDeleteIncompleteFile(outputPath);
             throw;
         }
+    }
+
+    // Reads the first bytes of the written file, detects the audio format, and renames
+    // the file if the extension doesn't match (e.g. raw FLAC saved as .m4a).
+    private string CorrectExtensionIfNeeded(string path)
+    {
+        try
+        {
+            Span<byte> header = stackalloc byte[12];
+            using var f = IOFile.OpenRead(path);
+            int read = f.Read(header);
+            if (read < 4) return path;
+
+            Logger.LogDebug("Format detection for {File}: first {N} bytes = {Hex}",
+                Path.GetFileName(path), read,
+                string.Join(" ", header[..read].ToArray().Select(b => b.ToString("X2"))));
+
+            // Raw FLAC: starts with fLaC (0x66 0x4C 0x61 0x43)
+            bool isFlac = header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43;
+            // ISOBMFF/MP4: bytes 4-7 are 'ftyp' (0x66 0x74 0x79 0x70)
+            bool isMp4 = read >= 8 && header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70;
+
+            var currentExt = Path.GetExtension(path).ToLowerInvariant();
+            string? correctExt = null;
+            if (isFlac && currentExt != ".flac") correctExt = ".flac";
+            else if (isMp4 && currentExt != ".m4a") correctExt = ".m4a";
+
+            if (correctExt == null) return path;
+
+            var newPath = Path.ChangeExtension(path, correctExt);
+            newPath = PathHelper.ResolveUniquePath(newPath);
+            IOFile.Move(path, newPath);
+            Logger.LogDebug("Renamed {Old} → {New} (detected format mismatch)", Path.GetFileName(path), Path.GetFileName(newPath));
+            return newPath;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Format detection failed for {Path}, keeping original extension", path);
+            return path;
+        }
+    }
+
+    // Decrypt a CENC-encrypted CMAF file in-place using pure .NET + BouncyCastle AES-128-CTR.
+    // Amazon Music via squid.wtf delivers CMAF with AES-128-CTR CENC encryption;
+    // per-sample IVs are parsed from the moof/traf/senc boxes. The MP4 container is preserved.
+    private string DecryptCenc(string path, string hexKey)
+    {
+        try
+        {
+            var key = Convert.FromHexString(hexKey);
+            CmafCencDecryptor.Decrypt(path, path, key);
+            Logger.LogInformation("CENC decryption complete for {File}", Path.GetFileName(path));
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "CENC decryption failed for {Path}", path);
+            throw;
+        }
+    }
+
+    // Log progress every 10 MB and cancel if no bytes flow for 90 seconds (stall detection).
+    private async Task CopyWithProgressAsync(Stream source, Stream dest, string? title, CancellationToken cancellationToken)
+    {
+        const int bufferSize = 81920; // 80 KB
+        const long logEveryBytes = 10 * 1024 * 1024; // 10 MB
+        const int stallTimeoutSeconds = 90;
+
+        var buffer = new byte[bufferSize];
+        long totalBytes = 0;
+        long lastLoggedAt = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        while (true)
+        {
+            using var stallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            stallCts.CancelAfter(TimeSpan.FromSeconds(stallTimeoutSeconds));
+
+            int read;
+            try
+            {
+                read = await source.ReadAsync(buffer, stallCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Download stalled for {stallTimeoutSeconds}s on '{title}' after {totalBytes / 1024 / 1024} MB");
+            }
+
+            if (read == 0) break;
+
+            await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            totalBytes += read;
+
+            if (totalBytes - lastLoggedAt >= logEveryBytes)
+            {
+                lastLoggedAt = totalBytes;
+                Logger.LogDebug("Downloading '{Title}': {MB} MB in {Elapsed}s",
+                    title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
+            }
+        }
+
+        Logger.LogInformation("Download complete: '{Title}' — {MB} MB in {Elapsed}s",
+            title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>
@@ -858,6 +976,7 @@ public abstract class BaseDownloadService : IDownloadService
             Logger.LogInformation("Writing metadata to: {Path}", filePath);
 
             using var tagFile = TagLib.File.Create(filePath);
+            Logger.LogDebug("TagLib opened {File} as MIME type: {MimeType}", Path.GetFileName(filePath), tagFile.MimeType);
 
             // Basic metadata
             tagFile.Tag.Title = song.Title;

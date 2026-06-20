@@ -12,6 +12,7 @@ using octo_fiesta.Services;
 using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Lyrics;
+using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Subsonic;
 
 namespace octo_fiesta.Controllers;
@@ -501,10 +502,35 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        var (isExternal, albumProvider, albumExternalId) = _localLibraryService.ParseSongId(id);
+        var (isExternal, albumProvider, albumType, albumExternalId) = _localLibraryService.ParseExternalId(id);
 
         if (isExternal)
         {
+            // Amazon Music via squidwtf: songs lacking an album ASIN use albumId=songId so clients
+            // can look up cover art. Synthesise a single-track album so the client can queue/play.
+            // Scoped to squidwtf to avoid touching the getAlbum path for other providers.
+            if (albumType == "song" && albumProvider == "squidwtf")
+            {
+                var song = await _metadataService.GetSongAsync(albumProvider!, albumExternalId!);
+                if (song == null)
+                    return _responseBuilder.CreateError(format, 70, "Album not found");
+
+                var syntheticAlbum = new octo_fiesta.Models.Domain.Album
+                {
+                    Id = id,
+                    Title = song.Album ?? song.Title,
+                    Artist = song.Artist,
+                    ArtistId = song.ArtistId,
+                    CoverArtUrl = song.CoverArtUrl,
+                    CoverArtUrlLarge = song.CoverArtUrlLarge,
+                    IsLocal = false,
+                    ExternalProvider = albumProvider,
+                    ExternalId = albumExternalId,
+                    Songs = new System.Collections.Generic.List<octo_fiesta.Models.Domain.Song> { song }
+                };
+                return _responseBuilder.CreateAlbumResponse(format, syntheticAlbum);
+            }
+
             var album = await _metadataService.GetAlbumAsync(albumProvider!, albumExternalId!);
 
             if (album == null)
@@ -657,7 +683,7 @@ public class SubsonicController : ControllerBase
         {
             return NotFound();
         }
-        
+
         // Check if this is a playlist cover art request
         if (PlaylistIdHelper.IsExternalPlaylist(id))
         {
@@ -706,7 +732,7 @@ public class SubsonicController : ControllerBase
         }
 
         string? coverUrl = null;
-        
+
         // Use type to determine which API to call first
         switch (type)
         {
@@ -728,19 +754,27 @@ public class SubsonicController : ControllerBase
                 
             case "song":
             default:
-                // For songs, try to get from song first, then album
-                var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
-                if (song?.CoverArtUrl != null)
+                // Fast path: check the in-memory cover cache (populated during search/album lookup)
+                // before making an expensive API call just for cover art.
+                if (_metadataService is SquidWTFMetadataService squidService)
                 {
-                    coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
+                    coverUrl = squidService.GetCachedCoverUrl(coverExternalId!);
                 }
-                else
+
+                if (coverUrl == null)
                 {
-                    // Fallback: try album with same ID (legacy behavior)
-                    var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
-                    if (albumFallback?.CoverArtUrl != null)
+                    var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
+                    if (song?.CoverArtUrl != null)
                     {
-                        coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
+                        coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
+                    }
+                    else
+                    {
+                        var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
+                        if (albumFallback?.CoverArtUrl != null)
+                        {
+                            coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
+                        }
                     }
                 }
                 break;
@@ -749,13 +783,34 @@ public class SubsonicController : ControllerBase
         if (coverUrl != null)
         {
             using var httpClient = new HttpClient();
-            var response = await httpClient.GetAsync(coverUrl);
+            using var req = new HttpRequestMessage(HttpMethod.Get, coverUrl);
+
+            // amz.squid.wtf image proxy requires the captcha token
+            if (coverUrl.Contains("amz.squid.wtf", StringComparison.OrdinalIgnoreCase))
+            {
+                var captchaSolver = HttpContext.RequestServices.GetService<SquidWTFCaptchaSolver>();
+                if (captchaSolver != null)
+                {
+                    try
+                    {
+                        var token = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
+                        req.Headers.Add("X-Captcha-Token", token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Could not get Amazon captcha token for cover art");
+                    }
+                }
+            }
+
+            var response = await httpClient.SendAsync(req);
             if (response.IsSuccessStatusCode)
             {
                 var imageBytes = await response.Content.ReadAsByteArrayAsync();
                 var contentType = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
                 return File(imageBytes, contentType);
             }
+            _logger.LogWarning("Cover art fetch failed for {Url}: HTTP {Status}", coverUrl, (int)response.StatusCode);
         }
 
         return NotFound();

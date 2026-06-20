@@ -56,11 +56,12 @@ services:
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
       
       # ===== SQUIDWTF SETTINGS =====
-      # Backend source: Qobuz or Tidal (default: Qobuz)
+      # Backend source: Qobuz, Tidal, or AmazonMusic (default: Qobuz)
       - SquidWTF__Source=${SQUIDWTF_SOURCE:-Qobuz}
       # Preferred audio quality (optional)
       # Qobuz: 27 (FLAC 24-bit/192kHz), 7 (FLAC 24-bit/96kHz), 6 (FLAC 16-bit/44kHz), 5 (MP3 320kbps)
       # Tidal: HI_RES_LOSSLESS (FLAC 24-bit/192kHz), LOSSLESS (FLAC 16-bit/44kHz), HIGH (AAC 320kbps), LOW (AAC 96kbps)
+      # AmazonMusic: FLAC_24 (24-bit), FLAC_16 (16-bit), AAC (256kbps), OPUS, ATMOS
       - SquidWTF__Quality=${SQUIDWTF_QUALITY:-}
       # Instance timeout in seconds for Tidal backend (default: 5)
       # Switches to next instance if current one doesn't respond in time

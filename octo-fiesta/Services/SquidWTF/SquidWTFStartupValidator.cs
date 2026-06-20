@@ -40,8 +40,13 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteStatus("SquidWTF Quality Warning", "INCOMPATIBLE CONFIG", ConsoleColor.Yellow);
             WriteDetail($"Quality '{configuredQuality}' is not valid for source '{source}'. Falling back to default quality.");
         }
-        
-        if (_settings.InstanceTimeoutSeconds > 0)
+
+        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteStatus("Amazon Country", _settings.Country, ConsoleColor.Cyan);
+        }
+
+        if (_settings.InstanceTimeoutSeconds > 0 && !source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
         {
             WriteStatus("Instance Timeout", $"{_settings.InstanceTimeoutSeconds}s", ConsoleColor.Cyan);
         }
@@ -60,6 +65,10 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
             {
                 return await ValidateQobuzAsync(cancellationToken);
+            }
+            else if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
+            {
+                return await ValidateAmazonAsync(cancellationToken);
             }
             else
             {
@@ -101,6 +110,33 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
             WriteDetail("Service may be temporarily unavailable");
             return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF returned code");
+        }
+    }
+
+    private async Task<ValidationResult> ValidateAmazonAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("https://amz.squid.wtf/api/captcha/challenge", cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+            {
+                WriteStatus("SquidWTF API", "REACHABLE", ConsoleColor.Green);
+                WriteDetail("No account credentials required - powered by Amazon Music");
+                return ValidationResult.Success("SquidWTF Amazon Music validation completed");
+            }
+            else
+            {
+                WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
+                WriteDetail("Service may be temporarily unavailable");
+                return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF Amazon Music returned error code");
+            }
+        }
+        catch (Exception ex)
+        {
+            WriteStatus("SquidWTF API", "UNREACHABLE", ConsoleColor.Red);
+            WriteDetail(ex.Message);
+            return ValidationResult.Failure("-1", $"Cannot connect to Amazon Music SquidWTF: {ex.Message}");
         }
     }
 
@@ -197,10 +233,9 @@ public class SquidWTFStartupValidator : BaseStartupValidator
 
     private static (string Label, bool UsedDefaultFallback) GetEffectiveQualityLabel(string source, string? configuredQuality)
     {
-        var sourceIsQobuz = source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
         var quality = configuredQuality?.ToUpperInvariant();
 
-        if (sourceIsQobuz)
+        if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
         {
             return quality switch
             {
@@ -212,6 +247,20 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             };
         }
 
+        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
+        {
+            return quality switch
+            {
+                "FLAC_24" or "FLAC_24_192" or "ULTRAHD" or "BEST" => ("Ultra HD FLAC 24-bit", false),
+                "FLAC_16" or "FLAC" or "HD" => ("HD FLAC 16-bit", false),
+                "AAC" or "AAC_256" or "HIGH" or "STANDARD" => ("High (256 kbps AAC)", false),
+                "OPUS" => ("Opus", false),
+                "ATMOS" => ("Dolby Atmos", false),
+                _ => ("Ultra HD FLAC 24-bit (default)", true)
+            };
+        }
+
+        // Tidal
         return quality switch
         {
             "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => ("HI_RES_LOSSLESS", false),
