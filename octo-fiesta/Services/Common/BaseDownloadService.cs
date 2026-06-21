@@ -720,7 +720,10 @@ public abstract class BaseDownloadService : IDownloadService
 
             // CENC-encrypted CMAF (Amazon Music via squid.wtf): decrypt in-place in pure .NET.
             if (!string.IsNullOrEmpty(result.CencKey))
+            {
                 outputPath = DecryptCenc(outputPath, result.CencKey);
+                outputPath = DemuxFlacIfNeeded(outputPath);
+            }
 
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
@@ -789,6 +792,33 @@ public abstract class BaseDownloadService : IDownloadService
             Logger.LogWarning(ex, "Format detection failed for {Path}, keeping original extension", path);
             return path;
         }
+    }
+
+    // After CENC decryption, if the MP4 container holds raw FLAC frames (Amazon Music FLAC tier),
+    // extract them into a .flac file. AAC/Opus/Atmos streams stay as .m4a.
+    private string DemuxFlacIfNeeded(string path)
+    {
+        if (!path.EndsWith(".m4a", StringComparison.OrdinalIgnoreCase)) return path;
+
+        var flacPath = Path.ChangeExtension(path, ".flac");
+        flacPath = PathHelper.ResolveUniquePath(flacPath);
+
+        try
+        {
+            if (CmafFlacDemuxer.TryDemux(path, flacPath))
+            {
+                IOFile.Delete(path);
+                Logger.LogInformation("Demuxed FLAC from MP4 container: {File}", Path.GetFileName(flacPath));
+                return flacPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "FLAC demux failed for {Path}, keeping .m4a", path);
+            if (IOFile.Exists(flacPath)) IOFile.Delete(flacPath);
+        }
+
+        return path;
     }
 
     // Decrypt a CENC-encrypted CMAF file in-place using pure .NET + BouncyCastle AES-128-CTR.
