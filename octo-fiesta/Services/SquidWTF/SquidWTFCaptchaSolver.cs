@@ -149,8 +149,8 @@ public partial class SquidWTFCaptchaSolver
 
         using var challengeRequest = CreateAmazonApiRequest(HttpMethod.Get, trimmed, "/api/captcha/challenge");
         using var challengeResp = await session.Http.SendAsync(challengeRequest, ct);
-        var challengeJson = await challengeResp.Content.ReadAsStringAsync(ct);
         challengeResp.EnsureSuccessStatusCode();
+        var challengeJson = (await challengeResp.Content.ReadAsStringAsync(ct)).TrimEnd();
 
         using var challengeDoc = JsonDocument.Parse(challengeJson);
         var root = challengeDoc.RootElement;
@@ -163,14 +163,15 @@ public partial class SquidWTFCaptchaSolver
 
         var (counter, derivedKeyHex, elapsedMs) = SolveChallenge(parameters, ct);
 
-        var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = elapsedMs });
-        var payloadJson = $"{{\"challenge\":{challengeJson.TrimEnd()},\"solution\":{solutionJson}}}";
+        // Match browser/Python payload: time as float ms, challenge JSON embedded verbatim.
+        var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = (double)elapsedMs });
+        var payloadJson = $"{{\"challenge\":{challengeJson},\"solution\":{solutionJson}}}";
         var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
         var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64, webNonce = session.WebNonce });
 
         _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
         using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
-        using var verifyRequest = CreateAmazonApiRequest(HttpMethod.Post, trimmed, "/api/captcha/verify");
+        using var verifyRequest = CreateAmazonVerifyRequest(trimmed);
         verifyRequest.Content = content;
         using var verifyResp = await session.Http.SendAsync(verifyRequest, ct);
 
@@ -262,12 +263,21 @@ public partial class SquidWTFCaptchaSolver
         var request = new HttpRequestMessage(method, $"{baseUrl}{path}");
         request.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
         request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+        ApplyAmazonBrowserHeaders(request, baseUrl);
+        return request;
+    }
+
+    /// <summary>Verify POST matches browser fetch(): Content-Type + same-origin cookies only.</summary>
+    private static HttpRequestMessage CreateAmazonVerifyRequest(string baseUrl) =>
+        new(HttpMethod.Post, $"{baseUrl}/api/captcha/verify");
+
+    private static void ApplyAmazonBrowserHeaders(HttpRequestMessage request, string baseUrl)
+    {
         request.Headers.TryAddWithoutValidation("Origin", baseUrl);
         request.Headers.TryAddWithoutValidation("Referer", $"{baseUrl}/");
         request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "same-origin");
         request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "cors");
         request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");
-        return request;
     }
 
     private static async Task<string> LoadAmazonPageSessionAsync(HttpClient http, string baseUrl, CancellationToken ct)
@@ -290,7 +300,7 @@ public partial class SquidWTFCaptchaSolver
         return match.Groups[1].Value;
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex("""window\.__AMZ_WEB\s*=\s*\{\s*"n"\s*:\s*"([^"]+)"""")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"window\.__AMZ_WEB\s*=\s*\{\s*""n""\s*:\s*""([^""]+)""")]
     private static partial System.Text.RegularExpressions.Regex AmazonWebNonceRegex();
 
     private async Task<string> SolveAndVerifyAsync(string baseUrl, CancellationToken ct)
