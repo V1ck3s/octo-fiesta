@@ -617,7 +617,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
         return $"https://{domain}/albums/{albumAsin}";
     }
 
-    private static string? ResolveAmazonCoverUrl(string? cover)
+    private string? ResolveAmazonCoverUrl(string? cover)
     {
         if (string.IsNullOrEmpty(cover)) return null;
         if (cover.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return cover;
