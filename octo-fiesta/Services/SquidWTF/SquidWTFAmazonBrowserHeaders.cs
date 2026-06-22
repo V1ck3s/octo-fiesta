@@ -61,4 +61,41 @@ internal static class SquidWTFAmazonBrowserHeaders
             ["accept-language"] = "en-US,en;q=0.9",
             ["X-Captcha-Token"] = captchaToken,
         };
+
+    public static Dictionary<string, string> CreateStreamHeaders(
+        string streamUrl,
+        string baseUrl,
+        string captchaToken)
+    {
+        var trimmedBase = baseUrl.TrimEnd('/');
+        var sameOrigin = streamUrl.StartsWith(trimmedBase, StringComparison.OrdinalIgnoreCase);
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["accept"] = "*/*",
+            ["user-agent"] = UserAgent,
+            ["sec-ch-ua"] = SecChUa,
+            ["sec-ch-ua-mobile"] = "?0",
+            ["sec-ch-ua-platform"] = "\"macOS\"",
+            ["accept-language"] = "en-US,en;q=0.9",
+            ["referer"] = $"{trimmedBase}/",
+            ["X-Captcha-Token"] = captchaToken,
+        };
+
+        if (sameOrigin)
+        {
+            headers["origin"] = trimmedBase;
+            headers["sec-fetch-site"] = "same-origin";
+            headers["sec-fetch-mode"] = "cors";
+            headers["sec-fetch-dest"] = "empty";
+        }
+        else
+        {
+            headers["sec-fetch-site"] = "cross-site";
+            headers["sec-fetch-mode"] = "no-cors";
+            headers["sec-fetch-dest"] = "audio";
+        }
+
+        return headers;
+    }
 }

@@ -30,7 +30,6 @@ public class SquidWTFDownloadService : BaseDownloadService
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    private const string AmazonCaptchaTokenHeader = "X-Captcha-Token";
 
     // Quality mappings
     // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
@@ -239,7 +238,6 @@ public class SquidWTFDownloadService : BaseDownloadService
             }
 
             var cencKey = trackResponse.Drm?.Key;
-            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, cancellationToken: cancellationToken);
             Logger.LogInformation("Got Amazon Music stream URL for track {TrackAsin}: {Title} (codec: {Codec}, tier: {Tier}, attempt: {Attempt}, hasKey: {HasKey})",
                 trackAsin, song.Title, trackResponse.Stream.Codec ?? "?", tier, attempt, cencKey != null);
 
@@ -248,7 +246,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
             try
             {
-                var downloadStream = await GetAmazonStreamAsync(streamUrl, token, cancellationToken);
+                var downloadStream = await GetAmazonStreamAsync(streamUrl, cancellationToken);
                 var codec = (trackResponse.Stream.Codec ?? "").ToLowerInvariant();
                 var (extension, quality) = GetAmazonExtensionAndQuality(codec, tier);
                 return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey);
@@ -288,29 +286,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         }
     }
 
-    private async Task<Stream> GetAmazonStreamAsync(string url, string token, CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(AmazonCaptchaTokenHeader, token);
-        request.Headers.Add("User-Agent", "Mozilla/5.0");
-        request.Headers.Add("Accept", "*/*");
-
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-        {
-            // One more attempt with a fresh token
-            var freshToken = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true, cancellationToken);
-            using var retryRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            retryRequest.Headers.Add(AmazonCaptchaTokenHeader, freshToken);
-            retryRequest.Headers.Add("User-Agent", "Mozilla/5.0");
-            retryRequest.Headers.Add("Accept", "*/*");
-            response = await _httpClient.SendAsync(retryRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        }
-
-        response.EnsureSuccessStatusCode();
-        return await HttpResponseStream.CreateAsync(response, cancellationToken);
-    }
+    private Task<Stream> GetAmazonStreamAsync(string url, CancellationToken cancellationToken) =>
+        _captchaSolver.GetAmazonDownloadStreamAsync(AmazonBaseUrl, url, cancellationToken);
 
     private string GetAmazonTier()
     {

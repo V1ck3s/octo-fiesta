@@ -106,6 +106,51 @@ public partial class SquidWTFCaptchaSolver
         return response;
     }
 
+    /// <summary>
+    /// Downloads an Amazon Music stream URL using the shared browser session (cookies + captcha token).
+    /// </summary>
+    public async Task<Stream> GetAmazonDownloadStreamAsync(
+        string baseUrl,
+        string streamUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await GetAmazonSessionAsync(baseUrl, cancellationToken);
+        var download = await DownloadAmazonStreamCoreAsync(session, baseUrl, streamUrl, forceRefreshToken: false, cancellationToken);
+
+        if (download.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            download.Stream?.Dispose();
+            download = await DownloadAmazonStreamCoreAsync(session, baseUrl, streamUrl, forceRefreshToken: true, cancellationToken);
+        }
+
+        if (!download.IsSuccessStatusCode)
+        {
+            var detail = download.ErrorBody;
+            if (!string.IsNullOrEmpty(detail) && detail.Length > 200)
+                detail = detail[..200];
+            throw new HttpRequestException(
+                $"Amazon stream download returned {(int)download.StatusCode}: {detail}",
+                null,
+                download.StatusCode);
+        }
+
+        return download.Stream
+            ?? throw new InvalidOperationException("Amazon stream download succeeded but returned no body");
+    }
+
+    private async Task<AmazonImpersonateDownload> DownloadAmazonStreamCoreAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        string streamUrl,
+        bool forceRefreshToken,
+        CancellationToken ct)
+    {
+        var trimmed = baseUrl.TrimEnd('/');
+        var token = await RefreshAmazonCaptchaTokenAsync(session, trimmed, forceRefreshToken, ct);
+        var headers = SquidWTFAmazonBrowserHeaders.CreateStreamHeaders(streamUrl, trimmed, token);
+        return await session.Http.DownloadAsync(streamUrl, headers, ct);
+    }
+
     private async Task<string> RefreshAmazonCaptchaTokenAsync(
         SquidWTFAmazonSession session,
         string baseUrl,
