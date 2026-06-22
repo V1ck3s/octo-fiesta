@@ -1,24 +1,15 @@
-using Primp;
-
 namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
-/// Shared Amazon SquidWTF session with Chrome TLS impersonation (Primp) + webNonce + token cache.
+/// Shared Amazon SquidWTF session: curl-impersonate cookies + webNonce + captcha token cache.
 /// </summary>
 internal sealed class SquidWTFAmazonSession : IDisposable
 {
-    public PrimpClient Client { get; } = PrimpClient.Builder()
-        .WithImpersonate(Impersonate.Chrome146)
-        .WithOS(ImpersonateOS.Windows)
-        .WithTimeout(TimeSpan.FromSeconds(90))
-        .WithCookieStore(true)
-        .FollowRedirects(true)
-        .Build();
-
+    public SquidWTFAmazonImpersonateHttp Http { get; } = new();
     public string WebNonce { get; set; } = "";
 
     public string? CaptchaToken { get; set; }
     public DateTimeOffset CaptchaTokenExpiresAt { get; set; }
 
-    public void Dispose() => Client.Dispose();
+    public void Dispose() => Http.Dispose();
 }
