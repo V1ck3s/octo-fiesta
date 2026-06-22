@@ -1,16 +1,14 @@
-using System.Net;
-using System.Text.Json;
+using Primp;
 
 namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
-/// Keeps the Amazon SquidWTF browser session (cookies + webNonce) on one HttpClient
-/// so captcha tokens and API calls stay tied to the same page session.
+/// Keeps the Amazon SquidWTF browser session (cookies + webNonce) on one Primp client
+/// with Chrome TLS impersonation so /api/search passes edgedragon checks.
 /// </summary>
 internal sealed class SquidWTFAmazonSession : IDisposable
 {
-    public HttpClient Http { get; }
-    public CookieContainer Cookies { get; }
+    public PrimpClient Client { get; }
     public string WebNonce { get; set; } = "";
 
     public string? CaptchaToken { get; set; }
@@ -18,17 +16,14 @@ internal sealed class SquidWTFAmazonSession : IDisposable
 
     public SquidWTFAmazonSession()
     {
-        Cookies = new CookieContainer();
-        var handler = new HttpClientHandler
-        {
-            CookieContainer = Cookies,
-            UseCookies = true,
-            AutomaticDecompression = DecompressionMethods.All
-        };
-        Http = new HttpClient(handler);
-        Http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        Client = PrimpClient.Builder()
+            .WithImpersonate(Impersonate.Chrome146)
+            .WithOS(ImpersonateOS.Windows)
+            .WithTimeout(TimeSpan.FromSeconds(90))
+            .WithCookieStore(true)
+            .FollowRedirects(true)
+            .Build();
     }
 
-    public void Dispose() => Http.Dispose();
+    public void Dispose() => Client.Dispose();
 }
