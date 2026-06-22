@@ -60,6 +60,15 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteStatus("Instances URL", _settings.InstancesUrl!, ConsoleColor.Cyan);
         }
 
+        if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteStatus("Qobuz API URL", _settings.EffectiveQobuzBaseUrl, ConsoleColor.Cyan);
+        }
+        else if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteStatus("Amazon API URL", _settings.EffectiveAmazonBaseUrl, ConsoleColor.Cyan);
+        }
+
         try
         {
             if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
@@ -97,7 +106,7 @@ public class SquidWTFStartupValidator : BaseStartupValidator
 
     private async Task<ValidationResult> ValidateQobuzAsync(CancellationToken cancellationToken)
     {
-        var response = await _httpClient.GetAsync("https://qobuz.squid.wtf/api/get-music?q=test&offset=0", cancellationToken);
+        var response = await _httpClient.GetAsync($"{_settings.EffectiveQobuzBaseUrl}/api/get-music?q=test&offset=0", cancellationToken);
 
         if (response.IsSuccessStatusCode)
         {
@@ -117,7 +126,7 @@ public class SquidWTFStartupValidator : BaseStartupValidator
     {
         try
         {
-            var response = await _httpClient.GetAsync("https://amz.squid.wtf/api/captcha/challenge", cancellationToken);
+            var response = await _httpClient.GetAsync($"{_settings.EffectiveAmazonBaseUrl}/api/captcha/challenge", cancellationToken);
 
             if (response.IsSuccessStatusCode)
             {

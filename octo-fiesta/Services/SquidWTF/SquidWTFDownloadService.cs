@@ -22,9 +22,8 @@ public class SquidWTFDownloadService : BaseDownloadService
     private readonly SquidWTFInstanceManager _instanceManager;
     private readonly SquidWTFCaptchaSolver _captchaSolver;
     
-    // Static Qobuz API endpoint
-    private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string AmazonBaseUrl = "https://amz.squid.wtf";
+    private string QobuzBaseUrl => _squidWTFSettings.EffectiveQobuzBaseUrl;
+    private string AmazonBaseUrl => _squidWTFSettings.EffectiveAmazonBaseUrl;
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";

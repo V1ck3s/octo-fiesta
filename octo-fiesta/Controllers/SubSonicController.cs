@@ -22,6 +22,7 @@ namespace octo_fiesta.Controllers;
 public class SubsonicController : ControllerBase
 {
     private readonly SubsonicSettings _subsonicSettings;
+    private readonly SquidWTFSettings _squidWtfSettings;
     private readonly IMusicMetadataService _metadataService;
     private readonly ILocalLibraryService _localLibraryService;
     private readonly IDownloadService _downloadService;
@@ -36,6 +37,7 @@ public class SubsonicController : ControllerBase
 
     public SubsonicController(
         IOptions<SubsonicSettings> subsonicSettings,
+        IOptions<SquidWTFSettings> squidWtfSettings,
         IMusicMetadataService metadataService,
         ILocalLibraryService localLibraryService,
         IDownloadService downloadService,
@@ -49,6 +51,7 @@ public class SubsonicController : ControllerBase
         ILyricsService? lyricsService = null)
     {
         _subsonicSettings = subsonicSettings.Value;
+        _squidWtfSettings = squidWtfSettings.Value;
         _metadataService = metadataService;
         _localLibraryService = localLibraryService;
         _downloadService = downloadService;
@@ -785,15 +788,16 @@ public class SubsonicController : ControllerBase
             using var httpClient = new HttpClient();
             using var req = new HttpRequestMessage(HttpMethod.Get, coverUrl);
 
-            // amz.squid.wtf image proxy requires the captcha token
-            if (coverUrl.Contains("amz.squid.wtf", StringComparison.OrdinalIgnoreCase))
+            // Amazon Music image proxy requires the captcha token
+            var amazonBaseUrl = _squidWtfSettings.EffectiveAmazonBaseUrl;
+            if (coverUrl.StartsWith(amazonBaseUrl, StringComparison.OrdinalIgnoreCase))
             {
                 var captchaSolver = HttpContext.RequestServices.GetService<SquidWTFCaptchaSolver>();
                 if (captchaSolver != null)
                 {
                     try
                     {
-                        var token = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
+                        var token = await captchaSolver.GetAmazonCaptchaTokenAsync(amazonBaseUrl);
                         req.Headers.Add("X-Captcha-Token", token);
                     }
                     catch (Exception ex)

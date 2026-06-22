@@ -18,9 +18,6 @@ public class SquidWTFInstanceManager
     private const int DefaultTimeoutSeconds = 5;
     private const string FallbackInstance = "https://monochrome-api.samidy.com/";
 
-    // No failover for Qobuz — only one public endpoint exists.
-    private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-
     private List<string>? _tidalInstances;
     private int _currentInstanceIndex;
     private string? _currentTidalInstance;
@@ -51,7 +48,7 @@ public class SquidWTFInstanceManager
     {
         if (_settings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
         {
-            return QobuzBaseUrl;
+            return _settings.EffectiveQobuzBaseUrl;
         }
         
         await EnsureInitializedAsync();

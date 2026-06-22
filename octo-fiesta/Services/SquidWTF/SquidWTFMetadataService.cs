@@ -37,9 +37,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
         _coverCache[asin] = url;
     }
 
-    // API endpoints
-    private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string AmazonBaseUrl = "https://amz.squid.wtf";
+    private string QobuzBaseUrl => _settings.EffectiveQobuzBaseUrl;
+    private string AmazonBaseUrl => _settings.EffectiveAmazonBaseUrl;
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";

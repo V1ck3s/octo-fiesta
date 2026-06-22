@@ -6,11 +6,47 @@ namespace octo_fiesta.Models.Settings;
 /// </summary>
 public class SquidWTFSettings
 {
+    internal const string DefaultQobuzBaseUrl = "https://qobuz.squid.wtf";
+    internal const string DefaultAmazonBaseUrl = "https://amz.squid.wtf";
+
     /// <summary>
     /// The backend source to use: "Qobuz", "Tidal", or "AmazonMusic"
     /// Defaults to "Qobuz" if not specified
     /// </summary>
     public string Source { get; set; } = "Qobuz";
+
+    /// <summary>
+    /// Base URL for the SquidWTF Qobuz API (e.g. https://qobuz.kennyy.com.br).
+    /// Defaults to https://qobuz.squid.wtf if not specified.
+    /// </summary>
+    public string QobuzBaseUrl { get; set; } = DefaultQobuzBaseUrl;
+
+    /// <summary>
+    /// Base URL for the SquidWTF Amazon Music API.
+    /// Defaults to https://amz.squid.wtf if not specified.
+    /// </summary>
+    public string AmazonBaseUrl { get; set; } = DefaultAmazonBaseUrl;
+
+    /// <summary>Normalized Qobuz base URL with scheme and without trailing slash.</summary>
+    public string EffectiveQobuzBaseUrl => NormalizeBaseUrl(QobuzBaseUrl, DefaultQobuzBaseUrl);
+
+    /// <summary>Normalized Amazon base URL with scheme and without trailing slash.</summary>
+    public string EffectiveAmazonBaseUrl => NormalizeBaseUrl(AmazonBaseUrl, DefaultAmazonBaseUrl);
+
+    public static string NormalizeBaseUrl(string? url, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return fallback;
+
+        var trimmed = url.Trim().TrimEnd('/');
+        if (!trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = "https://" + trimmed;
+        }
+
+        return trimmed;
+    }
 
     /// <summary>
     /// Preferred audio quality
