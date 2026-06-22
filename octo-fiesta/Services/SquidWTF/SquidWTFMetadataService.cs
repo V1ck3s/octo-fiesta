@@ -571,25 +571,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         try
         {
-            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl);
             var json = JsonSerializer.Serialize(body);
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
-            request.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            request.Headers.Add(AmazonCaptchaTokenHeader, token);
-
-            var response = await _httpClient.SendAsync(request);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            {
-                // Captcha token expired — refresh and retry once
-                token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true);
-                using var retryRequest = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
-                retryRequest.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                retryRequest.Headers.Add(AmazonCaptchaTokenHeader, token);
-                response = await _httpClient.SendAsync(retryRequest);
-            }
+            using var response = await _captchaSolver.SendAmazonPostAsync(AmazonBaseUrl, path, json);
 
             if (!response.IsSuccessStatusCode)
             {

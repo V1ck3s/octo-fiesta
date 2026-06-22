@@ -224,13 +224,11 @@ public class SquidWTFDownloadService : BaseDownloadService
         const int maxAttempts = 3;
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            bool forceRefresh = attempt > 1;
-            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: forceRefresh, cancellationToken);
-            var trackResponse = await FetchAmazonTrackAsync(trackAsin, tier, country, token, cancellationToken);
+            var trackResponse = await FetchAmazonTrackAsync(trackAsin, tier, country, cancellationToken);
 
             if (trackResponse == null)
             {
-                Logger.LogWarning("Amazon Music track request failed (attempt {Attempt}/{Max}), will refresh token", attempt, maxAttempts);
+                Logger.LogWarning("Amazon Music track request failed (attempt {Attempt}/{Max})", attempt, maxAttempts);
                 continue;
             }
 
@@ -241,6 +239,7 @@ public class SquidWTFDownloadService : BaseDownloadService
             }
 
             var cencKey = trackResponse.Drm?.Key;
+            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, cancellationToken: cancellationToken);
             Logger.LogInformation("Got Amazon Music stream URL for track {TrackAsin}: {Title} (codec: {Codec}, tier: {Tier}, attempt: {Attempt}, hasKey: {HasKey})",
                 trackAsin, song.Title, trackResponse.Stream.Codec ?? "?", tier, attempt, cencKey != null);
 
@@ -265,24 +264,19 @@ public class SquidWTFDownloadService : BaseDownloadService
     }
 
     private async Task<AmazonMusicTrackResponse?> FetchAmazonTrackAsync(
-        string asin, string tier, string country, string token, CancellationToken cancellationToken)
+        string asin, string tier, string country, CancellationToken cancellationToken)
     {
         try
         {
             var body = System.Text.Json.JsonSerializer.Serialize(new { asin, tier, country });
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}/api/track");
-            request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-            request.Headers.Add(AmazonCaptchaTokenHeader, token);
+            using var response = await _captchaSolver.SendAmazonPostAsync(
+                AmazonBaseUrl, "/api/track", body, cancellationToken);
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            if (!response.IsSuccessStatusCode)
             {
-                return null; // Signal to caller to refresh token
+                return null;
             }
 
-            response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync(cancellationToken);
             Logger.LogDebug("Amazon /api/track response for {Asin}: {Json}", asin, json);
             return System.Text.Json.JsonSerializer.Deserialize<AmazonMusicTrackResponse>(json);

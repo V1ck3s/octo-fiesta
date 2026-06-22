@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,7 +8,7 @@ using System.Text.Json;
 namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>Solves the ALTCHA v2 proof-of-work that gates qobuz.squid.wtf /api/download-music.</summary>
-public class SquidWTFCaptchaSolver
+public partial class SquidWTFCaptchaSolver
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SquidWTFCaptchaSolver> _logger;
@@ -25,6 +26,14 @@ public class SquidWTFCaptchaSolver
     private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
     private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private readonly SemaphoreSlim _amazonSessionLock = new(1, 1);
+
+    private SquidWTFAmazonSession? _amazonSession;
+    private string? _amazonSessionBaseUrl;
+
+    private const string BrowserUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    private const string AmazonCaptchaTokenHeader = "X-Captcha-Token";
 
     public SquidWTFCaptchaSolver(
         IHttpClientFactory httpClientFactory,
@@ -80,7 +89,7 @@ public class SquidWTFCaptchaSolver
             if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
                 return _captchaToken;
 
-            _captchaToken = await SolveAndVerifyAmazonAsync(baseUrl, cancellationToken);
+            _captchaToken = await SolveAndVerifyAmazonAsync(baseUrl, forceRefresh, cancellationToken);
             _tokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
             return _captchaToken;
         }
@@ -90,19 +99,62 @@ public class SquidWTFCaptchaSolver
         }
     }
 
-    private async Task<string> SolveAndVerifyAmazonAsync(string baseUrl, CancellationToken ct)
+    /// <summary>
+    /// POST to an Amazon SquidWTF API route using the shared browser session (cookies + captcha token).
+    /// </summary>
+    public async Task<HttpResponseMessage> SendAmazonPostAsync(
+        string baseUrl,
+        string path,
+        string jsonBody,
+        CancellationToken cancellationToken = default)
     {
-        var http = _httpClientFactory.CreateClient();
+        var session = await GetAmazonSessionAsync(baseUrl, cancellationToken);
+        var response = await SendAmazonPostCoreAsync(session, baseUrl, path, jsonBody, forceRefreshToken: false, cancellationToken);
+
+        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+        {
+            response.Dispose();
+            response = await SendAmazonPostCoreAsync(session, baseUrl, path, jsonBody, forceRefreshToken: true, cancellationToken);
+        }
+
+        return response;
+    }
+
+    private async Task<string> SolveAndVerifyAmazonAsync(string baseUrl, bool forceRefresh, CancellationToken ct)
+    {
+        var session = await GetAmazonSessionAsync(baseUrl, ct);
+        if (forceRefresh)
+        {
+            session.CaptchaToken = null;
+            session.CaptchaTokenExpiresAt = DateTimeOffset.MinValue;
+        }
+
+        return await RefreshAmazonCaptchaTokenAsync(session, baseUrl, forceRefresh, ct);
+    }
+
+    private async Task<string> RefreshAmazonCaptchaTokenAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        bool forceRefresh,
+        CancellationToken ct)
+    {
+        if (!forceRefresh &&
+            session.CaptchaToken != null &&
+            DateTimeOffset.UtcNow < session.CaptchaTokenExpiresAt)
+        {
+            return session.CaptchaToken;
+        }
+
         var trimmed = baseUrl.TrimEnd('/');
 
-        using var challengeResp = await http.GetAsync($"{trimmed}/api/captcha/challenge", ct);
+        using var challengeRequest = CreateAmazonApiRequest(HttpMethod.Get, trimmed, "/api/captcha/challenge");
+        using var challengeResp = await session.Http.SendAsync(challengeRequest, ct);
         var challengeJson = await challengeResp.Content.ReadAsStringAsync(ct);
         challengeResp.EnsureSuccessStatusCode();
 
         using var challengeDoc = JsonDocument.Parse(challengeJson);
         var root = challengeDoc.RootElement;
 
-        // Support both { parameters: {...} } and flat { nonce, salt, ... }
         JsonElement parameters;
         if (root.TryGetProperty("parameters", out var parametersEl))
             parameters = parametersEl;
@@ -114,11 +166,13 @@ public class SquidWTFCaptchaSolver
         var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = elapsedMs });
         var payloadJson = $"{{\"challenge\":{challengeJson.TrimEnd()},\"solution\":{solutionJson}}}";
         var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
-        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64 });
+        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64, webNonce = session.WebNonce });
 
         _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
         using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
-        using var verifyResp = await http.PostAsync($"{trimmed}/api/captcha/verify", content, ct);
+        using var verifyRequest = CreateAmazonApiRequest(HttpMethod.Post, trimmed, "/api/captcha/verify");
+        verifyRequest.Content = content;
+        using var verifyResp = await session.Http.SendAsync(verifyRequest, ct);
 
         var verifyJson = await verifyResp.Content.ReadAsStringAsync(ct);
         _logger.LogDebug("Amazon captcha verify response ({Status}): {Json}", (int)verifyResp.StatusCode, verifyJson);
@@ -139,12 +193,105 @@ public class SquidWTFCaptchaSolver
         var token = tokenElement.GetString()
             ?? throw new InvalidOperationException("Amazon captcha token is null");
 
+        session.CaptchaToken = token;
+        session.CaptchaTokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
+        _captchaToken = token;
+        _tokenExpiresAt = session.CaptchaTokenExpiresAt;
+
         _logger.LogInformation(
             "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~{Minutes} min",
             elapsedMs, counter, (int)TokenValidity.TotalMinutes);
 
         return token;
     }
+
+    private async Task<HttpResponseMessage> SendAmazonPostCoreAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        string path,
+        string jsonBody,
+        bool forceRefreshToken,
+        CancellationToken ct)
+    {
+        var trimmed = baseUrl.TrimEnd('/');
+        var token = await RefreshAmazonCaptchaTokenAsync(session, trimmed, forceRefreshToken, ct);
+
+        using var request = CreateAmazonApiRequest(HttpMethod.Post, trimmed, path);
+        request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+        request.Headers.TryAddWithoutValidation(AmazonCaptchaTokenHeader, token);
+
+        return await session.Http.SendAsync(request, ct);
+    }
+
+    private async Task<SquidWTFAmazonSession> GetAmazonSessionAsync(string baseUrl, CancellationToken ct)
+    {
+        var trimmed = baseUrl.TrimEnd('/');
+        if (_amazonSession != null && _amazonSessionBaseUrl == trimmed && !string.IsNullOrEmpty(_amazonSession.WebNonce))
+            return _amazonSession;
+
+        await _amazonSessionLock.WaitAsync(ct);
+        try
+        {
+            if (_amazonSession == null || _amazonSessionBaseUrl != trimmed)
+            {
+                _amazonSession?.Dispose();
+                _amazonSession = new SquidWTFAmazonSession();
+                _amazonSessionBaseUrl = trimmed;
+                _captchaToken = null;
+                _tokenExpiresAt = DateTimeOffset.MinValue;
+            }
+
+            if (string.IsNullOrEmpty(_amazonSession.WebNonce))
+            {
+                _amazonSession.WebNonce = await LoadAmazonPageSessionAsync(_amazonSession.Http, trimmed, ct);
+            }
+
+            return _amazonSession;
+        }
+        finally
+        {
+            _amazonSessionLock.Release();
+        }
+    }
+
+    private static HttpRequestMessage CreateAmazonApiRequest(
+        HttpMethod method,
+        string baseUrl,
+        string path)
+    {
+        var request = new HttpRequestMessage(method, $"{baseUrl}{path}");
+        request.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+        request.Headers.TryAddWithoutValidation("Origin", baseUrl);
+        request.Headers.TryAddWithoutValidation("Referer", $"{baseUrl}/");
+        request.Headers.TryAddWithoutValidation("Sec-Fetch-Site", "same-origin");
+        request.Headers.TryAddWithoutValidation("Sec-Fetch-Mode", "cors");
+        request.Headers.TryAddWithoutValidation("Sec-Fetch-Dest", "empty");
+        return request;
+    }
+
+    private static async Task<string> LoadAmazonPageSessionAsync(HttpClient http, string baseUrl, CancellationToken ct)
+    {
+        using var pageRequest = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/");
+        pageRequest.Headers.TryAddWithoutValidation("Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+        pageRequest.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
+        using var pageResponse = await http.SendAsync(pageRequest, ct);
+        pageResponse.EnsureSuccessStatusCode();
+        var html = await pageResponse.Content.ReadAsStringAsync(ct);
+
+        var match = AmazonWebNonceRegex().Match(html);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException(
+                "Amazon page session nonce (window.__AMZ_WEB.n) was not found in homepage HTML");
+        }
+
+        return match.Groups[1].Value;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex("""window\.__AMZ_WEB\s*=\s*\{\s*"n"\s*:\s*"([^"]+)"""")]
+    private static partial System.Text.RegularExpressions.Regex AmazonWebNonceRegex();
 
     private async Task<string> SolveAndVerifyAsync(string baseUrl, CancellationToken ct)
     {
