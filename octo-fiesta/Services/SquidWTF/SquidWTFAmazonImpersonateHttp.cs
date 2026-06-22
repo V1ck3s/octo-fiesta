@@ -84,8 +84,13 @@ internal sealed class SquidWTFAmazonImpersonateHttp : IDisposable
 
                 if (body != null)
                 {
-                    process.StartInfo.ArgumentList.Add("-H");
-                    process.StartInfo.ArgumentList.Add($"Content-Type: {contentType ?? "application/json"}");
+                    if (headers == null ||
+                        !headers.Keys.Any(k => k.Equals("content-type", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        process.StartInfo.ArgumentList.Add("-H");
+                        process.StartInfo.ArgumentList.Add($"Content-Type: {contentType ?? "application/json"}");
+                    }
+
                     process.StartInfo.ArgumentList.Add("--data-binary");
                     process.StartInfo.ArgumentList.Add("@-");
                 }
@@ -100,7 +105,7 @@ internal sealed class SquidWTFAmazonImpersonateHttp : IDisposable
                 {
                     throw new InvalidOperationException(
                         $"Failed to start curl-impersonate ({_curlBinary}). " +
-                        "Install curl_chrome131 in the container or set SQUIDWTF_CURL_IMPERSONATE.",
+                        "Install curl_amz_tls in the container or set SQUIDWTF_CURL_IMPERSONATE.",
                         ex);
                 }
 
@@ -148,7 +153,7 @@ internal sealed class SquidWTFAmazonImpersonateHttp : IDisposable
         if (!string.IsNullOrWhiteSpace(configured))
             return configured.Trim();
 
-        return "curl_chrome131";
+        return "/usr/local/bin/curl_amz_tls";
     }
 
     private static void TryDelete(string path)

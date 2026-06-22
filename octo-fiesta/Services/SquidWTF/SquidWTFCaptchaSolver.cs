@@ -164,8 +164,7 @@ public partial class SquidWTFCaptchaSolver
     {
         ct.ThrowIfCancellationRequested();
 
-        var challengeHeaders = CreateAmazonBrowserHeaders(baseUrl);
-        challengeHeaders["accept"] = "application/json, text/plain, */*";
+        var challengeHeaders = SquidWTFAmazonBrowserHeaders.CreateChallengeHeaders();
 
         var challengeResp = await session.Http.GetAsync($"{baseUrl}/api/captcha/challenge", challengeHeaders, ct);
         if (challengeResp.StatusCode == HttpStatusCode.TooManyRequests)
@@ -206,7 +205,7 @@ public partial class SquidWTFCaptchaSolver
             $"{baseUrl}/api/captcha/verify",
             verifyBody,
             "application/json",
-            headers: null,
+            SquidWTFAmazonBrowserHeaders.CreateVerifyHeaders(),
             ct);
 
         var verifyJson = verifyResp.Body;
@@ -266,7 +265,7 @@ public partial class SquidWTFCaptchaSolver
         var trimmed = baseUrl.TrimEnd('/');
         var token = await RefreshAmazonCaptchaTokenAsync(session, trimmed, forceRefreshToken, ct);
 
-        var headers = CreateAmazonSearchHeaders(trimmed, token);
+        var headers = SquidWTFAmazonBrowserHeaders.CreateApiPostHeaders(trimmed, token);
         var amazonResp = await session.Http.PostAsync($"{trimmed}{path}", jsonBody, "application/json", headers, ct);
         ct.ThrowIfCancellationRequested();
 
@@ -308,24 +307,6 @@ public partial class SquidWTFCaptchaSolver
         }
     }
 
-    private static Dictionary<string, string> CreateAmazonBrowserHeaders(string baseUrl) =>
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["origin"] = baseUrl,
-            ["referer"] = $"{baseUrl}/",
-            ["sec-fetch-site"] = "same-origin",
-            ["sec-fetch-mode"] = "cors",
-            ["sec-fetch-dest"] = "empty",
-        };
-
-    private static Dictionary<string, string> CreateAmazonSearchHeaders(string baseUrl, string captchaToken)
-    {
-        var headers = CreateAmazonBrowserHeaders(baseUrl);
-        headers["accept"] = "application/json, text/plain, */*";
-        headers[AmazonCaptchaTokenHeader] = captchaToken;
-        return headers;
-    }
-
     private static async Task<string> LoadAmazonPageSessionAsync(
         SquidWTFAmazonImpersonateHttp http,
         string baseUrl,
@@ -333,10 +314,10 @@ public partial class SquidWTFCaptchaSolver
     {
         ct.ThrowIfCancellationRequested();
 
-        var pageResponse = await http.GetAsync($"{baseUrl}/", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }, ct);
+        var pageResponse = await http.GetAsync(
+            $"{baseUrl}/",
+            SquidWTFAmazonBrowserHeaders.CreatePageHeaders(),
+            ct);
 
         if (pageResponse.StatusCode != HttpStatusCode.OK)
         {

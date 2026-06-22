@@ -37,12 +37,15 @@ RUN apt-get update \
     | tar xz -C /usr/local/bin \
     && rm -rf /var/lib/apt/lists/*
 
+COPY docker/curl_amz_tls.sh /usr/local/bin/curl_amz_tls
+RUN sed -i 's/\r$//' /usr/local/bin/curl_amz_tls && chmod +x /usr/local/bin/curl_amz_tls
+
 RUN mkdir -p /app/downloads
 
 COPY --from=build /app/publish .
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
-ENV SQUIDWTF_CURL_IMPERSONATE=/usr/local/bin/curl_chrome131
+ENV SQUIDWTF_CURL_IMPERSONATE=/usr/local/bin/curl_amz_tls
 
 ENTRYPOINT ["dotnet", "octo-fiesta.dll"]
