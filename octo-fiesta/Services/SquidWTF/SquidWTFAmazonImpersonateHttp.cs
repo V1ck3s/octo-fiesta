@@ -100,7 +100,7 @@ internal sealed class SquidWTFAmazonImpersonateHttp : IDisposable
                 {
                     throw new InvalidOperationException(
                         $"Failed to start curl-impersonate ({_curlBinary}). " +
-                        "Install curl_chrome116 in the container or set SQUIDWTF_CURL_IMPERSONATE.",
+                        "Install curl_chrome131 in the container or set SQUIDWTF_CURL_IMPERSONATE.",
                         ex);
                 }
 
@@ -148,7 +148,7 @@ internal sealed class SquidWTFAmazonImpersonateHttp : IDisposable
         if (!string.IsNullOrWhiteSpace(configured))
             return configured.Trim();
 
-        return "curl_chrome116";
+        return "curl_chrome131";
     }
 
     private static void TryDelete(string path)
