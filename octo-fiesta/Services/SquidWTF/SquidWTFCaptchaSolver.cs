@@ -25,11 +25,13 @@ public partial class SquidWTFCaptchaSolver
     private string? _captchaToken;
     private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
     private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
+    private static readonly TimeSpan CaptchaRateLimitCooldown = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
     private readonly SemaphoreSlim _amazonSessionLock = new(1, 1);
 
     private SquidWTFAmazonSession? _amazonSession;
     private string? _amazonSessionBaseUrl;
+    private DateTimeOffset _captchaRateLimitedUntil = DateTimeOffset.MinValue;
 
     private const string BrowserUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -80,23 +82,8 @@ public partial class SquidWTFCaptchaSolver
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
-        if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-            return _captchaToken;
-
-        await _tokenLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-                return _captchaToken;
-
-            _captchaToken = await SolveAndVerifyAmazonAsync(baseUrl, forceRefresh, cancellationToken);
-            _tokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
-            return _captchaToken;
-        }
-        finally
-        {
-            _tokenLock.Release();
-        }
+        var session = await GetAmazonSessionAsync(baseUrl, cancellationToken);
+        return await RefreshAmazonCaptchaTokenAsync(session, baseUrl.TrimEnd('/'), forceRefresh, cancellationToken);
     }
 
     /// <summary>
@@ -111,25 +98,14 @@ public partial class SquidWTFCaptchaSolver
         var session = await GetAmazonSessionAsync(baseUrl, cancellationToken);
         var response = await SendAmazonPostCoreAsync(session, baseUrl, path, jsonBody, forceRefreshToken: false, cancellationToken);
 
-        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+        // 403 is not fixed by a new token (e.g. "web interface only"); only retry on 401.
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             response.Dispose();
             response = await SendAmazonPostCoreAsync(session, baseUrl, path, jsonBody, forceRefreshToken: true, cancellationToken);
         }
 
         return response;
-    }
-
-    private async Task<string> SolveAndVerifyAmazonAsync(string baseUrl, bool forceRefresh, CancellationToken ct)
-    {
-        var session = await GetAmazonSessionAsync(baseUrl, ct);
-        if (forceRefresh)
-        {
-            session.CaptchaToken = null;
-            session.CaptchaTokenExpiresAt = DateTimeOffset.MinValue;
-        }
-
-        return await RefreshAmazonCaptchaTokenAsync(session, baseUrl, forceRefresh, ct);
     }
 
     private async Task<string> RefreshAmazonCaptchaTokenAsync(
@@ -145,10 +121,59 @@ public partial class SquidWTFCaptchaSolver
             return session.CaptchaToken;
         }
 
-        var trimmed = baseUrl.TrimEnd('/');
+        if (DateTimeOffset.UtcNow < _captchaRateLimitedUntil)
+        {
+            throw new InvalidOperationException(
+                $"Amazon captcha is rate-limited until {_captchaRateLimitedUntil:u}. Please wait before retrying.");
+        }
 
-        using var challengeRequest = CreateAmazonApiRequest(HttpMethod.Get, trimmed, "/api/captcha/challenge");
+        await _tokenLock.WaitAsync(ct);
+        try
+        {
+            if (!forceRefresh &&
+                session.CaptchaToken != null &&
+                DateTimeOffset.UtcNow < session.CaptchaTokenExpiresAt)
+            {
+                return session.CaptchaToken;
+            }
+
+            if (DateTimeOffset.UtcNow < _captchaRateLimitedUntil)
+            {
+                throw new InvalidOperationException(
+                    $"Amazon captcha is rate-limited until {_captchaRateLimitedUntil:u}. Please wait before retrying.");
+            }
+
+            if (forceRefresh)
+            {
+                session.CaptchaToken = null;
+                session.CaptchaTokenExpiresAt = DateTimeOffset.MinValue;
+                _captchaToken = null;
+                _tokenExpiresAt = DateTimeOffset.MinValue;
+            }
+
+            return await SolveAndVerifyAmazonCaptchaAsync(session, baseUrl, ct);
+        }
+        finally
+        {
+            _tokenLock.Release();
+        }
+    }
+
+    private async Task<string> SolveAndVerifyAmazonCaptchaAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        CancellationToken ct)
+    {
+        using var challengeRequest = CreateAmazonApiRequest(HttpMethod.Get, baseUrl, "/api/captcha/challenge");
         using var challengeResp = await session.Http.SendAsync(challengeRequest, ct);
+        if (challengeResp.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            var challengeError = await challengeResp.Content.ReadAsStringAsync(ct);
+            MarkCaptchaRateLimited();
+            throw new InvalidOperationException(
+                $"Amazon captcha challenge returned 429: {challengeError}");
+        }
+
         challengeResp.EnsureSuccessStatusCode();
         var challengeJson = (await challengeResp.Content.ReadAsStringAsync(ct)).TrimEnd();
 
@@ -171,12 +196,19 @@ public partial class SquidWTFCaptchaSolver
 
         _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
         using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
-        using var verifyRequest = CreateAmazonVerifyRequest(trimmed);
+        using var verifyRequest = CreateAmazonVerifyRequest(baseUrl);
         verifyRequest.Content = content;
         using var verifyResp = await session.Http.SendAsync(verifyRequest, ct);
 
         var verifyJson = await verifyResp.Content.ReadAsStringAsync(ct);
         _logger.LogDebug("Amazon captcha verify response ({Status}): {Json}", (int)verifyResp.StatusCode, verifyJson);
+
+        if (verifyResp.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            MarkCaptchaRateLimited();
+            throw new InvalidOperationException(
+                $"Amazon captcha verify returned 429: {verifyJson}");
+        }
 
         if (!verifyResp.IsSuccessStatusCode)
         {
@@ -204,6 +236,14 @@ public partial class SquidWTFCaptchaSolver
             elapsedMs, counter, (int)TokenValidity.TotalMinutes);
 
         return token;
+    }
+
+    private void MarkCaptchaRateLimited()
+    {
+        _captchaRateLimitedUntil = DateTimeOffset.UtcNow + CaptchaRateLimitCooldown;
+        _logger.LogWarning(
+            "Amazon captcha rate-limited by upstream; backing off until {Until:u}",
+            _captchaRateLimitedUntil);
     }
 
     private async Task<HttpResponseMessage> SendAmazonPostCoreAsync(

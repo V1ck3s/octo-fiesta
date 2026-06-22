@@ -297,8 +297,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
         var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-            response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             // One more attempt with a fresh token
             var freshToken = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true, cancellationToken);
