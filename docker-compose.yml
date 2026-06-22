@@ -58,6 +58,10 @@ services:
       # ===== SQUIDWTF SETTINGS =====
       # Backend source: Qobuz, Tidal, or AmazonMusic (default: Qobuz)
       - SquidWTF__Source=${SQUIDWTF_SOURCE:-Qobuz}
+      # Base URL for the SquidWTF Qobuz API (default: https://qobuz.squid.wtf)
+      - SquidWTF__QobuzBaseUrl=${SQUIDWTF_QOBUZ_BASE_URL:-}
+      # Base URL for the SquidWTF Amazon Music API (default: https://amz.squid.wtf)
+      - SquidWTF__AmazonBaseUrl=${SQUIDWTF_AMAZON_BASE_URL:-}
       # Preferred audio quality (optional)
       # Qobuz: 27 (FLAC 24-bit/192kHz), 7 (FLAC 24-bit/96kHz), 6 (FLAC 16-bit/44kHz), 5 (MP3 320kbps)
       # Tidal: HI_RES_LOSSLESS (FLAC 24-bit/192kHz), LOSSLESS (FLAC 16-bit/44kHz), HIGH (AAC 320kbps), LOW (AAC 96kbps)

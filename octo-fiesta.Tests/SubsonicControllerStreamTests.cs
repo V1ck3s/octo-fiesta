@@ -49,6 +49,7 @@ public class SubsonicControllerStreamTests
 
         var controller = new SubsonicController(
             settings,
+            Options.Create(new SquidWTFSettings()),
             metadataServiceMock.Object,
             localLibraryServiceMock.Object,
             downloadServiceMock.Object,

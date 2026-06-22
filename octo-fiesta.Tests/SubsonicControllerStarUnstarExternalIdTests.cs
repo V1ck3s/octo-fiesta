@@ -80,6 +80,7 @@ public class SubsonicControllerStarUnstarExternalIdTests
 
         var controller = new SubsonicController(
             settingsToUse,
+            Options.Create(new SquidWTFSettings()),
             _mockMetadataService.Object,
             _mockLocalLibraryService.Object,
             _mockDownloadService.Object,

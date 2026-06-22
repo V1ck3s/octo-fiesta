@@ -79,6 +79,7 @@ public class SubsonicControllerUpdatePlaylistTests
 
         var controller = new SubsonicController(
             _settings,
+            Options.Create(new SquidWTFSettings()),
             _mockMetadataService.Object,
             _mockLocalLibraryService.Object,
             _mockDownloadService.Object,
