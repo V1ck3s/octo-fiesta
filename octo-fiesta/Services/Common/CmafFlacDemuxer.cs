@@ -29,11 +29,10 @@ internal static class CmafFlacDemuxer
 
         // Find STREAMINFO from the dfLa box in the moov tree.
         var streamInfo = FindStreamInfo(data);
-
-        using var output = File.Create(outputPath);
-
         // Without STREAMINFO the file would be invalid — keep .m4a as fallback.
         if (streamInfo is not { Length: 38 }) return false;
+
+        using var output = File.Create(outputPath);
 
         // Write FLAC stream marker.
         output.Write(FlacMarker);
