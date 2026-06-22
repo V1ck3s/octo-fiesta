@@ -3,15 +3,27 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 ARG VERSION=0.0.0-dev
+# Override on the server at build time, e.g. Liara mirror when nuget.org is blocked.
+ARG NUGET_FEED=https://api.nuget.org/v3/index.json
 
 COPY octo-fiesta.sln .
 COPY octo-fiesta/octo-fiesta.csproj octo-fiesta/
 COPY octo-fiesta.Tests/octo-fiesta.Tests.csproj octo-fiesta.Tests/
 
+RUN printf '%s\n' \
+    '<?xml version="1.0" encoding="utf-8"?>' \
+    '<configuration>' \
+    '  <packageSources>' \
+    '    <clear />' \
+    "    <add key=\"feed\" value=\"${NUGET_FEED}\" />" \
+    '  </packageSources>' \
+    '</configuration>' > /tmp/nuget.config \
+    && dotnet restore --configfile /tmp/nuget.config
+
 COPY octo-fiesta/ octo-fiesta/
 COPY octo-fiesta.Tests/ octo-fiesta.Tests/
 
-RUN dotnet publish octo-fiesta/octo-fiesta.csproj -c Release -p:Version=$VERSION -o /app/publish
+RUN dotnet publish octo-fiesta/octo-fiesta.csproj -c Release -p:Version=$VERSION -o /app/publish --no-restore
 
 # Runtime stage
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
