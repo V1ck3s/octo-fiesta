@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Primp;
 
 namespace octo_fiesta.Services.SquidWTF;
 
@@ -167,10 +168,10 @@ public partial class SquidWTFCaptchaSolver
         var challengeHeaders = CreateAmazonBrowserHeaders(baseUrl);
         challengeHeaders["accept"] = "application/json, text/plain, */*";
 
-        var challengeResp = await session.Http.GetAsync($"{baseUrl}/api/captcha/challenge", challengeHeaders, ct);
+        using var challengeResp = await session.Client.GetAsync($"{baseUrl}/api/captcha/challenge", challengeHeaders);
         if (challengeResp.StatusCode == HttpStatusCode.TooManyRequests)
         {
-            var challengeError = challengeResp.Body;
+            var challengeError = challengeResp.ReadAsString();
             MarkCaptchaRateLimited();
             throw new InvalidOperationException(
                 $"Amazon captcha challenge returned 429: {challengeError}");
@@ -179,10 +180,10 @@ public partial class SquidWTFCaptchaSolver
         if (challengeResp.StatusCode != HttpStatusCode.OK)
         {
             throw new InvalidOperationException(
-                $"Amazon captcha challenge returned {(int)challengeResp.StatusCode}: {challengeResp.Body}");
+                $"Amazon captcha challenge returned {(int)challengeResp.StatusCode}: {challengeResp.ReadAsString()}");
         }
 
-        var challengeJson = challengeResp.Body.TrimEnd();
+        var challengeJson = challengeResp.ReadAsString().TrimEnd();
 
         using var challengeDoc = JsonDocument.Parse(challengeJson);
         var root = challengeDoc.RootElement;
@@ -202,14 +203,12 @@ public partial class SquidWTFCaptchaSolver
         var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64, webNonce = session.WebNonce });
 
         _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
-        var verifyResp = await session.Http.PostAsync(
+        using var verifyResp = await session.Client.PostAsync(
             $"{baseUrl}/api/captcha/verify",
             verifyBody,
-            "application/json",
-            headers: null,
-            ct);
+            "application/json");
 
-        var verifyJson = verifyResp.Body;
+        var verifyJson = verifyResp.ReadAsString();
         _logger.LogDebug("Amazon captcha verify response ({Status}): {Json}", (int)verifyResp.StatusCode, verifyJson);
 
         if (verifyResp.StatusCode == HttpStatusCode.TooManyRequests)
@@ -267,10 +266,10 @@ public partial class SquidWTFCaptchaSolver
         var token = await RefreshAmazonCaptchaTokenAsync(session, trimmed, forceRefreshToken, ct);
 
         var headers = CreateAmazonSearchHeaders(trimmed, token);
-        var amazonResp = await session.Http.PostAsync($"{trimmed}{path}", jsonBody, "application/json", headers, ct);
+        using var amazonResp = await session.Client.PostAsync($"{trimmed}{path}", jsonBody, "application/json", headers);
         ct.ThrowIfCancellationRequested();
 
-        var responseBody = amazonResp.Body;
+        var responseBody = amazonResp.ReadAsString();
         return new HttpResponseMessage(amazonResp.StatusCode)
         {
             Content = new StringContent(responseBody, Encoding.UTF8, "application/json"),
@@ -297,7 +296,7 @@ public partial class SquidWTFCaptchaSolver
 
             if (string.IsNullOrEmpty(_amazonSession.WebNonce))
             {
-                _amazonSession.WebNonce = await LoadAmazonPageSessionAsync(_amazonSession.Http, trimmed, ct);
+                _amazonSession.WebNonce = await LoadAmazonPageSessionAsync(_amazonSession.Client, trimmed, ct);
             }
 
             return _amazonSession;
@@ -327,16 +326,16 @@ public partial class SquidWTFCaptchaSolver
     }
 
     private static async Task<string> LoadAmazonPageSessionAsync(
-        SquidWTFAmazonImpersonateHttp http,
+        PrimpClient client,
         string baseUrl,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
-        var pageResponse = await http.GetAsync($"{baseUrl}/", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        using var pageResponse = await client.GetAsync($"{baseUrl}/", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }, ct);
+        });
 
         if (pageResponse.StatusCode != HttpStatusCode.OK)
         {
@@ -344,7 +343,7 @@ public partial class SquidWTFCaptchaSolver
                 $"Amazon homepage returned {(int)pageResponse.StatusCode}");
         }
 
-        var html = pageResponse.Body;
+        var html = pageResponse.ReadAsString();
 
         var match = AmazonWebNonceRegex().Match(html);
         if (!match.Success)

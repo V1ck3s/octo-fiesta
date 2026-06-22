@@ -576,7 +576,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Amazon Music API returned {StatusCode} for {Path}", response.StatusCode, path);
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning(
+                    "Amazon Music API returned {StatusCode} for {Path}: {Body}",
+                    response.StatusCode, path, body.Length > 200 ? body[..200] : body);
                 return null;
             }
 
