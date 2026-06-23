@@ -568,16 +568,33 @@ public class SquidWTFMetadataService : IMusicMetadataService
         return album;
     }
 
+    private static void AddAmazonBrowserHeaders(HttpRequestMessage req, string sessionCookie, string token)
+    {
+        req.Headers.Add("Cookie", sessionCookie);
+        req.Headers.Add(AmazonCaptchaTokenHeader, token);
+        req.Headers.Add("Origin", AmazonBaseUrl);
+        req.Headers.Add("Referer", AmazonBaseUrl + "/");
+        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+        req.Headers.Add("Accept", "*/*");
+        req.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+        req.Headers.Add("Sec-Fetch-Site", "same-origin");
+        req.Headers.Add("Sec-Fetch-Mode", "cors");
+        req.Headers.Add("Sec-Fetch-Dest", "empty");
+        req.Headers.Add("sec-ch-ua", "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Google Chrome\";v=\"137\"");
+        req.Headers.Add("sec-ch-ua-mobile", "?0");
+        req.Headers.Add("sec-ch-ua-platform", "\"Linux\"");
+    }
+
     private async Task<string?> SendAmazonPostAsync(string path, object body)
     {
         try
         {
-            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl);
+            var (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl);
             var json = JsonSerializer.Serialize(body);
 
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
             request.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            request.Headers.Add(AmazonCaptchaTokenHeader, token);
+            AddAmazonBrowserHeaders(request, sessionCookie, token);
 
             var response = await _httpClient.SendAsync(request);
 
@@ -585,10 +602,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
                 // Captcha token expired — refresh and retry once
-                token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true);
+                (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true);
                 using var retryRequest = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
                 retryRequest.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                retryRequest.Headers.Add(AmazonCaptchaTokenHeader, token);
+                AddAmazonBrowserHeaders(retryRequest, sessionCookie, token);
                 response = await _httpClient.SendAsync(retryRequest);
             }
 
