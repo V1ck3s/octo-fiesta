@@ -22,6 +22,7 @@ public class SquidWTFCaptchaSolver
 
     // Token-based captcha cache (Amazon Music uses X-Captcha-Token instead of a cookie)
     private string? _captchaToken;
+    private string? _amazonSessionCookie;   // amz_web_sess — must accompany every API request
     private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
     private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
@@ -63,26 +64,26 @@ public class SquidWTFCaptchaSolver
     }
 
     /// <summary>
-    /// Returns an X-Captcha-Token value for Amazon Music (amz.squid.wtf).
-    /// Uses /api/captcha/challenge + /api/captcha/verify → { token }.
+    /// Returns (X-Captcha-Token, amz_web_sess cookie value) for Amazon Music (amz.squid.wtf).
+    /// Both values must be sent with every API request.
     /// </summary>
-    public async Task<string> GetAmazonCaptchaTokenAsync(
+    public async Task<(string Token, string SessionCookie)> GetAmazonCaptchaTokenAsync(
         string baseUrl,
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
-        if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-            return _captchaToken;
+        if (!forceRefresh && _captchaToken != null && _amazonSessionCookie != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
+            return (_captchaToken, _amazonSessionCookie);
 
         await _tokenLock.WaitAsync(cancellationToken);
         try
         {
-            if (!forceRefresh && _captchaToken != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-                return _captchaToken;
+            if (!forceRefresh && _captchaToken != null && _amazonSessionCookie != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
+                return (_captchaToken, _amazonSessionCookie);
 
-            _captchaToken = await SolveAndVerifyAmazonAsync(baseUrl, cancellationToken);
+            (_captchaToken, _amazonSessionCookie) = await SolveAndVerifyAmazonAsync(baseUrl, cancellationToken);
             _tokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
-            return _captchaToken;
+            return (_captchaToken, _amazonSessionCookie);
         }
         finally
         {
@@ -90,10 +91,20 @@ public class SquidWTFCaptchaSolver
         }
     }
 
-    private async Task<string> SolveAndVerifyAmazonAsync(string baseUrl, CancellationToken ct)
+    private async Task<(string Token, string SessionCookie)> SolveAndVerifyAmazonAsync(string baseUrl, CancellationToken ct)
     {
-        var http = _httpClientFactory.CreateClient();
+        // Use a dedicated client with its own CookieContainer so the amz_web_sess cookie
+        // set on the page load is forwarded to /api/captcha/challenge and /api/captcha/verify.
+        var cookieContainer = new System.Net.CookieContainer();
+        using var handler = new HttpClientHandler { CookieContainer = cookieContainer };
+        using var http = new HttpClient(handler, disposeHandler: false);
+
         var trimmed = baseUrl.TrimEnd('/');
+
+        // Fetch the root page to capture amz_web_sess cookie and extract webNonce.
+        var pageHtml = await http.GetStringAsync(trimmed + "/", ct);
+        var webNonce = ExtractAmzWebNonce(pageHtml)
+            ?? throw new InvalidOperationException("Could not extract window.__AMZ_WEB.n from amz.squid.wtf page");
 
         using var challengeResp = await http.GetAsync($"{trimmed}/api/captcha/challenge", ct);
         var challengeJson = await challengeResp.Content.ReadAsStringAsync(ct);
@@ -114,7 +125,7 @@ public class SquidWTFCaptchaSolver
         var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = elapsedMs });
         var payloadJson = $"{{\"challenge\":{challengeJson.TrimEnd()},\"solution\":{solutionJson}}}";
         var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
-        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64 });
+        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64, webNonce });
 
         _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
         using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
@@ -139,11 +150,16 @@ public class SquidWTFCaptchaSolver
         var token = tokenElement.GetString()
             ?? throw new InvalidOperationException("Amazon captcha token is null");
 
+        // Extract amz_web_sess value so callers can include it in subsequent API requests.
+        var sessionCookieValue = cookieContainer
+            .GetCookies(new Uri(trimmed))["amz_web_sess"]?.Value
+            ?? throw new InvalidOperationException("amz_web_sess cookie not found after captcha verify");
+
         _logger.LogInformation(
             "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~{Minutes} min",
             elapsedMs, counter, (int)TokenValidity.TotalMinutes);
 
-        return token;
+        return (token, $"amz_web_sess={sessionCookieValue}");
     }
 
     private async Task<string> SolveAndVerifyAsync(string baseUrl, CancellationToken ct)
@@ -258,5 +274,14 @@ public class SquidWTFCaptchaSolver
 
         throw new InvalidOperationException(
             $"captcha solver exhausted {MaxSolverIterations} iterations without finding a match");
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex AmzWebNonceRegex =
+        new(@"__AMZ_WEB\s*=\s*\{""n""\s*:\s*""([^""]+)""", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string? ExtractAmzWebNonce(string html)
+    {
+        var m = AmzWebNonceRegex.Match(html);
+        return m.Success ? m.Groups[1].Value : null;
     }
 }

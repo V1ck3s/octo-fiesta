@@ -226,8 +226,8 @@ public class SquidWTFDownloadService : BaseDownloadService
         for (int attempt = 1; attempt <= maxAttempts; attempt++)
         {
             bool forceRefresh = attempt > 1;
-            var token = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: forceRefresh, cancellationToken);
-            var trackResponse = await FetchAmazonTrackAsync(trackAsin, tier, country, token, cancellationToken);
+            var (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: forceRefresh, cancellationToken);
+            var trackResponse = await FetchAmazonTrackAsync(trackAsin, tier, country, token, sessionCookie, cancellationToken);
 
             if (trackResponse == null)
             {
@@ -250,7 +250,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
             try
             {
-                var downloadStream = await GetAmazonStreamAsync(streamUrl, token, cancellationToken);
+                var downloadStream = await GetAmazonStreamAsync(streamUrl, token, sessionCookie, cancellationToken);
                 var codec = (trackResponse.Stream.Codec ?? "").ToLowerInvariant();
                 var (extension, quality) = GetAmazonExtensionAndQuality(codec, tier);
                 return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey);
@@ -265,15 +265,32 @@ public class SquidWTFDownloadService : BaseDownloadService
         throw new Exception($"Failed to download Amazon Music track {trackAsin} after {maxAttempts} attempts");
     }
 
+    private static void AddAmazonBrowserHeaders(HttpRequestMessage req, string sessionCookie, string token)
+    {
+        req.Headers.Add("Cookie", sessionCookie);
+        req.Headers.Add(AmazonCaptchaTokenHeader, token);
+        req.Headers.Add("Origin", AmazonBaseUrl);
+        req.Headers.Add("Referer", AmazonBaseUrl + "/");
+        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+        req.Headers.Add("Accept", "*/*");
+        req.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+        req.Headers.Add("Sec-Fetch-Site", "same-origin");
+        req.Headers.Add("Sec-Fetch-Mode", "cors");
+        req.Headers.Add("Sec-Fetch-Dest", "empty");
+        req.Headers.Add("sec-ch-ua", "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Google Chrome\";v=\"137\"");
+        req.Headers.Add("sec-ch-ua-mobile", "?0");
+        req.Headers.Add("sec-ch-ua-platform", "\"Linux\"");
+    }
+
     private async Task<AmazonMusicTrackResponse?> FetchAmazonTrackAsync(
-        string asin, string tier, string country, string token, CancellationToken cancellationToken)
+        string asin, string tier, string country, string token, string sessionCookie, CancellationToken cancellationToken)
     {
         try
         {
             var body = System.Text.Json.JsonSerializer.Serialize(new { asin, tier, country });
             using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}/api/track");
             request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-            request.Headers.Add(AmazonCaptchaTokenHeader, token);
+            AddAmazonBrowserHeaders(request, sessionCookie, token);
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -295,12 +312,10 @@ public class SquidWTFDownloadService : BaseDownloadService
         }
     }
 
-    private async Task<Stream> GetAmazonStreamAsync(string url, string token, CancellationToken cancellationToken)
+    private async Task<Stream> GetAmazonStreamAsync(string url, string token, string sessionCookie, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add(AmazonCaptchaTokenHeader, token);
-        request.Headers.Add("User-Agent", "Mozilla/5.0");
-        request.Headers.Add("Accept", "*/*");
+        AddAmazonBrowserHeaders(request, sessionCookie, token);
 
         var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
@@ -308,11 +323,9 @@ public class SquidWTFDownloadService : BaseDownloadService
             response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
         {
             // One more attempt with a fresh token
-            var freshToken = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true, cancellationToken);
+            var (freshToken, freshCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true, cancellationToken);
             using var retryRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            retryRequest.Headers.Add(AmazonCaptchaTokenHeader, freshToken);
-            retryRequest.Headers.Add("User-Agent", "Mozilla/5.0");
-            retryRequest.Headers.Add("Accept", "*/*");
+            AddAmazonBrowserHeaders(retryRequest, freshCookie, freshToken);
             response = await _httpClient.SendAsync(retryRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         }
 

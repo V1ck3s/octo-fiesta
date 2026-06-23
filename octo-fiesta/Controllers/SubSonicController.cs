@@ -793,8 +793,15 @@ public class SubsonicController : ControllerBase
                 {
                     try
                     {
-                        var token = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
+                        var (token, sessionCookie) = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
                         req.Headers.Add("X-Captcha-Token", token);
+                        req.Headers.Add("Cookie", sessionCookie);
+                        req.Headers.Add("Origin", "https://amz.squid.wtf");
+                        req.Headers.Add("Referer", "https://amz.squid.wtf/");
+                        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
+                        req.Headers.Add("Sec-Fetch-Site", "same-origin");
+                        req.Headers.Add("Sec-Fetch-Mode", "cors");
+                        req.Headers.Add("Sec-Fetch-Dest", "empty");
                     }
                     catch (Exception ex)
                     {
