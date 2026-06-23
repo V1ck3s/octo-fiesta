@@ -24,7 +24,7 @@ public partial class SquidWTFCaptchaSolver
     // Token-based captcha cache (Amazon Music uses X-Captcha-Token instead of a cookie)
     private string? _captchaToken;
     private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
-    private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
+    private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(12);
     private static readonly TimeSpan CaptchaRateLimitCooldown = TimeSpan.FromMinutes(5);
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
     private readonly SemaphoreSlim _amazonSessionLock = new(1, 1);
@@ -32,6 +32,7 @@ public partial class SquidWTFCaptchaSolver
     private SquidWTFAmazonSession? _amazonSession;
     private string? _amazonSessionBaseUrl;
     private DateTimeOffset _captchaRateLimitedUntil = DateTimeOffset.MinValue;
+    private Task<string>? _inflightCaptchaRefresh;
 
     private const string AmazonCaptchaTokenHeader = "X-Captcha-Token";
 
@@ -170,6 +171,14 @@ public partial class SquidWTFCaptchaSolver
                 $"Amazon captcha is rate-limited until {_captchaRateLimitedUntil:u}. Please wait before retrying.");
         }
 
+        if (!forceRefresh)
+        {
+            var existingRefresh = _inflightCaptchaRefresh;
+            if (existingRefresh != null)
+                return await existingRefresh;
+        }
+
+        Task<string> refreshTask;
         await _tokenLock.WaitAsync(ct);
         try
         {
@@ -194,21 +203,71 @@ public partial class SquidWTFCaptchaSolver
                 _tokenExpiresAt = DateTimeOffset.MinValue;
             }
 
-            return await SolveAndVerifyAmazonCaptchaAsync(session, baseUrl, ct);
+            refreshTask = _inflightCaptchaRefresh ??= RefreshAmazonCaptchaTokenLockedAsync(session, baseUrl, ct);
         }
         finally
         {
             _tokenLock.Release();
         }
+
+        try
+        {
+            return await refreshTask;
+        }
+        finally
+        {
+            if (refreshTask.IsCompleted)
+            {
+                await _tokenLock.WaitAsync(CancellationToken.None);
+                try
+                {
+                    if (ReferenceEquals(_inflightCaptchaRefresh, refreshTask))
+                        _inflightCaptchaRefresh = null;
+                }
+                finally
+                {
+                    _tokenLock.Release();
+                }
+            }
+        }
     }
+
+    private Task<string> RefreshAmazonCaptchaTokenLockedAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        CancellationToken ct) =>
+        SolveAndVerifyAmazonCaptchaAsync(session, baseUrl, ct);
 
     private async Task<string> SolveAndVerifyAmazonCaptchaAsync(
         SquidWTFAmazonSession session,
         string baseUrl,
         CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await EnsureFreshAmazonPageSessionAsync(session, baseUrl, ct);
 
+            var token = await SolveAndVerifyAmazonCaptchaOnceAsync(session, baseUrl, ct);
+            if (token != null)
+                return token;
+
+            if (attempt == 0)
+            {
+                _logger.LogWarning("Amazon page session rejected captcha verify; reloading page session and retrying once");
+                await ForceReloadAmazonPageSessionAsync(session, baseUrl, ct);
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Amazon captcha verify failed after reloading the page session");
+    }
+
+    private async Task<string?> SolveAndVerifyAmazonCaptchaOnceAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        CancellationToken ct)
+    {
         var challengeHeaders = SquidWTFAmazonBrowserHeaders.CreateChallengeHeaders();
 
         var challengeResp = await session.Http.GetAsync($"{baseUrl}/api/captcha/challenge", challengeHeaders, ct);
@@ -239,7 +298,6 @@ public partial class SquidWTFCaptchaSolver
 
         var (counter, derivedKeyHex, elapsedMs) = SolveChallenge(parameters, ct);
 
-        // Match browser/Python payload: time as float ms, challenge JSON embedded verbatim.
         var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = (double)elapsedMs });
         var payloadJson = $"{{\"challenge\":{challengeJson},\"solution\":{solutionJson}}}";
         var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
@@ -250,7 +308,7 @@ public partial class SquidWTFCaptchaSolver
             $"{baseUrl}/api/captcha/verify",
             verifyBody,
             "application/json",
-            SquidWTFAmazonBrowserHeaders.CreateVerifyHeaders(),
+            SquidWTFAmazonBrowserHeaders.CreateVerifyHeaders(baseUrl),
             ct);
 
         var verifyJson = verifyResp.Body;
@@ -261,6 +319,12 @@ public partial class SquidWTFCaptchaSolver
             MarkCaptchaRateLimited();
             throw new InvalidOperationException(
                 $"Amazon captcha verify returned 429: {verifyJson}");
+        }
+
+        if (verifyResp.StatusCode == HttpStatusCode.Forbidden &&
+            IsExpiredPageSessionError(verifyJson))
+        {
+            return null;
         }
 
         if (verifyResp.StatusCode != HttpStatusCode.OK)
@@ -289,6 +353,36 @@ public partial class SquidWTFCaptchaSolver
             elapsedMs, counter, (int)TokenValidity.TotalMinutes);
 
         return token;
+    }
+
+    private static bool IsExpiredPageSessionError(string responseBody) =>
+        responseBody.Contains("page session", StringComparison.OrdinalIgnoreCase) ||
+        responseBody.Contains("Invalid or expired", StringComparison.OrdinalIgnoreCase);
+
+    private async Task EnsureFreshAmazonPageSessionAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        CancellationToken ct)
+    {
+        if (!session.IsPageSessionStale)
+            return;
+
+        await ForceReloadAmazonPageSessionAsync(session, baseUrl, ct);
+    }
+
+    private async Task ForceReloadAmazonPageSessionAsync(
+        SquidWTFAmazonSession session,
+        string baseUrl,
+        CancellationToken ct)
+    {
+        session.WebNonce = await LoadAmazonPageSessionAsync(session.Http, baseUrl, ct);
+        session.PageSessionLoadedAt = DateTimeOffset.UtcNow;
+        session.CaptchaToken = null;
+        session.CaptchaTokenExpiresAt = DateTimeOffset.MinValue;
+        _captchaToken = null;
+        _tokenExpiresAt = DateTimeOffset.MinValue;
+
+        _logger.LogInformation("Amazon page session reloaded (fresh webNonce + amz_web_sess cookie)");
     }
 
     private void MarkCaptchaRateLimited()
@@ -341,7 +435,11 @@ public partial class SquidWTFCaptchaSolver
 
             if (string.IsNullOrEmpty(_amazonSession.WebNonce))
             {
-                _amazonSession.WebNonce = await LoadAmazonPageSessionAsync(_amazonSession.Http, trimmed, ct);
+                await ForceReloadAmazonPageSessionAsync(_amazonSession, trimmed, ct);
+            }
+            else if (_amazonSession.PageSessionLoadedAt == DateTimeOffset.MinValue)
+            {
+                _amazonSession.PageSessionLoadedAt = DateTimeOffset.UtcNow;
             }
 
             return _amazonSession;

@@ -35,15 +35,23 @@ internal static class SquidWTFAmazonBrowserHeaders
             ["accept-language"] = "en-US,en;q=0.9",
         };
 
-    public static Dictionary<string, string> CreateVerifyHeaders() =>
-        new(StringComparer.OrdinalIgnoreCase)
+    public static Dictionary<string, string> CreateVerifyHeaders(string baseUrl)
+    {
+        var trimmed = baseUrl.TrimEnd('/');
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["user-agent"] = UserAgent,
             ["sec-ch-ua"] = SecChUa,
             ["sec-ch-ua-mobile"] = "?0",
             ["sec-ch-ua-platform"] = "\"macOS\"",
             ["accept-language"] = "en-US,en;q=0.9",
+            ["origin"] = trimmed,
+            ["referer"] = $"{trimmed}/",
+            ["sec-fetch-site"] = "same-origin",
+            ["sec-fetch-mode"] = "cors",
+            ["sec-fetch-dest"] = "empty",
         };
+    }
 
     public static Dictionary<string, string> CreateApiPostHeaders(string baseUrl, string captchaToken) =>
         new(StringComparer.OrdinalIgnoreCase)
