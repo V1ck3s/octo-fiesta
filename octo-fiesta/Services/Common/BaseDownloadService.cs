@@ -963,6 +963,18 @@ public abstract class BaseDownloadService : IDownloadService
                     continue;
                 }
 
+                // Try to permanentize cached track BEFORE checking for completed downloads
+                // otherwise permanentization would be skipped as we already have a completed cache download
+                if (SubsonicSettings.StorageMode == StorageMode.Cache && forcePermanent)
+                {
+                    var permanentized = await PermanentizeCachedSongAsync(ProviderName, track.ExternalId!, cancellationToken);
+                    if (permanentized)
+                    {
+                        Logger.LogInformation("Permanentized cached track '{Title}' from album '{Album}'", track.Title, album.Title);
+                        continue;
+                    }
+                }
+
                 // Check if download is already in progress or recently completed
                 var songId = $"ext-{ProviderName}-{track.ExternalId}";
                 if (ActiveDownloads.TryGetValue(songId, out var activeDownload))
