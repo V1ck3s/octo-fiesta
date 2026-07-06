@@ -639,6 +639,12 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
 
     public async Task<bool> TriggerLibraryScanAsync()
     {
+        if (_subsonicSettings.DisableLibraryScan)
+        {
+            _logger.LogDebug("Library scan disabled (DisableLibraryScan=true) - skipping scan trigger");
+            return false;
+        }
+
         var requestCredentials = await ResolveAdminCapableCredentialsAsync();
         
         if (requestCredentials == null)

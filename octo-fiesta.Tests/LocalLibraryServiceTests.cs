@@ -950,6 +950,29 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.Equal(1, getUserCalls);
     }
 
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WhenDisabled_ReturnsFalseAndSendsNoRequest()
+    {
+        // Scenario: DisableLibraryScan=true
+        var service = BuildService(adminUsername: "configured-admin", adminPassword: "secret", disableLibraryScan: true);
+        service.SetSubsonicCredentials(new Dictionary<string, string>
+        {
+            ["u"] = "request-user",
+            ["t"] = "user-token",
+            ["s"] = "user-salt",
+            ["v"] = "1.16.1",
+            ["c"] = "aonsoku"
+        });
+
+        var result = await service.TriggerLibraryScanAsync();
+
+        Assert.False(result);
+        _mockHandler.Protected()
+            .Verify("SendAsync", Times.Never(),
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>());
+    }
+
     // --- Helpers ---
 
     private void SetupCredentials()
@@ -1008,7 +1031,8 @@ public class LocalLibraryServiceTests : IDisposable
 
     private LocalLibraryService BuildService(
         string? adminUsername = null,
-        string? adminPassword = null
+        string? adminPassword = null,
+        bool disableLibraryScan = false
         )
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -1021,7 +1045,8 @@ public class LocalLibraryServiceTests : IDisposable
         {
             Url = "https://localhost:4533",
             AdminUsername = adminUsername,
-            AdminPassword = adminPassword
+            AdminPassword = adminPassword,
+            DisableLibraryScan = disableLibraryScan
         });
 
         var mockLogger = new Mock<ILogger<LocalLibraryService>>();

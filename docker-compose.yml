@@ -35,6 +35,9 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # Disable triggering a library scan after a download completes (default: false)
+      # Useful if your Subsonic server or an external automation already picks up new files
+      - Subsonic__DisableLibraryScan=${DISABLE_LIBRARY_SCAN:-false}
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
       # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
       - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
