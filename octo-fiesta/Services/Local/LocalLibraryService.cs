@@ -73,13 +73,158 @@ public class LocalLibraryService : ILocalLibraryService
     {
         var mappings = await LoadMappingsAsync();
         var key = $"{externalProvider}:{externalId}";
-        
+
         if (mappings.TryGetValue(key, out var mapping) && File.Exists(mapping.LocalPath))
         {
             return mapping.LocalPath;
         }
-        
-        return null;
+
+        // Fallback: the recording may already sit in the Subsonic library under a
+        // different release or a path an external tool moved it to (our mapping only
+        // knows tracks WE downloaded). Resolve it against the live library so we can
+        // reuse the existing file instead of re-downloading a duplicate.
+        return await ResolveLibraryFilePathAsync(externalProvider, externalId);
+    }
+
+    /// <summary>
+    /// Finds an owned copy of an external song in the Subsonic library and returns its
+    /// absolute file path inside our download directory, or null if not present.
+    /// Uses the same title/artist/album matching as <see cref="GetLocalIdForExternalSongAsync"/>
+    /// but reads the matched song's <c>path</c> and verifies the file exists on disk.
+    /// </summary>
+    private async Task<string?> ResolveLibraryFilePathAsync(string externalProvider, string externalId)
+    {
+        try
+        {
+            var mappings = await LoadMappingsAsync();
+            var key = $"{externalProvider}:{externalId}";
+            mappings.TryGetValue(key, out var mapping);
+
+            string? title;
+            string? artist;
+            string? album;
+
+            if (mapping != null)
+            {
+                title = mapping.Title;
+                artist = mapping.Artist;
+                album = mapping.Album;
+            }
+            else
+            {
+                var externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
+                if (externalSong == null)
+                {
+                    return null;
+                }
+
+                title = externalSong.Title;
+                artist = externalSong.Artist;
+                album = externalSong.Album;
+            }
+
+            var queryText = string.Join(" ", new[] { artist, title });
+            if (string.IsNullOrWhiteSpace(queryText))
+            {
+                return null;
+            }
+
+            var authQuery = BuildAuthQuery(_subsonicUserCredentials);
+            var searchUrl = $"{_subsonicSettings.Url}/rest/search3?f=json&songCount=10&albumCount=0&artistCount=0&query={Uri.EscapeDataString(queryText)}{authQuery}";
+
+            var response = await _httpClient.GetAsync(searchUrl);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) ||
+                !subsonicResponse.TryGetProperty("searchResult3", out var searchResult) ||
+                !searchResult.TryGetProperty("song", out var songNode))
+            {
+                return null;
+            }
+
+            var titleKey = StringNormalizer.CreateComparisonKey(title);
+            var artistKey = StringNormalizer.CreateComparisonKey(artist);
+            var albumKey = StringNormalizer.CreateComparisonKey(album);
+
+            foreach (var songElement in EnumerateSongs(songNode))
+            {
+                var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
+                var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
+                var candidateAlbumKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("album", out var albumEl) ? albumEl.GetString() : null);
+
+                var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
+                var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
+                var albumMatches = !string.IsNullOrEmpty(albumKey) && albumKey == candidateAlbumKey;
+
+                if (!((titleMatches && artistMatches) || (titleMatches && albumMatches)))
+                {
+                    continue;
+                }
+
+                // A match with no usable path can't be verified on disk; keep looking -
+                // Navidrome may also return a stale "ghost" entry (DB row, missing file)
+                // alongside a real one, so we must not stop at the first candidate.
+                if (!songElement.TryGetProperty("path", out var pathEl))
+                {
+                    continue;
+                }
+
+                var relativePath = pathEl.GetString();
+                if (string.IsNullOrEmpty(relativePath))
+                {
+                    continue;
+                }
+
+                // Navidrome's reported path is relative to the music folder (our download
+                // directory) but tag-derived, so it can diverge from the file Octo actually
+                // wrote: album/artist tags may contain characters Octo sanitizes on disk
+                // (e.g. ':' -> '_'), and the name can carry a synthetic disc prefix
+                // ("01-05 - X") the real file lacks ("05 - X"). Rebuild the on-disk path
+                // segment by segment with Octo's own sanitizer, trying the file name both
+                // as-is and with a leading "<disc>-" stripped.
+                var parts = relativePath.Split('/');
+                if (parts.Length == 0)
+                {
+                    continue;
+                }
+
+                var directory = _downloadDirectory;
+                for (var p = 0; p < parts.Length - 1; p++)
+                {
+                    directory = Path.Combine(directory, PathHelper.SanitizeFolderName(parts[p]));
+                }
+
+                var rawName = parts[^1];
+                var extension = Path.GetExtension(rawName);
+                var stem = Path.GetFileNameWithoutExtension(rawName);
+                var discStripped = System.Text.RegularExpressions.Regex.Replace(stem, @"^\d+-", "");
+
+                foreach (var candidateStem in new[] { stem, discStripped })
+                {
+                    var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
+                    if (File.Exists(candidatePath))
+                    {
+                        return candidatePath;
+                    }
+                }
+
+                // This candidate matched by metadata but its file is gone (ghost);
+                // continue scanning the remaining search hits for a real copy.
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not resolve local library file path for {Provider}:{ExternalId}", externalProvider, externalId);
+            return null;
+        }
     }
 
 public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)

@@ -515,6 +515,23 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
 
+            // Not tracked by our own download mapping, but the recording may already exist
+            // in the Subsonic library (a different release, or moved there by an external
+            // library manager). Reuse that file instead of downloading a duplicate.
+            // Skipped in cache mode and during a quality upgrade (which re-downloads on purpose).
+            if (!isCache && ourDownloadInfo.BackupPath == null)
+            {
+                var ownedPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
+                if (!string.IsNullOrEmpty(ownedPath) && IOFile.Exists(ownedPath))
+                {
+                    Logger.LogInformation("Song already in local library, skipping download: {Path}", ownedPath);
+                    ourDownloadInfo.Status = DownloadStatus.Completed;
+                    ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                    ourDownloadInfo.LocalPath = ownedPath;
+                    return ownedPath;
+                }
+            }
+
             Song song = await GetSongMetadataForTrackAsync(externalProvider, externalId);
             var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
             string localPath;
@@ -959,7 +976,7 @@ public abstract class BaseDownloadService : IDownloadService
                 var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(ProviderName, track.ExternalId!);
                 if (existingPath != null && IOFile.Exists(existingPath))
                 {
-                    Logger.LogDebug("Track {TrackId} already downloaded, skipping", track.ExternalId);
+                    Logger.LogDebug("Track {TrackId} already in library, skipping", track.ExternalId);
                     continue;
                 }
 
