@@ -131,8 +131,13 @@ public class DeezerDownloadService : BaseDownloadService
 
         // Decrypt
         // Streams are disposed at the calling side
+        // IMPORTANT: decrypt with downloadInfo.TrackId, not the original trackId.
+        // When a fallback/alternative track is used, its media is encrypted with the
+        // ALTERNATIVE id's Blowfish key; decrypting with the original id yields garbage
+        // (corrupt FLAC). GetTrackDownloadInfoAsync already resolves TrackId to the
+        // actual (alternative) id used for the media.
         var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
-        var downloadStream = new DeezerDecryptedStream(responseStream, trackId);
+        var downloadStream = new DeezerDecryptedStream(responseStream, downloadInfo.TrackId);
 
         return new DownloadResult(downloadStream, extension, downloadedQuality);
     }
