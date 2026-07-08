@@ -157,19 +157,17 @@ public class SubsonicController : ControllerBase
             return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
-        // If this external song is already in the local library, stream the owned
-        // copy from the Subsonic server instead of re-downloading from the provider.
-        // The mapping-based check in DownloadAndStreamAsync only knows Octo's own
-        // download path, which goes stale once an external tool (e.g. beets) moves
-        // the file into the managed library -> Octo would otherwise re-download an
-        // already-owned song on every play. GetLocalIdForExternalSongAsync resolves
-        // via a Subsonic search (title+artist / title+album), so it finds the moved
-        // or cross-release copy and we proxy that stream locally.
-        var localSongId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider!, externalId!);
-        if (!string.IsNullOrEmpty(localSongId))
+        // Serve an already-owned copy from the library instead of re-downloading.
+        // Skipped when AutoUpgradeQuality is on so the download path can still
+        // upgrade a lower-quality local copy on play.
+        if (!_subsonicSettings.AutoUpgradeQuality)
         {
-            parameters["id"] = localSongId;
-            return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
+            var localSongId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider!, externalId!);
+            if (!string.IsNullOrEmpty(localSongId))
+            {
+                parameters["id"] = localSongId;
+                return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
+            }
         }
 
         // Otherwise download from the provider and stream (quality upgrade logic applies)
