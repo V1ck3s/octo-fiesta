@@ -79,31 +79,55 @@ public class LocalLibraryService : ILocalLibraryService
             return mapping.LocalPath;
         }
 
-        // Fallback: the recording may already sit in the Subsonic library under a
-        // different release or a path an external tool moved it to (our mapping only
-        // knows tracks WE downloaded). Resolve it against the live library so we can
-        // reuse the existing file instead of re-downloading a duplicate.
-        return await ResolveLibraryFilePathAsync(externalProvider, externalId);
+        return null;
     }
 
     /// <summary>
-    /// Finds an owned copy of an external song in the Subsonic library and returns its
-    /// absolute file path inside our download directory, or null if not present.
-    /// Uses the same title/artist/album matching as <see cref="GetLocalIdForExternalSongAsync"/>
-    /// but reads the matched song's <c>path</c> and verifies the file exists on disk.
+    /// Resolves the on-disk path of an owned copy of an external song for the download path:
+    /// our own download mapping first, then a live library search (a different release, or a
+    /// file an external tool moved into the managed library). This hits the network (search3),
+    /// so it is intentionally separate from <see cref="GetLocalPathForExternalSongAsync"/>,
+    /// which many per-track callers (playlist sync, album skip-loop) invoke.
     /// </summary>
-    private async Task<string?> ResolveLibraryFilePathAsync(string externalProvider, string externalId)
+    public async Task<string?> GetOwnedLibraryPathAsync(string externalProvider, string externalId)
     {
+        var mapped = await GetLocalPathForExternalSongAsync(externalProvider, externalId);
+        if (mapped != null)
+        {
+            return mapped;
+        }
+
+        foreach (var songElement in await FindLibraryMatchesAsync(externalProvider, externalId))
+        {
+            var path = ResolveMatchedSongFilePath(songElement);
+            if (path != null)
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Searches the live Subsonic library for an external song and returns the song elements
+    /// that match by title+artist or title+album, in Subsonic's result order. Shared by the
+    /// id resolver (<see cref="GetLocalIdForExternalSongAsync"/>) and the download-path file
+    /// resolver (<see cref="GetOwnedLibraryPathAsync"/>). Returns an empty list on any failure.
+    /// Elements are cloned so they remain valid after the backing JsonDocument is disposed.
+    /// </summary>
+    private async Task<List<JsonElement>> FindLibraryMatchesAsync(string externalProvider, string externalId)
+    {
+        var matches = new List<JsonElement>();
         try
         {
+            // Prefer our own mapping's tags (no extra network); otherwise ask the provider.
             var mappings = await LoadMappingsAsync();
-            var key = $"{externalProvider}:{externalId}";
-            mappings.TryGetValue(key, out var mapping);
+            mappings.TryGetValue($"{externalProvider}:{externalId}", out var mapping);
 
             string? title;
             string? artist;
             string? album;
-
             if (mapping != null)
             {
                 title = mapping.Title;
@@ -115,7 +139,7 @@ public class LocalLibraryService : ILocalLibraryService
                 var externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
                 if (externalSong == null)
                 {
-                    return null;
+                    return matches;
                 }
 
                 title = externalSong.Title;
@@ -126,7 +150,7 @@ public class LocalLibraryService : ILocalLibraryService
             var queryText = string.Join(" ", new[] { artist, title });
             if (string.IsNullOrWhiteSpace(queryText))
             {
-                return null;
+                return matches;
             }
 
             var authQuery = BuildAuthQuery(_subsonicUserCredentials);
@@ -135,7 +159,9 @@ public class LocalLibraryService : ILocalLibraryService
             var response = await _httpClient.GetAsync(searchUrl);
             if (!response.IsSuccessStatusCode)
             {
-                return null;
+                _logger.LogDebug("Library search for {Provider}:{ExternalId} returned {StatusCode}",
+                    externalProvider, externalId, response.StatusCode);
+                return matches;
             }
 
             var content = await response.Content.ReadAsStringAsync();
@@ -145,7 +171,7 @@ public class LocalLibraryService : ILocalLibraryService
                 !subsonicResponse.TryGetProperty("searchResult3", out var searchResult) ||
                 !searchResult.TryGetProperty("song", out var songNode))
             {
-                return null;
+                return matches;
             }
 
             var titleKey = StringNormalizer.CreateComparisonKey(title);
@@ -162,69 +188,68 @@ public class LocalLibraryService : ILocalLibraryService
                 var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
                 var albumMatches = !string.IsNullOrEmpty(albumKey) && albumKey == candidateAlbumKey;
 
-                if (!((titleMatches && artistMatches) || (titleMatches && albumMatches)))
+                if ((titleMatches && artistMatches) || (titleMatches && albumMatches))
                 {
-                    continue;
+                    matches.Add(songElement.Clone());
                 }
-
-                // A match with no usable path can't be verified on disk; keep looking -
-                // Navidrome may also return a stale "ghost" entry (DB row, missing file)
-                // alongside a real one, so we must not stop at the first candidate.
-                if (!songElement.TryGetProperty("path", out var pathEl))
-                {
-                    continue;
-                }
-
-                var relativePath = pathEl.GetString();
-                if (string.IsNullOrEmpty(relativePath))
-                {
-                    continue;
-                }
-
-                // Navidrome's reported path is relative to the music folder (our download
-                // directory) but tag-derived, so it can diverge from the file Octo actually
-                // wrote: album/artist tags may contain characters Octo sanitizes on disk
-                // (e.g. ':' -> '_'), and the name can carry a synthetic disc prefix
-                // ("01-05 - X") the real file lacks ("05 - X"). Rebuild the on-disk path
-                // segment by segment with Octo's own sanitizer, trying the file name both
-                // as-is and with a leading "<disc>-" stripped.
-                var parts = relativePath.Split('/');
-                if (parts.Length == 0)
-                {
-                    continue;
-                }
-
-                var directory = _downloadDirectory;
-                for (var p = 0; p < parts.Length - 1; p++)
-                {
-                    directory = Path.Combine(directory, PathHelper.SanitizeFolderName(parts[p]));
-                }
-
-                var rawName = parts[^1];
-                var extension = Path.GetExtension(rawName);
-                var stem = Path.GetFileNameWithoutExtension(rawName);
-                var discStripped = System.Text.RegularExpressions.Regex.Replace(stem, @"^\d+-", "");
-
-                foreach (var candidateStem in new[] { stem, discStripped })
-                {
-                    var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
-                    if (File.Exists(candidatePath))
-                    {
-                        return candidatePath;
-                    }
-                }
-
-                // This candidate matched by metadata but its file is gone (ghost);
-                // continue scanning the remaining search hits for a real copy.
             }
-
-            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not resolve local library file path for {Provider}:{ExternalId}", externalProvider, externalId);
+            _logger.LogDebug(ex, "Library search failed for {Provider}:{ExternalId}", externalProvider, externalId);
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Translates a Subsonic search hit's (tag-derived) path into the real on-disk path inside
+    /// our download directory, or null if the file isn't there (e.g. a stale "ghost" entry).
+    /// Navidrome's reported path can diverge from the file Octo actually wrote: tags may contain
+    /// characters Octo sanitizes on disk (e.g. ':' -> '_'), and the name can carry a synthetic
+    /// disc prefix ("01-05 - X") the real file lacks ("05 - X"). Rebuild segment by segment with
+    /// Octo's own sanitizer, trying the file name both as-is and with a leading "&lt;disc&gt;-" stripped.
+    /// </summary>
+    private string? ResolveMatchedSongFilePath(JsonElement songElement)
+    {
+        if (!songElement.TryGetProperty("path", out var pathEl))
+        {
             return null;
         }
+
+        var relativePath = pathEl.GetString();
+        if (string.IsNullOrEmpty(relativePath))
+        {
+            return null;
+        }
+
+        var parts = relativePath.Split('/');
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        var directory = _downloadDirectory;
+        for (var p = 0; p < parts.Length - 1; p++)
+        {
+            directory = Path.Combine(directory, PathHelper.SanitizeFolderName(parts[p]));
+        }
+
+        var rawName = parts[^1];
+        var extension = Path.GetExtension(rawName);
+        var stem = Path.GetFileNameWithoutExtension(rawName);
+        var discStripped = System.Text.RegularExpressions.Regex.Replace(stem, @"^\d+-", "");
+
+        foreach (var candidateStem in new[] { stem, discStripped })
+        {
+            var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
+            if (File.Exists(candidatePath))
+            {
+                return candidatePath;
+            }
+        }
+
+        return null;
     }
 
 public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)
@@ -288,119 +313,43 @@ public async Task RegisterDownloadedSongAsync(Song song, string localPath, strin
             return mapping.LocalSubsonicId;
         }
 
-        try
+        string? matchedId = null;
+        foreach (var songElement in await FindLibraryMatchesAsync(externalProvider, externalId))
         {
-            string? title;
-            string? artist;
-            string? album;
-
-            if (mapping != null)
+            var candidateId = songElement.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+            if (!string.IsNullOrEmpty(candidateId))
             {
-                title = mapping.Title;
-                artist = mapping.Artist;
-                album = mapping.Album;
+                matchedId = candidateId;
+                break;
             }
-            else
-            {
-                var externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
-                if (externalSong == null)
-                {
-                    return null;
-                }
-
-                title = externalSong.Title;
-                artist = externalSong.Artist;
-                album = externalSong.Album;
-            }
-
-            var queryText = string.Join(" ", new[] { artist, title });
-            if (string.IsNullOrWhiteSpace(queryText))
-            {
-                return null;
-            }
-
-            var authQuery = BuildAuthQuery(_subsonicUserCredentials);
-            var searchUrl = $"{_subsonicSettings.Url}/rest/search3?f=json&songCount=10&albumCount=0&artistCount=0&query={Uri.EscapeDataString(queryText)}{authQuery}";
-
-            var response = await _httpClient.GetAsync(searchUrl);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogDebug("Could not resolve local Subsonic ID for {Provider}:{ExternalId}. search3 returned {StatusCode}",
-                    externalProvider, externalId, response.StatusCode);
-                return null;
-            }
-
-            var content = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(content);
-
-            if (!doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) ||
-                !subsonicResponse.TryGetProperty("searchResult3", out var searchResult) ||
-                !searchResult.TryGetProperty("song", out var songNode))
-            {
-                return null;
-            }
-
-            var titleKey = StringNormalizer.CreateComparisonKey(title);
-            var artistKey = StringNormalizer.CreateComparisonKey(artist);
-            var albumKey = StringNormalizer.CreateComparisonKey(album);
-
-            string? matchedId = null;
-
-            foreach (var songElement in EnumerateSongs(songNode))
-            {
-                var candidateId = songElement.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
-                if (string.IsNullOrEmpty(candidateId))
-                {
-                    continue;
-                }
-
-                var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
-                var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
-                var candidateAlbumKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("album", out var albumEl) ? albumEl.GetString() : null);
-
-                var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
-                var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
-                var albumMatches = !string.IsNullOrEmpty(albumKey) && albumKey == candidateAlbumKey;
-
-                if ((titleMatches && artistMatches) || (titleMatches && albumMatches))
-                {
-                    matchedId = candidateId;
-                    break;
-                }
-            }
-
-            if (string.IsNullOrEmpty(matchedId))
-            {
-                return null;
-            }
-
-            if (mapping != null)
-            {
-                await _lock.WaitAsync();
-                try
-                {
-                    if (mappings.TryGetValue(key, out var mappingToUpdate))
-                    {
-                        mappingToUpdate.LocalSubsonicId = matchedId;
-                        await SaveMappingsAsync(mappings);
-                    }
-                }
-                finally
-                {
-                    _lock.Release();
-                }
-            }
-
-            _logger.LogInformation("Resolved local Subsonic ID {LocalId} for external song {Provider}:{ExternalId}",
-                matchedId, externalProvider, externalId);
-            return matchedId;
         }
-        catch (Exception ex)
+
+        if (string.IsNullOrEmpty(matchedId))
         {
-            _logger.LogWarning(ex, "Failed to resolve local Subsonic ID for external song {Provider}:{ExternalId}",
-                externalProvider, externalId);
             return null;
         }
+
+        // Cache the resolved id on our mapping so we don't search again next time.
+        if (mapping != null)
+        {
+            await _lock.WaitAsync();
+            try
+            {
+                if (mappings.TryGetValue(key, out var mappingToUpdate))
+                {
+                    mappingToUpdate.LocalSubsonicId = matchedId;
+                    await SaveMappingsAsync(mappings);
+                }
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        _logger.LogInformation("Resolved local Subsonic ID {LocalId} for external song {Provider}:{ExternalId}",
+            matchedId, externalProvider, externalId);
+        return matchedId;
     }
 
     public async Task<string?> WaitForLocalIdAfterScanAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)

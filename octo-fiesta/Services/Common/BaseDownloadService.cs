@@ -521,7 +521,7 @@ public abstract class BaseDownloadService : IDownloadService
             // Skipped in cache mode and during a quality upgrade (which re-downloads on purpose).
             if (!isCache && ourDownloadInfo.BackupPath == null)
             {
-                var ownedPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(externalProvider, externalId);
+                var ownedPath = await LocalLibraryService.GetOwnedLibraryPathAsync(externalProvider, externalId);
                 if (!string.IsNullOrEmpty(ownedPath) && IOFile.Exists(ownedPath))
                 {
                     Logger.LogInformation("Song already in local library, skipping download: {Path}", ownedPath);
