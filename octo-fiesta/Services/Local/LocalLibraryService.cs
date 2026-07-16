@@ -127,12 +127,10 @@ public class LocalLibraryService : ILocalLibraryService
 
             string? title;
             string? artist;
-            string? album;
             if (mapping != null)
             {
                 title = mapping.Title;
                 artist = mapping.Artist;
-                album = mapping.Album;
             }
             else
             {
@@ -144,7 +142,6 @@ public class LocalLibraryService : ILocalLibraryService
 
                 title = externalSong.Title;
                 artist = externalSong.Artist;
-                album = externalSong.Album;
             }
 
             var queryText = string.Join(" ", new[] { artist, title });
@@ -176,19 +173,19 @@ public class LocalLibraryService : ILocalLibraryService
 
             var titleKey = StringNormalizer.CreateComparisonKey(title);
             var artistKey = StringNormalizer.CreateComparisonKey(artist);
-            var albumKey = StringNormalizer.CreateComparisonKey(album);
 
             foreach (var songElement in EnumerateSongs(songNode))
             {
                 var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
                 var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
-                var candidateAlbumKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("album", out var albumEl) ? albumEl.GetString() : null);
 
                 var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
                 var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
-                var albumMatches = !string.IsNullOrEmpty(albumKey) && albumKey == candidateAlbumKey;
 
-                if ((titleMatches && artistMatches) || (titleMatches && albumMatches))
+                // Require both title and artist. Matching on title+album alone let a different
+                // recording from a compilation (same title, different artist) pass as "owned",
+                // and that wrong file then got persisted into the M3U and the library.
+                if (titleMatches && artistMatches)
                 {
                     matches.Add(songElement.Clone());
                 }
