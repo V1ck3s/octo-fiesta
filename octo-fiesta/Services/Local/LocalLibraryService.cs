@@ -236,8 +236,9 @@ public class LocalLibraryService : ILocalLibraryService
         var extension = Path.GetExtension(rawName);
         var stem = Path.GetFileNameWithoutExtension(rawName);
         var discStripped = System.Text.RegularExpressions.Regex.Replace(stem, @"^\d+-", "");
+        var candidateStems = stem == discStripped ? new[] { stem } : new[] { stem, discStripped };
 
-        foreach (var candidateStem in new[] { stem, discStripped })
+        foreach (var candidateStem in candidateStems)
         {
             var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
             if (File.Exists(candidatePath))
@@ -249,7 +250,7 @@ public class LocalLibraryService : ILocalLibraryService
         return null;
     }
 
-public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)
+    public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)
     {
         if (song.ExternalProvider == null || song.ExternalId == null) return;
         
