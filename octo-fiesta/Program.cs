@@ -89,9 +89,10 @@ else if (musicService == MusicService.SquidWTF)
 {
     var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
     var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
+    var isDeemixSource = squidWtfSource.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
-    // Only Tidal source supports playlists via SquidWTF; Qobuz and Amazon Music do not
-    if (enableExternalPlaylists && isTidalSource)
+    // Tidal and Deemix expose playlists through their SquidWTF APIs.
+    if (enableExternalPlaylists && (isTidalSource || isDeemixSource))
     {
         builder.Services.AddSingleton<PlaylistSyncService>();
     }
