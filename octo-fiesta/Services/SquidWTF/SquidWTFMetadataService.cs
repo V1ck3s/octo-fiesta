@@ -365,8 +365,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private async Task<List<Album>> GetArtistAlbumsDeemixAsync(string artistId)
     {
         using var document = await GetDeemixDocumentAsync($"/api/artist/discography?id={Uri.EscapeDataString(artistId)}");
-        if (document == null || !document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return new();
-        return data.EnumerateArray().Select(MapDeemixAlbumToAlbum).ToList();
+        if (document == null || !document.RootElement.TryGetProperty("all", out var all) || all.ValueKind != JsonValueKind.Array) return new();
+        return all.EnumerateArray().Select(MapDeemixAlbumToAlbum).ToList();
     }
 
     private async Task<ExternalPlaylist?> GetPlaylistDeemixAsync(string playlistId)
@@ -405,11 +405,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
         var album = GetDeemixObject(track, "album");
         var artist = GetDeemixObject(track, "artist");
         var artistId = GetDeemixString(artist, "id");
+        var artistExternalId = DeemixArtistId(artistId);
         var artistName = GetDeemixString(artist, "name");
         var albumId = GetDeemixString(album, "id");
         return new Song {
-            Title = GetDeemixString(track, "title") ?? "", Artist = artistName ?? "", ArtistId = artistId,
-            Artists = string.IsNullOrEmpty(artistName) ? new() : new() { new Artist { Id = artistId ?? "", Name = artistName, IsLocal = false, ExternalProvider = "squidwtf", ExternalId = artistId } },
+            Title = GetDeemixString(track, "title") ?? "", Artist = artistName ?? "", ArtistId = artistExternalId,
+            Artists = string.IsNullOrEmpty(artistName) ? new() : new() { new Artist { Id = artistExternalId ?? "", Name = artistName, IsLocal = false, ExternalProvider = "squidwtf", ExternalId = artistId } },
             Album = GetDeemixString(album, "title") ?? "", AlbumId = string.IsNullOrEmpty(albumId) ? null : $"ext-squidwtf-album-{albumId}",
             Duration = GetDeemixInt(track, "duration"), Track = GetDeemixInt(track, "track_position"), DiscNumber = GetDeemixInt(track, "disk_number"),
             Year = GetDeemixYear(track), ReleaseDate = GetDeemixString(track, "release_date"), Bpm = GetDeemixInt(track, "bpm"), Isrc = GetDeemixString(track, "isrc"),
@@ -420,10 +421,16 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private Album MapDeemixAlbumToAlbum(JsonElement album)
     {
         var artist = GetDeemixObject(album, "artist"); var id = GetDeemixString(album, "id") ?? "";
-        return new Album { Id = $"ext-squidwtf-album-{id}", Title = GetDeemixString(album, "title") ?? "", Artist = GetDeemixString(artist, "name") ?? "", ArtistId = GetDeemixString(artist, "id"), Year = GetDeemixYear(album), SongCount = GetDeemixInt(album, "nb_tracks"), Genre = GetDeemixString(album, "genre"), ReleaseType = GetDeemixString(album, "record_type"), CoverArtUrl = GetDeemixCover(album, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(album, album, "cover_xl"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
+        return new Album { Id = $"ext-squidwtf-album-{id}", Title = GetDeemixString(album, "title") ?? "", Artist = GetDeemixString(artist, "name") ?? "", ArtistId = DeemixArtistId(GetDeemixString(artist, "id")), Year = GetDeemixYear(album), SongCount = GetDeemixInt(album, "nb_tracks"), Genre = GetDeemixString(album, "genre"), ReleaseType = GetDeemixString(album, "record_type"), CoverArtUrl = GetDeemixCover(album, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(album, album, "cover_xl"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
     }
 
-    private Artist MapDeemixArtistToArtist(JsonElement artist) => new() { Id = GetDeemixString(artist, "id") ?? "", Name = GetDeemixString(artist, "name") ?? "", ImageUrl = GetDeemixString(artist, "picture_xl") ?? GetDeemixString(artist, "picture_medium"), AlbumCount = GetDeemixInt(artist, "nb_album"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = GetDeemixString(artist, "id") };
+    private Artist MapDeemixArtistToArtist(JsonElement artist)
+    {
+        var id = GetDeemixString(artist, "id");
+        return new Artist { Id = DeemixArtistId(id) ?? "", Name = GetDeemixString(artist, "name") ?? "", ImageUrl = GetDeemixString(artist, "picture_xl") ?? GetDeemixString(artist, "picture_medium"), AlbumCount = GetDeemixInt(artist, "nb_album"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
+    }
+
+    private static string? DeemixArtistId(string? rawId) => string.IsNullOrEmpty(rawId) ? null : $"ext-squidwtf-artist-{rawId}";
 
     private ExternalPlaylist MapDeemixPlaylistToExternalPlaylist(JsonElement playlist)
     {
@@ -434,7 +441,13 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private static bool HasDeemixError(JsonElement value) => value.TryGetProperty("error", out _);
     private static JsonElement GetDeemixObject(JsonElement value, string name) => value.TryGetProperty(name, out var result) && result.ValueKind == JsonValueKind.Object ? result : default;
     private static string? GetDeemixString(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var result) ? result.ValueKind == JsonValueKind.String ? result.GetString() : result.ValueKind == JsonValueKind.Number ? result.GetRawText() : null : null;
-    private static int? GetDeemixInt(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var result) && result.TryGetInt32(out var number) ? number : null;
+    private static int? GetDeemixInt(JsonElement value, string name)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out var result)) return null;
+        if (result.ValueKind == JsonValueKind.Number && result.TryGetInt32(out var number)) return number;
+        if (result.ValueKind == JsonValueKind.String && int.TryParse(result.GetString(), out var parsed)) return parsed;
+        return null;
+    }
     private static int? GetDeemixYear(JsonElement value) { var date = GetDeemixString(value, "release_date"); return date is { Length: >= 4 } && int.TryParse(date[..4], out var year) ? year : null; }
     private static string? GetDeemixCover(JsonElement track, JsonElement album, string name) => GetDeemixString(track, name) ?? GetDeemixString(album, name) ?? GetDeemixString(track, name == "cover_xl" ? "cover" : "cover");
 
