@@ -10,7 +10,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Metadata service implementation using SquidWTF API
-/// Supports Qobuz, Tidal, and Amazon Music backends
+/// Supports Qobuz, Tidal, Amazon Music, and Deemix backends
 /// </summary>
 public class SquidWTFMetadataService : IMusicMetadataService
 {
@@ -40,6 +40,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
     private const string AmazonBaseUrl = "https://amz.squid.wtf";
+    private const string DeemixBaseUrl = "https://deemix.squid.wtf";
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -50,6 +51,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     private bool IsQobuzSource => _settings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
     private bool IsAmazonSource => _settings.Source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase);
+    private bool IsDeemixSource => _settings.Source.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
     public SquidWTFMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -77,6 +79,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await SearchSongsQobuzAsync(query, limit);
             if (IsAmazonSource)
                 return await SearchSongsAmazonAsync(query, limit);
+            if (IsDeemixSource)
+                return await SearchSongsDeemixAsync(query, limit);
             return await SearchSongsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -94,6 +98,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await SearchAlbumsQobuzAsync(query, limit);
             if (IsAmazonSource)
                 return await SearchAlbumsAmazonAsync(query, limit);
+            if (IsDeemixSource)
+                return await SearchAlbumsDeemixAsync(query, limit);
             return await SearchAlbumsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -111,6 +117,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await SearchArtistsQobuzAsync(query, limit);
             if (IsAmazonSource)
                 return new List<Artist>(); // Amazon Music API doesn't expose artist search
+            if (IsDeemixSource)
+                return await SearchArtistsDeemixAsync(query, limit);
             return await SearchArtistsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -167,6 +175,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await GetSongQobuzAsync(externalId);
             if (IsAmazonSource)
                 return await GetSongAmazonAsync(externalId);
+            if (IsDeemixSource)
+                return await GetSongDeemixAsync(externalId);
             return await GetSongTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -186,6 +196,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await GetAlbumQobuzAsync(externalId);
             if (IsAmazonSource)
                 return await GetAlbumAmazonAsync(externalId);
+            if (IsDeemixSource)
+                return await GetAlbumDeemixAsync(externalId);
             return await GetAlbumTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -205,6 +217,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await GetArtistQobuzAsync(externalId);
             if (IsAmazonSource)
                 return null; // Amazon Music API doesn't expose individual artist lookup
+            if (IsDeemixSource)
+                return await GetArtistDeemixAsync(externalId);
             return await GetArtistTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -224,6 +238,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
                 return await GetArtistAlbumsQobuzAsync(externalId);
             if (IsAmazonSource)
                 return new List<Album>(); // Amazon Music API doesn't expose artist album lists
+            if (IsDeemixSource)
+                return await GetArtistAlbumsDeemixAsync(externalId);
             return await GetArtistAlbumsTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -237,7 +253,9 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         try
         {
-            // Only Tidal supports playlist search via SquidWTF
+            if (IsDeemixSource)
+                return await SearchPlaylistsDeemixAsync(query, limit);
+            // Only Tidal supports playlist search via SquidWTF's original APIs
             if (!IsQobuzSource && !IsAmazonSource)
                 return await SearchPlaylistsTidalAsync(query, limit);
 
@@ -256,6 +274,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         try
         {
+            if (IsDeemixSource)
+                return await GetPlaylistDeemixAsync(externalId);
             if (!IsQobuzSource && !IsAmazonSource)
                 return await GetPlaylistTidalAsync(externalId);
 
@@ -274,6 +294,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         try
         {
+            if (IsDeemixSource)
+                return await GetPlaylistTracksDeemixAsync(externalId);
             if (!IsQobuzSource && !IsAmazonSource)
                 return await GetPlaylistTracksTidalAsync(externalId);
 
@@ -285,6 +307,136 @@ public class SquidWTFMetadataService : IMusicMetadataService
             return new List<Song>();
         }
     }
+
+    #endregion
+
+    #region Deemix Backend Methods
+
+    private async Task<List<Song>> SearchSongsDeemixAsync(string query, int limit)
+        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=track&limit={limit}&index=0"))
+            .Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
+
+    private async Task<List<Album>> SearchAlbumsDeemixAsync(string query, int limit)
+        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=album&limit={limit}&index=0"))
+            .Select(MapDeemixAlbumToAlbum).ToList();
+
+    private async Task<List<Artist>> SearchArtistsDeemixAsync(string query, int limit)
+        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=artist&limit={limit}&index=0"))
+            .Select(MapDeemixArtistToArtist).ToList();
+
+    private async Task<List<ExternalPlaylist>> SearchPlaylistsDeemixAsync(string query, int limit)
+        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=playlist&limit={limit}&index=0"))
+            .Select(MapDeemixPlaylistToExternalPlaylist).ToList();
+
+    private async Task<Song?> GetSongDeemixAsync(string trackId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/track?id={Uri.EscapeDataString(trackId)}");
+        return document == null ? null : MapDeemixTrackToSong(document.RootElement);
+    }
+
+    private async Task<Album?> GetAlbumDeemixAsync(string albumId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/album?id={Uri.EscapeDataString(albumId)}");
+        if (document == null || HasDeemixError(document.RootElement)) return null;
+        var album = MapDeemixAlbumToAlbum(document.RootElement);
+        if (document.RootElement.TryGetProperty("tracks", out var tracks) && tracks.ValueKind == JsonValueKind.Array)
+        {
+            album.Songs = tracks.EnumerateArray().Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
+            foreach (var song in album.Songs)
+            {
+                song.AlbumId = album.Id;
+                song.Album = album.Title;
+                song.AlbumArtist = album.Artist;
+                song.TotalTracks ??= album.SongCount;
+                song.Year ??= album.Year;
+                song.CoverArtUrl ??= album.CoverArtUrl;
+                song.CoverArtUrlLarge ??= album.CoverArtUrlLarge;
+            }
+        }
+        return album;
+    }
+
+    private async Task<Artist?> GetArtistDeemixAsync(string artistId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/artist?id={Uri.EscapeDataString(artistId)}");
+        return document == null || HasDeemixError(document.RootElement) ? null : MapDeemixArtistToArtist(document.RootElement);
+    }
+
+    private async Task<List<Album>> GetArtistAlbumsDeemixAsync(string artistId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/artist/discography?id={Uri.EscapeDataString(artistId)}");
+        if (document == null || !document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return new();
+        return data.EnumerateArray().Select(MapDeemixAlbumToAlbum).ToList();
+    }
+
+    private async Task<ExternalPlaylist?> GetPlaylistDeemixAsync(string playlistId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/playlist?id={Uri.EscapeDataString(playlistId)}");
+        return document == null || HasDeemixError(document.RootElement) ? null : MapDeemixPlaylistToExternalPlaylist(document.RootElement);
+    }
+
+    private async Task<List<Song>> GetPlaylistTracksDeemixAsync(string playlistId)
+    {
+        using var document = await GetDeemixDocumentAsync($"/api/playlist?id={Uri.EscapeDataString(playlistId)}");
+        if (document == null || !document.RootElement.TryGetProperty("tracks", out var tracks) || tracks.ValueKind != JsonValueKind.Array) return new();
+        return tracks.EnumerateArray().Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
+    }
+
+    private async Task<List<JsonElement>> GetDeemixDataAsync(string path)
+    {
+        using var document = await GetDeemixDocumentAsync(path);
+        if (document == null || !document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return new();
+        return data.EnumerateArray().Select(x => x.Clone()).ToList();
+    }
+
+    private async Task<JsonDocument?> GetDeemixDocumentAsync(string path)
+    {
+        try
+        {
+            using var response = await _httpClient.GetAsync($"{DeemixBaseUrl}{path}");
+            if (!response.IsSuccessStatusCode) { _logger.LogWarning("Deemix API returned {StatusCode} for {Path}", response.StatusCode, path); return null; }
+            return JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Failed to request Deemix {Path}", path); return null; }
+    }
+
+    private Song MapDeemixTrackToSong(JsonElement track)
+    {
+        var album = GetDeemixObject(track, "album");
+        var artist = GetDeemixObject(track, "artist");
+        var artistId = GetDeemixString(artist, "id");
+        var artistName = GetDeemixString(artist, "name");
+        var albumId = GetDeemixString(album, "id");
+        return new Song {
+            Title = GetDeemixString(track, "title") ?? "", Artist = artistName ?? "", ArtistId = artistId,
+            Artists = string.IsNullOrEmpty(artistName) ? new() : new() { new Artist { Id = artistId ?? "", Name = artistName, IsLocal = false, ExternalProvider = "squidwtf", ExternalId = artistId } },
+            Album = GetDeemixString(album, "title") ?? "", AlbumId = string.IsNullOrEmpty(albumId) ? null : $"ext-squidwtf-album-{albumId}",
+            Duration = GetDeemixInt(track, "duration"), Track = GetDeemixInt(track, "track_position"), DiscNumber = GetDeemixInt(track, "disk_number"),
+            Year = GetDeemixYear(track), ReleaseDate = GetDeemixString(track, "release_date"), Bpm = GetDeemixInt(track, "bpm"), Isrc = GetDeemixString(track, "isrc"),
+            ExplicitContentLyrics = GetDeemixInt(track, "explicit_content_lyrics"), CoverArtUrl = GetDeemixCover(track, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(track, album, "cover_xl"), ReleaseType = GetDeemixString(album, "record_type"),
+            IsLocal = false, ExternalProvider = "squidwtf", ExternalId = GetDeemixString(track, "id") };
+    }
+
+    private Album MapDeemixAlbumToAlbum(JsonElement album)
+    {
+        var artist = GetDeemixObject(album, "artist"); var id = GetDeemixString(album, "id") ?? "";
+        return new Album { Id = $"ext-squidwtf-album-{id}", Title = GetDeemixString(album, "title") ?? "", Artist = GetDeemixString(artist, "name") ?? "", ArtistId = GetDeemixString(artist, "id"), Year = GetDeemixYear(album), SongCount = GetDeemixInt(album, "nb_tracks"), Genre = GetDeemixString(album, "genre"), ReleaseType = GetDeemixString(album, "record_type"), CoverArtUrl = GetDeemixCover(album, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(album, album, "cover_xl"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
+    }
+
+    private Artist MapDeemixArtistToArtist(JsonElement artist) => new() { Id = GetDeemixString(artist, "id") ?? "", Name = GetDeemixString(artist, "name") ?? "", ImageUrl = GetDeemixString(artist, "picture_xl") ?? GetDeemixString(artist, "picture_medium"), AlbumCount = GetDeemixInt(artist, "nb_album"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = GetDeemixString(artist, "id") };
+
+    private ExternalPlaylist MapDeemixPlaylistToExternalPlaylist(JsonElement playlist)
+    {
+        var id = GetDeemixString(playlist, "id") ?? ""; var creator = GetDeemixObject(playlist, "creator");
+        return new ExternalPlaylist { Id = Common.PlaylistIdHelper.CreatePlaylistId("squidwtf", id), Name = GetDeemixString(playlist, "title") ?? "", Description = GetDeemixString(playlist, "description"), CuratorName = GetDeemixString(creator, "name"), Provider = "squidwtf", ExternalId = id, TrackCount = GetDeemixInt(playlist, "nb_tracks") ?? 0, Duration = GetDeemixInt(playlist, "duration") ?? 0, CoverUrl = GetDeemixString(playlist, "picture_xl") ?? GetDeemixString(playlist, "picture_medium") };
+    }
+
+    private static bool HasDeemixError(JsonElement value) => value.TryGetProperty("error", out _);
+    private static JsonElement GetDeemixObject(JsonElement value, string name) => value.TryGetProperty(name, out var result) && result.ValueKind == JsonValueKind.Object ? result : default;
+    private static string? GetDeemixString(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var result) ? result.ValueKind == JsonValueKind.String ? result.GetString() : result.ValueKind == JsonValueKind.Number ? result.GetRawText() : null : null;
+    private static int? GetDeemixInt(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var result) && result.TryGetInt32(out var number) ? number : null;
+    private static int? GetDeemixYear(JsonElement value) { var date = GetDeemixString(value, "release_date"); return date is { Length: >= 4 } && int.TryParse(date[..4], out var year) ? year : null; }
+    private static string? GetDeemixCover(JsonElement track, JsonElement album, string name) => GetDeemixString(track, name) ?? GetDeemixString(album, name) ?? GetDeemixString(track, name == "cover_xl" ? "cover" : "cover");
 
     #endregion
 

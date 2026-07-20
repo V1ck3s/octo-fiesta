@@ -12,7 +12,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Download service implementation using SquidWTF API
-/// Supports both Qobuz and Tidal backends with automatic instance failover for Tidal
+/// Supports Qobuz, Tidal, Amazon Music, and Deemix backends
 /// No decryption needed - SquidWTF returns direct streaming URLs
 /// </summary>
 public class SquidWTFDownloadService : BaseDownloadService
@@ -25,6 +25,7 @@ public class SquidWTFDownloadService : BaseDownloadService
     // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
     private const string AmazonBaseUrl = "https://amz.squid.wtf";
+    private const string DeemixBaseUrl = "https://deemix.squid.wtf";
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
@@ -40,6 +41,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
     private bool IsAmazonSource => _squidWTFSettings.Source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase);
+    private bool IsDeemixSource => _squidWTFSettings.Source.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
     protected override string ProviderName => "squidwtf";
 
@@ -83,6 +85,12 @@ public class SquidWTFDownloadService : BaseDownloadService
                 return response.IsSuccessStatusCode;
             }
 
+            if (IsDeemixSource)
+            {
+                var response = await _httpClient.GetAsync($"{DeemixBaseUrl}/api/health");
+                return response.IsSuccessStatusCode;
+            }
+
             // Tidal — test with instance manager
             {
                 var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
@@ -118,6 +126,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
         if (IsQobuzSource) return "27";
         if (IsAmazonSource) return "ultrahd";
+        if (IsDeemixSource) return "FLAC";
         return "HI_RES_LOSSLESS";
     }
 
@@ -127,6 +136,8 @@ public class SquidWTFDownloadService : BaseDownloadService
             return await DownloadTrackQobuzAsync(trackId, song, cancellationToken);
         if (IsAmazonSource)
             return await DownloadTrackAmazonAsync(trackId, song, cancellationToken);
+        if (IsDeemixSource)
+            return await DownloadTrackDeemixAsync(trackId, song, cancellationToken);
         return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
     }
 
@@ -211,6 +222,29 @@ public class SquidWTFDownloadService : BaseDownloadService
             "MP3_320" or "MP3" or "5" => "5",
             _ => "27"
         };
+    }
+
+    #endregion
+
+    #region Deemix Download
+
+    private async Task<DownloadResult> DownloadTrackDeemixAsync(string trackId, Song song, CancellationToken cancellationToken)
+    {
+        // Deemix applies its configured quality server-side and returns a fully decrypted audio stream.
+        // Do not POST /api/settings here: its settings are shared by the public instance.
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{DeemixBaseUrl}/api/download/stream/{Uri.EscapeDataString(trackId)}?blob=1");
+        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var format = response.Headers.TryGetValues("X-Actual-Format", out var values)
+            ? values.FirstOrDefault()?.ToUpperInvariant()
+            : null;
+        format ??= response.Content.Headers.ContentType?.MediaType?.Contains("flac", StringComparison.OrdinalIgnoreCase) == true ? "FLAC" : "MP3";
+        var extension = format == "FLAC" ? ".flac" : ".mp3";
+        var quality = format == "FLAC" ? "FLAC" : format is "MP3_320" or "MP3_128" ? format : "MP3";
+
+        Logger.LogInformation("Got Deemix stream for track {TrackId}: {Title} ({Format})", trackId, song.Title, format);
+        return new DownloadResult(await HttpResponseStream.CreateAsync(response, cancellationToken), extension, quality);
     }
 
     #endregion
