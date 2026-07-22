@@ -195,6 +195,31 @@ public class SubsonicModelMapperTests
     }
 
     [Fact]
+    public void MergeSearchResults_Json_DropsExternalSongAlreadyInLibrary()
+    {
+        var localSongs = new List<object>
+        {
+            new Dictionary<string, object> { ["id"] = "navidrome-real-id", ["title"] = "Keine Angst", ["artist"] = "Danger Dan" }
+        };
+        var externalResult = new SearchResult
+        {
+            Songs = new List<Song>
+            {
+                new Song { Title = "Keine Angst", Artist = "Danger Dan", ExternalProvider = "squidwtf", ExternalId = "4024016711" }
+            },
+            Albums = new List<Album>(),
+            Artists = new List<Artist>()
+        };
+
+        var (mergedSongs, _, _) = _mapper.MergeSearchResults(
+            localSongs, new List<object>(), new List<object>(), externalResult, new List<ExternalPlaylist>(), true);
+
+        Assert.Single(mergedSongs);
+        var only = Assert.IsType<Dictionary<string, object>>(mergedSongs[0]);
+        Assert.Equal("navidrome-real-id", only["id"]);
+    }
+
+    [Fact]
     public void MergeSearchResults_Json_CaseInsensitiveDeduplication()
     {
         // Arrange

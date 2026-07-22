@@ -264,6 +264,15 @@ public class SubsonicController : ControllerBase
             return File(result.Body, contentType);
         }
 
+        var localSongId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider!, externalId!);
+        if (!string.IsNullOrEmpty(localSongId))
+        {
+            parameters["id"] = localSongId;
+            var localResult = await _proxyService.RelayAsync("rest/getSong", parameters);
+            var localContentType = localResult.ContentType ?? $"application/{format}";
+            return File(localResult.Body, localContentType);
+        }
+
         var song = await _metadataService.GetSongAsync(provider!, externalId!);
 
         if (song == null)
