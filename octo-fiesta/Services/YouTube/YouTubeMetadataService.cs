@@ -40,8 +40,7 @@ public class YouTubeMetadataService : IMusicMetadataService
             "--skip-download",
             "--flat-playlist",
             "--no-warnings",
-            "--no-call-home",
-            $"ytmsearch{effectiveLimit}:{query}"
+            $"ytsearch{effectiveLimit}:{query}"
         };
 
         AddCookiesArgument(args);
@@ -176,7 +175,6 @@ public class YouTubeMetadataService : IMusicMetadataService
             "--dump-single-json",
             "--skip-download",
             "--no-warnings",
-            "--no-call-home",
             "--no-playlist",
             $"https://www.youtube.com/watch?v={externalId}"
         };

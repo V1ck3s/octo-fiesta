@@ -62,7 +62,6 @@ public class YouTubeDownloadService : BaseDownloadService
         {
             "--no-playlist",
             "--no-warnings",
-            "--no-call-home",
             "--restrict-filenames",
             "--format",
             formatExpression,

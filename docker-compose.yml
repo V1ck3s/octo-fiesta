@@ -103,7 +103,7 @@ services:
       # Enable YouTube provider (default: true)
       - YouTube__Enabled=${YOUTUBE_ENABLED:-true}
       # yt-dlp binary path inside container
-      - YouTube__YtDlpPath=${YOUTUBE_YTDLP_PATH:-/usr/bin/yt-dlp}
+      - YouTube__YtDlpPath=${YOUTUBE_YTDLP_PATH:-/usr/local/bin/yt-dlp}
       # Maximum number of YouTube search hits to return (default: 10)
       - YouTube__MaxResults=${YOUTUBE_MAX_RESULTS:-10}
       # Preferred YouTube audio format (default: m4a)
