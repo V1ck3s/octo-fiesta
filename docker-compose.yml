@@ -19,7 +19,7 @@ services:
       - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
       # Admin Password to perform actions on navidrome server that require admin permissions (optional)
       - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
-      # Music service to use: Deezer, Qobuz, or SquidWTF (default: SquidWTF)
+      # Music service to use: Deezer, Qobuz, SquidWTF, Yandex, or YouTube (default: SquidWTF)
       - Subsonic__MusicService=${MUSIC_SERVICE:-SquidWTF}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
       - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
@@ -98,5 +98,17 @@ services:
       # Default: false
       # Available: true, false
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
+
+      # ===== YOUTUBE SETTINGS =====
+      # Enable YouTube provider (default: true)
+      - YouTube__Enabled=${YOUTUBE_ENABLED:-true}
+      # yt-dlp binary path inside container
+      - YouTube__YtDlpPath=${YOUTUBE_YTDLP_PATH:-/usr/bin/yt-dlp}
+      # Maximum number of YouTube search hits to return (default: 10)
+      - YouTube__MaxResults=${YOUTUBE_MAX_RESULTS:-10}
+      # Preferred YouTube audio format (default: m4a)
+      - YouTube__AudioFormat=${YOUTUBE_AUDIO_FORMAT:-m4a}
+      # Optional cookies file path for authenticated/age-restricted content
+      - YouTube__CookiesPath=${YOUTUBE_COOKIES_PATH:-}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
