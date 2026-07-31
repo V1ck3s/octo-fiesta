@@ -26,8 +26,8 @@ public class YouTubeMetadataService : IMusicMetadataService
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
     {
-        if (!_settings.Enabled || string.IsNullOrWhiteSpace(query))
-        {
+        if (!_settings.Enabled || string.IsNullOrWhiteSpace(query) || query.Trim().Length < 3)
+	{
             return [];
         }
 
@@ -41,7 +41,7 @@ public class YouTubeMetadataService : IMusicMetadataService
             "--flat-playlist",
             "--no-warnings",
             "--no-call-home",
-            $"ytsearch{effectiveLimit}:{query}"
+            $"ytmsearch{effectiveLimit}:{query}"
         };
 
         AddCookiesArgument(args);

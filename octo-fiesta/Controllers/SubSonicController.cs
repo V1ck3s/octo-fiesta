@@ -87,6 +87,10 @@ public class SubsonicController : ControllerBase
     /// Merges local and external search results.
     /// </summary>
     [HttpGet, HttpPost]
+    [Route("rest/search")]       // Added for legacy clients
+    [Route("rest/search.view")]  // Added for legacy clients
+    [Route("rest/search2")]      // Added for Substreamer
+    [Route("rest/search2.view")] // Added for Substreamer
     [Route("rest/search3")]
     [Route("rest/search3.view")]
     public async Task<IActionResult> Search3()
