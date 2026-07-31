@@ -5,6 +5,7 @@ using octo_fiesta.Services.Qobuz;
 using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Yandex;
 using octo_fiesta.Services.YouTube;
+using octo_fiesta.Services.JioSaavn;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Lyrics;
 using octo_fiesta.Services.Validation;
@@ -39,6 +40,8 @@ builder.Services.Configure<YandexSettings>(
     builder.Configuration.GetSection("Yandex"));
 builder.Services.Configure<YouTubeSettings>(
     builder.Configuration.GetSection("YouTube"));
+builder.Services.Configure<JioSaavnSettings>(
+    builder.Configuration.GetSection("JioSaavn"));
 builder.Services.Configure<LyricsSettings>(
     builder.Configuration.GetSection("Lyrics"));
 
@@ -123,6 +126,11 @@ else if (musicService == MusicService.YouTube)
 {
     builder.Services.AddSingleton<IMusicMetadataService, YouTubeMetadataService>();
     builder.Services.AddSingleton<IDownloadService, YouTubeDownloadService>();
+}
+else if (musicService == MusicService.JioSaavn)
+{
+    builder.Services.AddSingleton<IMusicMetadataService, JioSaavnMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, JioSaavnDownloadService>();
 }
 else
 {

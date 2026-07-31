@@ -85,7 +85,12 @@ public enum MusicService
     /// <summary>
     /// YouTube music service
     /// </summary>
-    YouTube
+    YouTube,
+
+    /// <summary>
+    /// JioSaavn music service
+    /// </summary>
+    JioSaavn
 }
 
 public class SubsonicSettings
