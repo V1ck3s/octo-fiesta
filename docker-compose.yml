@@ -19,7 +19,7 @@ services:
       - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
       # Admin Password to perform actions on navidrome server that require admin permissions (optional)
       - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
-      # Music service to use: Deezer, Qobuz, SquidWTF, Yandex, or YouTube (default: SquidWTF)
+      # Music service to use: Deezer, Qobuz, SquidWTF, Yandex, YouTube, or JioSaavn (default: SquidWTF)
       - Subsonic__MusicService=${MUSIC_SERVICE:-SquidWTF}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
       - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
@@ -110,5 +110,9 @@ services:
       - YouTube__AudioFormat=${YOUTUBE_AUDIO_FORMAT:-m4a}
       # Optional cookies file path for authenticated/age-restricted content
       - YouTube__CookiesPath=${YOUTUBE_COOKIES_PATH:-}
+
+      # ===== JIOSAAVN SETTINGS =====
+      # Preferred JioSaavn quality: 96, 160, or 320 (default: 320)
+      - JioSaavn__Quality=${JIOSAAVN_QUALITY:-320}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads

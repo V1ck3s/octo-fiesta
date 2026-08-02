@@ -44,6 +44,7 @@ builder.Services.Configure<JioSaavnSettings>(
     builder.Configuration.GetSection("JioSaavn"));
 builder.Services.Configure<LyricsSettings>(
     builder.Configuration.GetSection("Lyrics"));
+builder.Services.AddSingleton<JioSaavnApiClient>();
 
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();
@@ -155,6 +156,7 @@ builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, SquidWTFStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, YandexStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, YouTubeStartupValidator>();
+builder.Services.AddSingleton<IStartupValidator, JioSaavnStartupValidator>();
 
 // Configure custom HTTP clients for services
 builder.Services.AddHttpClient("Yandex", YandexHttpClientConfiguration.ConfigureClient);
