@@ -153,6 +153,11 @@ public sealed class JioSaavnMetadataService : IMusicMetadataService
         {
             Title = track.Title ?? string.Empty,
             Artist = artistName,
+            // JioSaavn lists the lead artist first in "primary" on every track of an album,
+            // even when featured collaborators differ per track (e.g. "Villian" + varying
+            // features). Using the full joined artistName for folder pathing would split one
+            // album into a folder per collaborator combination, so pin AlbumArtist to the lead.
+            AlbumArtist = artists.Count > 0 ? artists[0].Name : artistName,
             Artists = artists,
             Contributors = featuredArtists,
             Album = info?.Album ?? string.Empty,
