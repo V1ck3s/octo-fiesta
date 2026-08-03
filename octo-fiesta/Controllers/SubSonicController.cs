@@ -96,13 +96,36 @@ public class SubsonicController : ControllerBase
     public async Task<IActionResult> Search3()
     {
         var parameters = await ExtractAllParameters();
-        var query = parameters.GetValueOrDefault("query", "");
+        var query = GetSearchQuery(parameters);
         var format = parameters.GetValueOrDefault("f", "xml");
-        
         var cleanQuery = query.Trim().Trim('"');
-        
+
+        var requestedEndpoint = Request.Path.Value ?? "/rest/search3";
+        var searchResultElement = requestedEndpoint.Contains(
+            "search2",
+            StringComparison.OrdinalIgnoreCase)
+            ? "searchResult2"
+            : requestedEndpoint.Contains(
+                "/search",
+                StringComparison.OrdinalIgnoreCase) &&
+              !requestedEndpoint.Contains(
+                  "search3",
+                  StringComparison.OrdinalIgnoreCase)
+                ? "searchResult"
+                : "searchResult3";
+
+        _logger.LogInformation(
+            "Search request {Path}; query='{Query}'; parameters=[{ParameterKeys}]",
+           requestedEndpoint,
+            cleanQuery,
+            string.Join(", ", parameters.Keys.OrderBy(key => key)));
+
         if (string.IsNullOrWhiteSpace(cleanQuery))
         {
+            _logger.LogWarning(
+                "Search request {Path} contained no usable search term",
+                requestedEndpoint);
+
             try
             {
                 var result = await _proxyService.RelayAsync("rest/search3", parameters);
@@ -111,7 +134,7 @@ public class SubsonicController : ControllerBase
             }
             catch
             {
-                return _responseBuilder.CreateResponse(format, "searchResult3", new { });
+                return _responseBuilder.CreateResponse(format, searchResultElement, new { });
             }
         }
 
@@ -135,7 +158,17 @@ public class SubsonicController : ControllerBase
         var externalResult = await externalTask;
         var playlistResult = await playlistTask;
 
-        return MergeSearchResults(subsonicResult, externalResult, playlistResult, format);
+        _logger.LogInformation(
+            "Search '{Query}' returned {ExternalSongCount} external song(s)",
+            cleanQuery,
+            externalResult.Songs.Count);
+
+        return MergeSearchResults(
+            subsonicResult,
+            externalResult,
+            playlistResult,
+            format,
+            searchResultElement);
     }
 
     /// <summary>
@@ -854,7 +887,8 @@ public class SubsonicController : ControllerBase
         (byte[]? Body, string? ContentType, bool Success) subsonicResult,
         SearchResult externalResult,
         List<ExternalPlaylist> playlistResult,
-        string format)
+        string format,
+        string searchResultElement = "searchResult3")
     {
         var (localSongs, localAlbums, localArtists) = subsonicResult.Success && subsonicResult.Body != null
             ? _modelMapper.ParseSearchResponse(subsonicResult.Body, subsonicResult.ContentType)
@@ -871,47 +905,80 @@ public class SubsonicController : ControllerBase
 
         if (isJson)
         {
-            return _responseBuilder.CreateJsonResponse(new
+            var searchPayload = new
             {
-                status = "ok",
-                version = "1.16.1",
-                searchResult3 = new
-                {
-                    song = mergedSongs,
-                    album = mergedAlbums,
-                    artist = mergedArtists
-                }
-            });
+                song = mergedSongs,
+                album = mergedAlbums,
+                artist = mergedArtists
+            };
+
+            var response = new Dictionary<string, object>
+            {
+                ["status"] = "ok",
+                ["version"] = "1.16.1",
+                [searchResultElement] = searchPayload
+            };
+
+            return _responseBuilder.CreateJsonResponse(response);
         }
         else
         {
             var ns = XNamespace.Get("http://subsonic.org/restapi");
-            var searchResult3 = new XElement(ns + "searchResult3");
+            var searchResult = new XElement(ns + searchResultElement);
             
             foreach (var artist in mergedArtists.Cast<XElement>())
             {
-                searchResult3.Add(artist);
+                searchResult.Add(artist);
             }
             foreach (var album in mergedAlbums.Cast<XElement>())
             {
-                searchResult3.Add(album);
+                searchResult.Add(album);
             }
             foreach (var song in mergedSongs.Cast<XElement>())
             {
-                searchResult3.Add(song);
+                searchResult.Add(song);
             }
 
             var doc = new XDocument(
                 new XElement(ns + "subsonic-response",
                     new XAttribute("status", "ok"),
                     new XAttribute("version", "1.16.1"),
-                    searchResult3
+                    searchResult
                 )
             );
 
             return Content(doc.ToString(), "application/xml; charset=utf-8");
         }
     }
+
+    private static string GetSearchQuery(
+        IReadOnlyDictionary<string, string> parameters)
+    {
+        // search2/search3 use "query". Some clients and wrappers send
+        // "searchTerm". The original search endpoint uses "any", "title",
+        // "album", and "artist".
+        var candidates = new[]
+        {
+            "query",
+            "searchTerm",
+            "any",
+            "title",
+            "album",
+            "artist"
+        };
+
+        foreach (var name in candidates)
+        {
+            if (parameters.TryGetValue(name, out var value) &&
+                !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
 
     private string GetContentType(string filePath)
     {

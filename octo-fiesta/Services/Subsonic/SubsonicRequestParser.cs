@@ -17,7 +17,7 @@ public class SubsonicRequestParser
     /// <returns>Dictionary containing all extracted parameters</returns>
     public async Task<Dictionary<string, string>> ExtractAllParametersAsync(HttpRequest request)
     {
-        var parameters = new Dictionary<string, string>();
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // Get query parameters
         foreach (var query in request.Query)

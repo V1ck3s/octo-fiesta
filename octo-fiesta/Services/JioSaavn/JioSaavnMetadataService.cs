@@ -1,4 +1,3 @@
-using System.Text.Json;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Search;
 using octo_fiesta.Models.Subsonic;
@@ -6,125 +5,277 @@ using octo_fiesta.Services.Common;
 
 namespace octo_fiesta.Services.JioSaavn;
 
-public class JioSaavnMetadataService : IMusicMetadataService
+public sealed class JioSaavnMetadataService : IMusicMetadataService
 {
-    private readonly HttpClient _httpClient;
+    private const string ProviderName = "jiosaavn";
+
+    private readonly JioSaavnApiClient _apiClient;
     private readonly ILogger<JioSaavnMetadataService> _logger;
-    private const string SearchBaseUrl = "https://rtmx.vercel.app/api";
 
     public JioSaavnMetadataService(
-        IHttpClientFactory httpClientFactory,
+        JioSaavnApiClient apiClient,
         ILogger<JioSaavnMetadataService> logger)
     {
-        _httpClient = httpClientFactory.CreateClient();
+        _apiClient = apiClient;
         _logger = logger;
     }
 
-    public async Task<string?> GetSongDownloadUrlAsync(string songToken)
+    public async Task<string?> GetSongDownloadUrlAsync(string externalId)
     {
         try
         {
-            var url = $"https://sda.rhythmax.workers.dev/song?url=https%3A%2F%2Fwww.jiosaavn.com%2Fsong%2Fsong%2F{songToken}";
-            using var response = await _httpClient.GetAsync(url);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            
-            var encryptedMediaUrl = doc.RootElement.GetProperty("more_info").GetProperty("encrypted_media_url").GetString();
-            if (string.IsNullOrEmpty(encryptedMediaUrl)) return null;
-
-            var decryptedUrl = JioSaavnCrypto.Decrypt(encryptedMediaUrl);
-            
-            // Swap quality to 320.mp4
-            return decryptedUrl.Replace("_96.mp4", "_320.mp4").Replace("_160.mp4", "_320.mp4");
+            return await _apiClient.ResolveQualityMediaUrlAsyncByExternalId(
+                externalId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get download URL for song: {Token}", songToken);
+            _logger.LogError(
+                ex,
+                "Failed to resolve JioSaavn download URL for external ID {ExternalId}",
+                externalId);
+
             return null;
         }
     }
 
-    public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
+    public async Task<List<Song>> SearchSongsAsync(
+        string query,
+        int limit = 20)
     {
+        _logger.LogInformation("JioSaavn SearchSongsAsync: {Query}", query);
         try
         {
-            var url = $"{SearchBaseUrl}/songs?q={Uri.EscapeDataString(query)}";
-            using var response = await _httpClient.GetAsync(url);
-            response.EnsureSuccessStatusCode();
+            var results = await _apiClient.SearchSongsAsync(query, limit);
 
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            
-            if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
-                return new List<Song>();
-
-            var songs = new List<Song>();
-            foreach (var item in results.EnumerateArray().Take(limit))
-            {
-                songs.Add(MapJioSaavnTrackToSong(item));
-            }
-            return songs;
+            return results
+                .Where(song => !string.IsNullOrWhiteSpace(song.PermaUrl))
+                .Select(song => MapJioSaavnTrackToSong(song))
+                .ToList();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to search songs for query: {Query}", query);
-            return new List<Song>();
+            _logger.LogError(
+                ex,
+                "Failed to search JioSaavn songs for query {Query}",
+                query);
+
+            return [];
         }
     }
 
-    private static Song MapJioSaavnTrackToSong(JsonElement track)
+    public async Task<SearchResult> SearchAllAsync(
+        string query,
+        int songLimit = 20,
+        int albumLimit = 20,
+        int artistLimit = 20)
     {
-        var externalId = track.TryGetProperty("token", out var t) ? t.GetString() ?? "" : "";
-        var title = track.TryGetProperty("title", out var titleProp) ? titleProp.GetString() ?? "" : "";
-        
-        var moreInfo = track.GetProperty("more_info");
-        var album = moreInfo.TryGetProperty("album", out var a) ? a.GetString() : "";
-        var albumId = moreInfo.TryGetProperty("album_token", out var at) ? $"ext-jiosaavn-album-{at.GetString()}" : null;
-        
-        var yearStr = track.TryGetProperty("year", out var y) ? y.GetString() : null;
-        int? year = int.TryParse(yearStr, out var parsedYear) ? parsedYear : null;
-        
-        // JioSaavn usually returns 150x150 images. We can manipulate the URL to get 500x500.
-        var coverUrl = track.TryGetProperty("image", out var i) ? i.GetString()?.Replace("150x150", "500x500") : null;
-        
-        string artistName = "";
-        if (moreInfo.TryGetProperty("artists", out var artistsNode) && 
-            artistsNode.TryGetProperty("primary", out var primaryNode) &&
-            primaryNode.ValueKind == JsonValueKind.Array &&
-            primaryNode.GetArrayLength() > 0)
+        _logger.LogInformation("JioSaavn SearchAllAsync: {Query}", query);
+        var songs = await SearchSongsAsync(query, songLimit);
+
+        return new SearchResult
         {
-            artistName = primaryNode[0].GetProperty("name").GetString() ?? "";
+            Songs = songs,
+            Albums = [],
+            Artists = []
+        };
+    }
+
+    public async Task<Song?> GetSongAsync(
+        string externalProvider,
+        string externalId)
+    {
+        if (!externalProvider.Equals(
+                ProviderName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
         }
+
+        try
+        {
+            var details =
+                await _apiClient.GetSongDetailsByExternalIdAsync(externalId);
+
+            return details is null
+                ? null
+                : MapJioSaavnTrackToSong(details, externalId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to load JioSaavn song {ExternalId}",
+                externalId);
+
+            return null;
+        }
+    }
+
+    private static Song MapJioSaavnTrackToSong(
+        JioSaavnApiSong track,
+        string? existingExternalId = null)
+    {
+        var info = track.MoreInfo;
+
+        var externalId = existingExternalId;
+        if (string.IsNullOrWhiteSpace(externalId) &&
+            !string.IsNullOrWhiteSpace(track.PermaUrl))
+        {
+            externalId =
+                JioSaavnApiClient.EncodePermaUrlExternalId(track.PermaUrl);
+        }
+
+        var artists = MapArtists(info?.Artists?.Primary);
+        var featuredArtists = MapArtistNames(info?.Artists?.Featured);
+
+        var artistName = artists.Count > 0
+            ? string.Join(", ", artists.Select(artist => artist.Name))
+            : ExtractArtistFromSubtitle(track.Subtitle);
+
+        if (artists.Count == 0 && !string.IsNullOrWhiteSpace(artistName))
+        {
+            artists.Add(new Artist
+            {
+                Id = string.Empty,
+                Name = artistName,
+                IsLocal = false,
+                ExternalProvider = ProviderName
+            });
+        }
+
+        var albumId = !string.IsNullOrWhiteSpace(info?.AlbumToken)
+            ? $"ext-jiosaavn-album-{info.AlbumToken}"
+            : null;
+
+        var coverUrl = UpgradeCoverUrl(track.Image);
 
         return new Song
         {
-            Title = title,
+            Title = track.Title ?? string.Empty,
             Artist = artistName,
-            Artists = !string.IsNullOrEmpty(artistName) 
-                ? new List<Artist> { new Artist { Id = "", Name = artistName, IsLocal = false, ExternalProvider = "jiosaavn" } } 
-                : new List<Artist>(),
-            Album = album ?? "",
+            Artists = artists,
+            Contributors = featuredArtists,
+            Album = info?.Album ?? string.Empty,
             AlbumId = albumId,
-            Year = year,
+            Duration = ParseInt(info?.Duration),
+            Year = ParseInt(track.Year),
+            ReleaseDate = info?.ReleaseDate,
+            Label = info?.Label,
+            Copyright = info?.CopyrightText,
+            Genre = track.Language,
             CoverArtUrl = coverUrl,
             CoverArtUrlLarge = coverUrl,
             IsLocal = false,
-            ExternalProvider = "jiosaavn",
+            ExternalProvider = ProviderName,
             ExternalId = externalId
         };
     }
 
-    // --- IMusicMetadataService Contract Stubs ---
-    public Task<List<Album>> SearchAlbumsAsync(string query, int limit = 20) => Task.FromResult(new List<Album>());
-    public Task<List<Artist>> SearchArtistsAsync(string query, int limit = 20) => Task.FromResult(new List<Artist>());
-    public Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20) => Task.FromResult(new SearchResult());
-    public Task<Song?> GetSongAsync(string externalProvider, string externalId) => Task.FromResult<Song?>(null);
-    public Task<Album?> GetAlbumAsync(string externalProvider, string externalId) => Task.FromResult<Album?>(null);
-    public Task<Artist?> GetArtistAsync(string externalProvider, string externalId) => Task.FromResult<Artist?>(null);
-    public Task<List<Album>> GetArtistAlbumsAsync(string externalProvider, string externalId) => Task.FromResult(new List<Album>());
-    public Task<List<ExternalPlaylist>> SearchPlaylistsAsync(string query, int limit = 20) => Task.FromResult(new List<ExternalPlaylist>());
-    public Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId) => Task.FromResult<ExternalPlaylist?>(null);
-    public Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId) => Task.FromResult(new List<Song>());
+    private static List<Artist> MapArtists(
+        IEnumerable<JioSaavnApiArtist>? source)
+    {
+        if (source is null)
+        {
+            return [];
+        }
+
+        return source
+            .Where(artist => !string.IsNullOrWhiteSpace(artist.Name))
+            .Select(artist => new Artist
+            {
+                Id = artist.Id ?? string.Empty,
+                Name = artist.Name!,
+                ImageUrl = artist.Image,
+                IsLocal = false,
+                ExternalProvider = ProviderName
+            })
+            .ToList();
+    }
+
+    private static List<string> MapArtistNames(
+        IEnumerable<JioSaavnApiArtist>? source)
+    {
+        if (source is null)
+        {
+            return [];
+        }
+
+        return source
+            .Select(artist => artist.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!)
+            .ToList();
+    }
+
+    private static string ExtractArtistFromSubtitle(string? subtitle)
+    {
+        if (string.IsNullOrWhiteSpace(subtitle))
+        {
+            return string.Empty;
+        }
+
+        var separatorIndex = subtitle.IndexOf(" - ", StringComparison.Ordinal);
+        return separatorIndex > 0
+            ? subtitle[..separatorIndex].Trim()
+            : subtitle.Trim();
+    }
+
+    private static string? UpgradeCoverUrl(string? image)
+    {
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return null;
+        }
+
+        return image
+            .Replace("50x50", "500x500", StringComparison.OrdinalIgnoreCase)
+            .Replace("150x150", "500x500", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int? ParseInt(string? value)
+    {
+        return int.TryParse(value, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    public Task<List<Album>> SearchAlbumsAsync(
+        string query,
+        int limit = 20) =>
+        Task.FromResult(new List<Album>());
+
+    public Task<List<Artist>> SearchArtistsAsync(
+        string query,
+        int limit = 20) =>
+        Task.FromResult(new List<Artist>());
+
+    public Task<Album?> GetAlbumAsync(
+        string externalProvider,
+        string externalId) =>
+        Task.FromResult<Album?>(null);
+
+    public Task<Artist?> GetArtistAsync(
+        string externalProvider,
+        string externalId) =>
+        Task.FromResult<Artist?>(null);
+
+    public Task<List<Album>> GetArtistAlbumsAsync(
+        string externalProvider,
+        string externalId) =>
+        Task.FromResult(new List<Album>());
+
+    public Task<List<ExternalPlaylist>> SearchPlaylistsAsync(
+        string query,
+        int limit = 20) =>
+        Task.FromResult(new List<ExternalPlaylist>());
+
+    public Task<ExternalPlaylist?> GetPlaylistAsync(
+        string externalProvider,
+        string externalId) =>
+        Task.FromResult<ExternalPlaylist?>(null);
+
+    public Task<List<Song>> GetPlaylistTracksAsync(
+        string externalProvider,
+        string externalId) =>
+        Task.FromResult(new List<Song>());
 }

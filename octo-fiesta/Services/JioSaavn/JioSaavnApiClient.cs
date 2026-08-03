@@ -16,7 +16,10 @@ public sealed class JioSaavnApiClient
     private const string SearchBaseUrl = "https://rtmx.vercel.app/api/songs?q=";
     private const string SongDetailsBaseUrl = "https://sda.rhythmax.workers.dev/song?url=";
     private static readonly byte[] DesKey = Encoding.ASCII.GetBytes("38346591");
-    private static readonly Regex QualitySuffixRegex = new(@"_\d+\.mp4(\?.*)?$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex QualitySuffixRegex = new(
+        @"_\d+\.mp4(\?.*)?$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -25,13 +28,18 @@ public sealed class JioSaavnApiClient
     private readonly HttpClient _httpClient;
     private readonly JioSaavnSettings _settings;
 
-    public JioSaavnApiClient(IHttpClientFactory httpClientFactory, IOptions<JioSaavnSettings> settings)
+    public JioSaavnApiClient(
+        IHttpClientFactory httpClientFactory,
+        IOptions<JioSaavnSettings> settings)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
     }
 
-    public async Task<IReadOnlyList<JioSaavnApiSong>> SearchSongsAsync(string query, int? limit = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<JioSaavnApiSong>> SearchSongsAsync(
+        string query,
+        int? limit = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -39,11 +47,20 @@ public sealed class JioSaavnApiClient
         }
 
         var encodedQuery = Uri.EscapeDataString(query.Trim());
-        using var response = await _httpClient.GetAsync($"{SearchBaseUrl}{encodedQuery}", cancellationToken);
+        using var response = await _httpClient.GetAsync(
+            $"{SearchBaseUrl}{encodedQuery}",
+            cancellationToken);
+
         response.EnsureSuccessStatusCode();
 
-        await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var payload = await JsonSerializer.DeserializeAsync<JioSaavnSearchResponse>(contentStream, SerializerOptions, cancellationToken);
+        await using var contentStream =
+            await response.Content.ReadAsStreamAsync(cancellationToken);
+
+        var payload = await JsonSerializer.DeserializeAsync<JioSaavnSearchResponse>(
+            contentStream,
+            SerializerOptions,
+            cancellationToken);
+
         if (payload?.Results is null || payload.Results.Count == 0)
         {
             return [];
@@ -53,7 +70,9 @@ public sealed class JioSaavnApiClient
         return payload.Results.Take(effectiveLimit).ToList();
     }
 
-    public async Task<JioSaavnApiSong?> GetSongDetailsByPermaUrlAsync(string permaUrl, CancellationToken cancellationToken = default)
+    public async Task<JioSaavnApiSong?> GetSongDetailsByPermaUrlAsync(
+        string permaUrl,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(permaUrl))
         {
@@ -61,22 +80,38 @@ public sealed class JioSaavnApiClient
         }
 
         var encodedSongUrl = Uri.EscapeDataString(permaUrl.Trim());
-        using var response = await _httpClient.GetAsync($"{SongDetailsBaseUrl}{encodedSongUrl}", cancellationToken);
+        using var response = await _httpClient.GetAsync(
+            $"{SongDetailsBaseUrl}{encodedSongUrl}",
+            cancellationToken);
+
         response.EnsureSuccessStatusCode();
 
-        await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonSerializer.DeserializeAsync<JioSaavnApiSong>(contentStream, SerializerOptions, cancellationToken);
+        await using var contentStream =
+            await response.Content.ReadAsStreamAsync(cancellationToken);
+
+        return await JsonSerializer.DeserializeAsync<JioSaavnApiSong>(
+            contentStream,
+            SerializerOptions,
+            cancellationToken);
     }
 
-    public Task<JioSaavnApiSong?> GetSongDetailsByExternalIdAsync(string externalSongId, CancellationToken cancellationToken = default)
+    public Task<JioSaavnApiSong?> GetSongDetailsByExternalIdAsync(
+        string externalSongId,
+        CancellationToken cancellationToken = default)
     {
         var permaUrl = DecodePermaUrlExternalId(externalSongId);
         return GetSongDetailsByPermaUrlAsync(permaUrl, cancellationToken);
     }
 
-    public async Task<string?> ResolveQualityMediaUrlAsyncByExternalId(string externalSongId, int? kbps = null, CancellationToken cancellationToken = default)
+    public async Task<string?> ResolveQualityMediaUrlAsyncByExternalId(
+        string externalSongId,
+        int? kbps = null,
+        CancellationToken cancellationToken = default)
     {
-        var song = await GetSongDetailsByExternalIdAsync(externalSongId, cancellationToken);
+        var song = await GetSongDetailsByExternalIdAsync(
+            externalSongId,
+            cancellationToken);
+
         var encryptedMediaUrl = song?.MoreInfo?.EncryptedMediaUrl;
         if (string.IsNullOrWhiteSpace(encryptedMediaUrl))
         {
@@ -84,7 +119,9 @@ public sealed class JioSaavnApiClient
         }
 
         var decryptedMediaUrl = DecryptMediaUrl(encryptedMediaUrl);
-        return GetQualityUrl(decryptedMediaUrl, kbps ?? GetConfiguredQualityKbps());
+        return GetQualityUrl(
+            decryptedMediaUrl,
+            NormalizeQuality(kbps ?? GetConfiguredQualityKbps()));
     }
 
     public static string EncodePermaUrlExternalId(string permaUrl)
@@ -95,21 +132,31 @@ public sealed class JioSaavnApiClient
         }
 
         var bytes = Encoding.UTF8.GetBytes(permaUrl.Trim());
-        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     public static string DecodePermaUrlExternalId(string externalSongId)
     {
         if (string.IsNullOrWhiteSpace(externalSongId))
         {
-            throw new ArgumentException("External song ID cannot be null or empty.", nameof(externalSongId));
+            throw new ArgumentException(
+                "External song ID cannot be null or empty.",
+                nameof(externalSongId));
         }
 
-        var normalized = externalSongId.Trim().Replace('-', '+').Replace('_', '/');
+        var normalized = externalSongId.Trim()
+            .Replace('-', '+')
+            .Replace('_', '/');
+
         var padding = normalized.Length % 4;
         if (padding != 0)
         {
-            normalized = normalized.PadRight(normalized.Length + (4 - padding), '=');
+            normalized = normalized.PadRight(
+                normalized.Length + (4 - padding),
+                '=');
         }
 
         var bytes = Convert.FromBase64String(normalized);
@@ -120,7 +167,9 @@ public sealed class JioSaavnApiClient
     {
         if (string.IsNullOrWhiteSpace(encryptedMediaUrl))
         {
-            throw new ArgumentException("Encrypted media URL cannot be null or empty.", nameof(encryptedMediaUrl));
+            throw new ArgumentException(
+                "Encrypted media URL cannot be null or empty.",
+                nameof(encryptedMediaUrl));
         }
 
         var normalizedBase64 = NormalizeBase64(encryptedMediaUrl.Trim());
@@ -132,7 +181,11 @@ public sealed class JioSaavnApiClient
         des.Key = DesKey;
 
         using var decryptor = des.CreateDecryptor();
-        var decryptedBytes = decryptor.TransformFinalBlock(encryptedBytes, 0, encryptedBytes.Length);
+        var decryptedBytes = decryptor.TransformFinalBlock(
+            encryptedBytes,
+            0,
+            encryptedBytes.Length);
+
         return Encoding.UTF8.GetString(decryptedBytes);
     }
 
@@ -140,24 +193,46 @@ public sealed class JioSaavnApiClient
     {
         if (string.IsNullOrWhiteSpace(decryptedMediaUrl))
         {
-            throw new ArgumentException("Decrypted media URL cannot be null or empty.", nameof(decryptedMediaUrl));
+            throw new ArgumentException(
+                "Decrypted media URL cannot be null or empty.",
+                nameof(decryptedMediaUrl));
         }
 
-        var quality = Math.Clamp(kbps, 12, 320);
-        return QualitySuffixRegex.Replace(decryptedMediaUrl, $"_{quality}.mp4$1");
+        var quality = NormalizeQuality(kbps);
+        var result = QualitySuffixRegex.Replace(
+            decryptedMediaUrl,
+            $"_{quality}.mp4$1");
+
+        if (result == decryptedMediaUrl)
+        {
+            throw new InvalidOperationException(
+                $"JioSaavn media URL did not contain a replaceable quality suffix: {decryptedMediaUrl}");
+        }
+
+        return result;
     }
+
+    public static int NormalizeQuality(int kbps) => kbps switch
+    {
+        <= 96 => 96,
+        <= 160 => 160,
+        _ => 320
+    };
 
     private static string NormalizeBase64(string base64)
     {
         var normalized = base64.Replace('-', '+').Replace('_', '/');
         var padding = normalized.Length % 4;
-        return padding == 0 ? normalized : normalized.PadRight(normalized.Length + (4 - padding), '=');
+
+        return padding == 0
+            ? normalized
+            : normalized.PadRight(normalized.Length + (4 - padding), '=');
     }
 
     private int GetConfiguredQualityKbps()
     {
         return int.TryParse(_settings.Quality, out var parsed)
-            ? Math.Clamp(parsed, 12, 320)
+            ? NormalizeQuality(parsed)
             : 320;
     }
 }
