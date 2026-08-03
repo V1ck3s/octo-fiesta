@@ -58,7 +58,9 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN can't publish a NEW package from a forked repo (GHCR anti-abuse
+          # restriction, independent of the permissions: block above) — use a PAT instead.
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Extract metadata
         id: meta
