@@ -90,17 +90,17 @@ public class YouTubeDownloadService : BaseDownloadService
             throw new FileNotFoundException($"yt-dlp did not create a file for track {trackId}");
         }
 
-        var extension = Path.GetExtension(downloadedFilePath).TrimStart('.').ToLowerInvariant();
+        var extension = Path.GetExtension(downloadedFilePath).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(extension))
         {
-            extension = preferredFormat;
+            extension = $".{preferredFormat}";
         }
 
         _logger.LogInformation("YouTube download completed: trackId={TrackId}, file={FilePath}", trackId, downloadedFilePath);
         return new DownloadResult(
             new DeleteOnDisposeFileStream(downloadedFilePath),
             extension,
-            extension.ToUpperInvariant());
+            extension.TrimStart('.').ToUpperInvariant());
     }
 
     protected override string? ExtractExternalIdFromAlbumId(string albumId)
