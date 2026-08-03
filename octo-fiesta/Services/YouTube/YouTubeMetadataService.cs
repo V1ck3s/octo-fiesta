@@ -49,7 +49,9 @@ public class YouTubeMetadataService : IMusicMetadataService
             return [];
         }
 
-        using var throttle = new SemaphoreSlim(6);
+        // Each lookup is ~1s; keep the whole batch to one round-trip (bounded so a
+        // misconfigured YouTube__MaxResults can't spawn an unreasonable number of processes).
+        using var throttle = new SemaphoreSlim(Math.Min(songIds.Count, 20));
         var resolveTasks = songIds.Select(async id =>
         {
             await throttle.WaitAsync();
