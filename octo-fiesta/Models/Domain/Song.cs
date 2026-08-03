@@ -76,7 +76,7 @@ public class Song
     public bool IsLocal { get; set; }
     
     /// <summary>
-    /// External provider (deezer, spotify, etc.) - null if local
+    /// External provider (qobuz, yandex, etc.) - null if local
     /// </summary>
     public string? ExternalProvider { get; set; }
     
@@ -91,7 +91,7 @@ public class Song
     public string? LocalPath { get; set; }
     
     /// <summary>
-    /// Deezer explicit content lyrics value
+    /// Explicit content flag, normalized to a shared convention across providers:
     /// 0 = Naturally clean, 1 = Explicit, 2 = Not applicable, 3 = Clean/edited version, 6/7 = Unknown
     /// </summary>
     public int? ExplicitContentLyrics { get; set; }

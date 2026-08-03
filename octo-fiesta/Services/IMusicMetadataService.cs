@@ -8,7 +8,7 @@ namespace octo_fiesta.Services;
 
 /// <summary>
 /// Interface for external music metadata search service
-/// (Deezer API, Spotify API, MusicBrainz, etc.)
+/// (Qobuz API, Yandex Music API, etc.)
 /// </summary>
 public interface IMusicMetadataService
 {
@@ -66,7 +66,7 @@ public interface IMusicMetadataService
     /// <summary>
     /// Gets details of an external playlist (metadata only, not tracks)
     /// </summary>
-    /// <param name="externalProvider">Provider name (e.g., "deezer", "qobuz")</param>
+    /// <param name="externalProvider">Provider name (e.g., "qobuz", "yandex")</param>
     /// <param name="externalId">Playlist ID from the provider</param>
     /// <returns>Playlist details or null if not found</returns>
     Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId);
@@ -74,7 +74,7 @@ public interface IMusicMetadataService
     /// <summary>
     /// Gets all tracks from an external playlist
     /// </summary>
-    /// <param name="externalProvider">Provider name (e.g., "deezer", "qobuz")</param>
+    /// <param name="externalProvider">Provider name (e.g., "qobuz", "yandex")</param>
     /// <param name="externalId">Playlist ID from the provider</param>
     /// <returns>List of songs in the playlist</returns>
     Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId);

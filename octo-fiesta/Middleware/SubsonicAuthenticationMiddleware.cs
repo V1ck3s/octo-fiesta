@@ -9,7 +9,7 @@ namespace octo_fiesta.Middleware;
 
 /// <summary>
 /// Middleware that validates Subsonic authentication parameters by verifying them against the upstream Subsonic server.
-/// This prevents unauthenticated access to external resources (like SquidWTF downloads).
+/// This prevents unauthenticated access to external resources (like external provider downloads).
 /// </summary>
 public class SubsonicAuthenticationMiddleware
 {

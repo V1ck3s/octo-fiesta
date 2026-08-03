@@ -68,7 +68,7 @@ public abstract class BaseDownloadService : IDownloadService
         => _lyricsService ??= _serviceProvider.GetService<ILyricsService>();
 
     /// <summary>
-    /// Provider name (e.g., "deezer", "qobuz")
+    /// Provider name (e.g., "qobuz", "yandex")
     /// </summary>
     protected abstract string ProviderName { get; }
 
@@ -215,7 +215,7 @@ public abstract class BaseDownloadService : IDownloadService
     /// Moves a cached song to permanent storage. Used when starring a song in Cache mode.
     /// If the song is not in cache, returns false (caller should handle this case).
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The external track ID</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if the song was moved to permanent storage, false if not found in cache</returns>
@@ -384,16 +384,8 @@ public abstract class BaseDownloadService : IDownloadService
 
     /// <summary>
     /// Result of a track download containing Stream with track content, preferred filename extension and quality.
-    /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
-    /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    /// <summary>
-    /// <paramref name="CencKey"/>, when set, is a 32-hex-char AES-128 key for a CENC-encrypted CMAF
-    /// stream (Amazon Music via squid.wtf). The encrypted file is written to disk first, then decrypted
-    /// in-place via <see cref="CmafCencDecryptor"/> before metadata is tagged.
-    /// The MP4 container is preserved; no remux step is required.
-    /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? CencKey = null);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -408,7 +400,7 @@ public abstract class BaseDownloadService : IDownloadService
 
     /// <summary>
     /// Extracts the external album ID from the internal album ID format.
-    /// Example: "ext-deezer-album-123456" -> "123456"
+    /// Example: "ext-qobuz-album-123456" -> "123456"
     /// </summary>
     protected abstract string? ExtractExternalIdFromAlbumId(string albumId);
 
@@ -735,21 +727,10 @@ public abstract class BaseDownloadService : IDownloadService
             // This catches cases where the stream is raw FLAC but we assumed MP4 container.
             outputPath = CorrectExtensionIfNeeded(outputPath);
 
-            // CENC-encrypted CMAF (Amazon Music via squid.wtf): decrypt in-place in pure .NET.
-            if (!string.IsNullOrEmpty(result.CencKey))
-            {
-                outputPath = DecryptCenc(outputPath, result.CencKey);
-                outputPath = DemuxFlacIfNeeded(outputPath);
-            }
-
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
             // Write metadata
             await WriteMetadataAsync(outputPath, song, cancellationToken);
-
-            // Fragmented MP4 (Tidal HI_RES FLAC-in-MP4) carries no top-level duration; patch it
-            // so tag scanners don't report 0:00. Done last so it survives the metadata write.
-            PatchMp4DurationIfNeeded(outputPath, result);
 
             // For permanent files, drop a .lrc sidecar so the backing server serves synced
             // lyrics on later listens and to other clients. Fire-and-forget: never delay or
@@ -811,52 +792,6 @@ public abstract class BaseDownloadService : IDownloadService
         }
     }
 
-    // After CENC decryption, if the MP4 container holds raw FLAC frames (Amazon Music FLAC tier),
-    // extract them into a .flac file. AAC/Opus/Atmos streams stay as .m4a.
-    private string DemuxFlacIfNeeded(string path)
-    {
-        if (!path.EndsWith(".m4a", StringComparison.OrdinalIgnoreCase)) return path;
-
-        var flacPath = Path.ChangeExtension(path, ".flac");
-        flacPath = PathHelper.ResolveUniquePath(flacPath);
-
-        try
-        {
-            if (CmafFlacDemuxer.TryDemux(path, flacPath))
-            {
-                IOFile.Delete(path);
-                Logger.LogInformation("Demuxed FLAC from MP4 container: {File}", Path.GetFileName(flacPath));
-                return flacPath;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "FLAC demux failed for {Path}, keeping .m4a", path);
-            if (IOFile.Exists(flacPath)) IOFile.Delete(flacPath);
-        }
-
-        return path;
-    }
-
-    // Decrypt a CENC-encrypted CMAF file in-place using pure .NET + BouncyCastle AES-128-CTR.
-    // Amazon Music via squid.wtf delivers CMAF with AES-128-CTR CENC encryption;
-    // per-sample IVs are parsed from the moof/traf/senc boxes. The MP4 container is preserved.
-    private string DecryptCenc(string path, string hexKey)
-    {
-        try
-        {
-            var key = Convert.FromHexString(hexKey);
-            CmafCencDecryptor.Decrypt(path, path, key);
-            Logger.LogInformation("CENC decryption complete for {File}", Path.GetFileName(path));
-            return path;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "CENC decryption failed for {Path}", path);
-            throw;
-        }
-    }
-
     // Log progress every 10 MB and cancel if no bytes flow for 90 seconds (stall detection).
     private async Task CopyWithProgressAsync(Stream source, Stream dest, string? title, CancellationToken cancellationToken)
     {
@@ -899,38 +834,6 @@ public abstract class BaseDownloadService : IDownloadService
 
         Logger.LogInformation("Download complete: '{Title}' — {MB} MB in {Elapsed}s",
             title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
-    }
-
-    /// <summary>
-    /// Writes the known duration into an MP4/M4A file's moov so fragmented MP4 (which stores
-    /// timing only in per-fragment boxes) doesn't report a 0:00 length. No-op for other formats.
-    /// Failures are logged but never abort the download — the audio is already on disk.
-    /// </summary>
-    private void PatchMp4DurationIfNeeded(string outputPath, DownloadResult result)
-    {
-        if (result.Mp4DurationSeconds is not > 0)
-        {
-            return;
-        }
-
-        var ext = Path.GetExtension(outputPath);
-        if (!ext.Equals(".m4a", StringComparison.OrdinalIgnoreCase) &&
-            !ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
-            if (Mp4DurationPatcher.PatchDuration(outputPath, result.Mp4DurationSeconds.Value))
-            {
-                Logger.LogInformation("Patched MP4 duration ({Duration:F3}s) for {Path}", result.Mp4DurationSeconds.Value, outputPath);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to patch MP4 duration for {Path}", outputPath);
-        }
     }
 
     protected async Task DownloadRemainingAlbumTracksAsync(string albumExternalId, string excludeTrackExternalId, CancellationToken cancellationToken = default)

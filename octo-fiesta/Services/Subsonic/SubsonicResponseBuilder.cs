@@ -500,8 +500,6 @@ public class SubsonicResponseBuilder
     /// </summary>
     public XElement ConvertSongToXml(Song song, XNamespace ns, string? parentAlbumId = null)
     {
-        var isSquid = !string.IsNullOrEmpty(song.ExternalProvider) && song.ExternalProvider.Equals("SquidWTF", System.StringComparison.OrdinalIgnoreCase);
-
         // albumId/parent prefer explicit Song.AlbumId, otherwise fall back to provided parentAlbumId
         var albumId = song.AlbumId ?? parentAlbumId ?? string.Empty;
 
@@ -733,7 +731,7 @@ public class SubsonicResponseBuilder
             return ("mp3", "audio/mpeg", 128);
         }
 
-        // Default for external providers (Deezer, Qobuz, SquidWTF) without cached file
+        // Default for external providers without a cached file yet
         return ("Remote", "audio/mpeg", 0);
     }
 

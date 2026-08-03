@@ -1,13 +1,13 @@
 namespace octo_fiesta.Models.Subsonic;
 
 /// <summary>
-/// Represents a playlist from an external music provider (Deezer, Qobuz).
+/// Represents a playlist from an external music provider (Qobuz, Yandex).
 /// </summary>
 public class ExternalPlaylist
 {
     /// <summary>
     /// Unique identifier in the format "pl-{provider}-{externalId}"
-    /// Example: "pl-deezer-123456" or "pl-qobuz-789"
+    /// Example: "pl-qobuz-123456" or "pl-yandex-789"
     /// </summary>
     public string Id { get; set; } = string.Empty;
     
@@ -27,7 +27,7 @@ public class ExternalPlaylist
     public string? CuratorName { get; set; }
     
     /// <summary>
-    /// Provider name ("deezer" or "qobuz")
+    /// Provider name ("qobuz" or "yandex")
     /// </summary>
     public string Provider { get; set; } = string.Empty;
     

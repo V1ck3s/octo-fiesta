@@ -1,8 +1,6 @@
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
-using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
-using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Yandex;
 using octo_fiesta.Services.YouTube;
 using octo_fiesta.Services.JioSaavn;
@@ -30,12 +28,8 @@ builder.Services.AddProblemDetails();
 // Configuration
 builder.Services.Configure<SubsonicSettings>(
     builder.Configuration.GetSection("Subsonic"));
-builder.Services.Configure<DeezerSettings>(
-    builder.Configuration.GetSection("Deezer"));
 builder.Services.Configure<QobuzSettings>(
     builder.Configuration.GetSection("Qobuz"));
-builder.Services.Configure<SquidWTFSettings>(
-    builder.Configuration.GetSection("SquidWTF"));
 builder.Services.Configure<YandexSettings>(
     builder.Configuration.GetSection("Yandex"));
 builder.Services.Configure<YouTubeSettings>(
@@ -79,40 +73,15 @@ builder.Services.AddHttpClient(LrclibLyricsService.HttpClientName, client =>
 // will use the last registered implementation when injecting IMusicMetadataService/IDownloadService
 if (musicService == MusicService.Qobuz)
 {
-    // If playlists enabled, register Deezer FIRST (secondary provider)
     if (enableExternalPlaylists)
     {
-        builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
-        builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
         builder.Services.AddSingleton<PlaylistSyncService>();
     }
-    
+
     // Qobuz services (primary) - registered LAST to be injected by default
     builder.Services.AddSingleton<QobuzBundleService>();
     builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
     builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
-}
-else if (musicService == MusicService.SquidWTF)
-{
-    var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
-    var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
-    var isDeemixSource = squidWtfSource.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
-
-    // Tidal and Deemix expose playlists through their SquidWTF APIs.
-    if (enableExternalPlaylists && (isTidalSource || isDeemixSource))
-    {
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-    
-    // Instance manager for automatic API failover (required for Tidal)
-    builder.Services.AddSingleton<SquidWTFInstanceManager>();
-
-    // Captcha ALTCHA solver for SquidWTF Qobuz
-    builder.Services.AddSingleton<SquidWTFCaptchaSolver>();
-    
-    // SquidWTF services (primary) - registered LAST to be injected by default
-    builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();
 }
 else if (musicService == MusicService.Yandex)
 {
@@ -135,25 +104,15 @@ else if (musicService == MusicService.JioSaavn)
 }
 else
 {
-    // If playlists enabled, register Qobuz FIRST (secondary provider)
-    if (enableExternalPlaylists)
-    {
-        builder.Services.AddSingleton<QobuzBundleService>();
-        builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
-        builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-    
-    // Deezer services (primary, default) - registered LAST to be injected by default
-    builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
+    // Unreachable in practice (MusicService binds to one of the enum values above,
+    // and its own default is JioSaavn) - kept as a safe fallback.
+    builder.Services.AddSingleton<IMusicMetadataService, JioSaavnMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, JioSaavnDownloadService>();
 }
 
 // Startup validation - register validators
 builder.Services.AddSingleton<IStartupValidator, SubsonicStartupValidator>();
-builder.Services.AddSingleton<IStartupValidator, DeezerStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
-builder.Services.AddSingleton<IStartupValidator, SquidWTFStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, YandexStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, YouTubeStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, JioSaavnStartupValidator>();

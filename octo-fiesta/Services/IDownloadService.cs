@@ -7,14 +7,14 @@ using octo_fiesta.Models.Subsonic;
 namespace octo_fiesta.Services;
 
 /// <summary>
-/// Interface for the music download service (Deezspot or other)
+/// Interface for the music download service
 /// </summary>
 public interface IDownloadService
 {
     /// <summary>
     /// Downloads a song from an external provider
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The ID on the external provider</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the downloaded file</returns>
@@ -24,7 +24,7 @@ public interface IDownloadService
     /// Downloads a song from an external provider, forcing permanent storage even in Cache mode.
     /// Used when starring playlists in Cache mode.
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The ID on the external provider</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the downloaded file</returns>
@@ -33,7 +33,7 @@ public interface IDownloadService
     /// <summary>
     /// Downloads a song and streams the result progressively
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The ID on the external provider</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>A stream of the audio file together with its local path (used to determine the content type)</returns>
@@ -42,7 +42,7 @@ public interface IDownloadService
     /// <summary>
     /// Downloads remaining tracks from an album in background (excluding the specified track)
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="albumExternalId">The album ID on the external provider</param>
     /// <param name="excludeTrackExternalId">The track ID to exclude (already downloaded)</param>
     void DownloadRemainingAlbumTracksInBackground(string externalProvider, string albumExternalId, string excludeTrackExternalId);
@@ -50,7 +50,7 @@ public interface IDownloadService
     /// <summary>
     /// Downloads all tracks from an album in background.
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, spotify)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="albumExternalId">The album ID on the external provider</param>
     void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId);
 
@@ -58,7 +58,7 @@ public interface IDownloadService
     /// Downloads all tracks from an album in background, forcing permanent storage even in Cache mode.
     /// Used when starring an album in Cache mode.
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="albumExternalId">The album ID on the external provider</param>
     void DownloadFullAlbumInBackgroundToPermanent(string externalProvider, string albumExternalId);
     
@@ -70,7 +70,7 @@ public interface IDownloadService
     /// <summary>
     /// Gets the local path for a song if it has been downloaded already
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The ID on the external provider</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The local file path if exists, null otherwise</returns>
@@ -79,7 +79,7 @@ public interface IDownloadService
     /// <summary>
     /// Moves a cached song to permanent storage. Used when starring a song in Cache mode.
     /// </summary>
-    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="externalId">The external track ID</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>True if the song was moved to permanent storage, false if not found in cache</returns>

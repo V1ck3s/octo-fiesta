@@ -3,14 +3,14 @@ namespace octo_fiesta.Services.Common;
 /// <summary>
 /// Helper class for handling external playlist IDs.
 /// Playlist IDs use the format: "pl-{provider}-{externalId}"
-/// Example: "pl-deezer-123456", "pl-qobuz-789"
+/// Example: "pl-qobuz-123456", "pl-yandex-789"
 /// </summary>
 public static class PlaylistIdHelper
 {
     private const string PlaylistPrefix = "pl-";
-    
+
     // Known external providers for playlists
-    private static readonly string[] KnownProviders = { "deezer", "qobuz", "squidwtf", "yandex", "youtube" };
+    private static readonly string[] KnownProviders = { "qobuz", "yandex", "youtube" };
     
     /// <summary>
     /// Checks if an ID represents an external playlist.
@@ -76,7 +76,7 @@ public static class PlaylistIdHelper
     /// <summary>
     /// Creates a playlist ID from provider and external ID.
     /// </summary>
-    /// <param name="provider">The provider name (e.g., "deezer", "qobuz")</param>
+    /// <param name="provider">The provider name (e.g., "qobuz", "yandex")</param>
     /// <param name="externalId">The external ID from the provider</param>
     /// <returns>A playlist ID in format "pl-{provider}-{externalId}"</returns>
     public static string CreatePlaylistId(string provider, string externalId)

@@ -12,7 +12,6 @@ using octo_fiesta.Services;
 using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Lyrics;
-using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Subsonic;
 
 namespace octo_fiesta.Controllers;
@@ -560,35 +559,10 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        var (isExternal, albumProvider, albumType, albumExternalId) = _localLibraryService.ParseExternalId(id);
+        var (isExternal, albumProvider, _, albumExternalId) = _localLibraryService.ParseExternalId(id);
 
         if (isExternal)
         {
-            // Amazon Music via squidwtf: songs lacking an album ASIN use albumId=songId so clients
-            // can look up cover art. Synthesise a single-track album so the client can queue/play.
-            // Scoped to squidwtf to avoid touching the getAlbum path for other providers.
-            if (albumType == "song" && albumProvider == "squidwtf")
-            {
-                var song = await _metadataService.GetSongAsync(albumProvider!, albumExternalId!);
-                if (song == null)
-                    return _responseBuilder.CreateError(format, 70, "Album not found");
-
-                var syntheticAlbum = new octo_fiesta.Models.Domain.Album
-                {
-                    Id = id,
-                    Title = song.Album ?? song.Title,
-                    Artist = song.Artist,
-                    ArtistId = song.ArtistId,
-                    CoverArtUrl = song.CoverArtUrl,
-                    CoverArtUrlLarge = song.CoverArtUrlLarge,
-                    IsLocal = false,
-                    ExternalProvider = albumProvider,
-                    ExternalId = albumExternalId,
-                    Songs = new System.Collections.Generic.List<octo_fiesta.Models.Domain.Song> { song }
-                };
-                return _responseBuilder.CreateAlbumResponse(format, syntheticAlbum);
-            }
-
             var album = await _metadataService.GetAlbumAsync(albumProvider!, albumExternalId!);
 
             if (album == null)
@@ -727,7 +701,7 @@ public class SubsonicController : ControllerBase
 
     /// <summary>
     /// Proxies external covers. Uses type from ID to determine which API to call.
-    /// Format: ext-{provider}-{type}-{id} (e.g., ext-deezer-artist-259, ext-deezer-album-96126)
+    /// Format: ext-{provider}-{type}-{id} (e.g., ext-qobuz-artist-259, ext-qobuz-album-96126)
     /// </summary>
     [HttpGet, HttpPost]
     [Route("rest/getCoverArt")]
@@ -812,27 +786,17 @@ public class SubsonicController : ControllerBase
                 
             case "song":
             default:
-                // Fast path: check the in-memory cover cache (populated during search/album lookup)
-                // before making an expensive API call just for cover art.
-                if (_metadataService is SquidWTFMetadataService squidService)
+                var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
+                if (song?.CoverArtUrl != null)
                 {
-                    coverUrl = squidService.GetCachedCoverUrl(coverExternalId!);
+                    coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
                 }
-
-                if (coverUrl == null)
+                else
                 {
-                    var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
-                    if (song?.CoverArtUrl != null)
+                    var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
+                    if (albumFallback?.CoverArtUrl != null)
                     {
-                        coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
-                    }
-                    else
-                    {
-                        var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
-                        if (albumFallback?.CoverArtUrl != null)
-                        {
-                            coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
-                        }
+                        coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
                     }
                 }
                 break;
@@ -842,31 +806,6 @@ public class SubsonicController : ControllerBase
         {
             using var httpClient = new HttpClient();
             using var req = new HttpRequestMessage(HttpMethod.Get, coverUrl);
-
-            // amz.squid.wtf image proxy requires the captcha token
-            if (coverUrl.Contains("amz.squid.wtf", StringComparison.OrdinalIgnoreCase))
-            {
-                var captchaSolver = HttpContext.RequestServices.GetService<SquidWTFCaptchaSolver>();
-                if (captchaSolver != null)
-                {
-                    try
-                    {
-                        var (token, sessionCookie) = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
-                        req.Headers.Add("X-Captcha-Token", token);
-                        req.Headers.Add("Cookie", sessionCookie);
-                        req.Headers.Add("Origin", "https://amz.squid.wtf");
-                        req.Headers.Add("Referer", "https://amz.squid.wtf/");
-                        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-                        req.Headers.Add("Sec-Fetch-Site", "same-origin");
-                        req.Headers.Add("Sec-Fetch-Mode", "cors");
-                        req.Headers.Add("Sec-Fetch-Dest", "empty");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Could not get Amazon captcha token for cover art");
-                    }
-                }
-            }
 
             var response = await httpClient.SendAsync(req);
             if (response.IsSuccessStatusCode)

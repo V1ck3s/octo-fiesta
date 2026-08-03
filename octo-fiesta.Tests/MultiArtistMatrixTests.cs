@@ -1,9 +1,7 @@
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Subsonic;
-using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
-using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Subsonic;
 using octo_fiesta.Services.Yandex;
 using Microsoft.Extensions.Logging;
@@ -77,9 +75,6 @@ public class MultiArtistMatrixTests
 
     // ---- per-provider service builders ----
 
-    private static DeezerMetadataService Deezer(string json) =>
-        new(Factory(JsonHandler(json)), Options.Create(new SubsonicSettings()));
-
     private static QobuzMetadataService Qobuz(string json)
     {
         var factory = Factory(JsonHandler(json));
@@ -106,41 +101,7 @@ public class MultiArtistMatrixTests
             Mock.Of<ILogger<YandexMetadataService>>());
     }
 
-    private static SquidWTFMetadataService SquidWtfTidal(string json)
-    {
-        var factory = Factory(JsonHandler(json));
-        var settings = Options.Create(new SquidWTFSettings
-        {
-            Source = "Tidal",
-            Instances = new List<string> { "https://inst1.test" }
-        });
-        var instanceManager = new SquidWTFInstanceManager(
-            factory, settings, Mock.Of<ILogger<SquidWTFInstanceManager>>());
-        var captchaSolver = new SquidWTFCaptchaSolver(factory, Mock.Of<ILogger<SquidWTFCaptchaSolver>>());
-        return new SquidWTFMetadataService(
-            factory,
-            settings,
-            Options.Create(new SubsonicSettings()),
-            instanceManager,
-            captchaSolver,
-            Mock.Of<ILogger<SquidWTFMetadataService>>());
-    }
-
     // ---- fixtures (multi-artist payloads) ----
-
-    private const string DeezerTrackJson = """
-    {
-      "id": 123,
-      "title": "Deezer Multi",
-      "duration": 210,
-      "artist": { "id": 7, "name": "Deezer Main" },
-      "album": { "id": 70, "title": "Deezer Album", "artist": { "id": 7, "name": "Deezer Main" } },
-      "contributors": [
-        { "id": 7, "name": "Deezer Main", "role": "Main" },
-        { "id": 8, "name": "Deezer Feat", "role": "Featured" }
-      ]
-    }
-    """;
 
     private const string QobuzTrackJson = """
     {
@@ -182,44 +143,12 @@ public class MultiArtistMatrixTests
     }
     """;
 
-    private const string TidalTrackJson = """
-    {
-      "version": "1",
-      "data": {
-        "id": 555,
-        "title": "Tidal Multi",
-        "duration": 200,
-        "trackNumber": 1,
-        "volumeNumber": 1,
-        "explicit": false,
-        "artist": { "id": 10, "name": "Tidal Main" },
-        "artists": [
-          { "id": 10, "name": "Tidal Main" },
-          { "id": 11, "name": "Tidal Feat" }
-        ],
-        "album": { "id": 99, "title": "Tidal Album", "releaseDate": "2020-01-01" }
-      }
-    }
-    """;
-
-    private static Task<Song?> DeezerSong() => Deezer(DeezerTrackJson).GetSongAsync("deezer", "123");
     private static Task<Song?> QobuzSong() => Qobuz(QobuzTrackJson).GetSongAsync("qobuz", "123456789");
     private static Task<Song?> YandexSong() => Yandex(YandexTrackJson).GetSongAsync("yandex", "88633197:17743572");
-    private static Task<Song?> TidalSong() => SquidWtfTidal(TidalTrackJson).GetSongAsync("squidwtf", "555");
 
     // =====================================================================
     // Provider dimension: Song.Artists is populated with id + name
     // =====================================================================
-
-    [Fact]
-    public async Task Deezer_PopulatesMultipleIdentifiedArtists()
-    {
-        var song = await DeezerSong();
-        Assert.NotNull(song);
-        Assert.Equal(
-            new[] { ("ext-deezer-artist-7", "Deezer Main"), ("ext-deezer-artist-8", "Deezer Feat") },
-            song!.Artists.Select(a => (a.Id, a.Name)));
-    }
 
     [Fact]
     public async Task Qobuz_PopulatesIdentifiedArtist()
@@ -246,28 +175,9 @@ public class MultiArtistMatrixTests
             song!.Artists.Select(a => (a.Id, a.Name)));
     }
 
-    [Fact]
-    public async Task Tidal_PopulatesMultipleIdentifiedArtists()
-    {
-        var song = await TidalSong();
-        Assert.NotNull(song);
-        Assert.Equal(
-            new[] { ("ext-squidwtf-artist-10", "Tidal Main"), ("ext-squidwtf-artist-11", "Tidal Feat") },
-            song!.Artists.Select(a => (a.Id, a.Name)));
-    }
-
     // =====================================================================
     // Serializer dimension: artists reach the client (JSON + XML), per provider
     // =====================================================================
-
-    [Fact]
-    public async Task Deezer_Subsonic_EmitsArtists()
-    {
-        var song = (await DeezerSong())!;
-        var expected = new[] { ("ext-deezer-artist-7", "Deezer Main"), ("ext-deezer-artist-8", "Deezer Feat") };
-        Assert.Equal(expected, JsonArtists(song));
-        Assert.Equal(expected, XmlArtists(song));
-    }
 
     [Fact]
     public async Task Qobuz_Subsonic_EmitsArtists()
@@ -292,15 +202,6 @@ public class MultiArtistMatrixTests
         Assert.Equal(expected, XmlArtists(song));
     }
 
-    [Fact]
-    public async Task Tidal_Subsonic_EmitsArtists()
-    {
-        var song = (await TidalSong())!;
-        var expected = new[] { ("ext-squidwtf-artist-10", "Tidal Main"), ("ext-squidwtf-artist-11", "Tidal Feat") };
-        Assert.Equal(expected, JsonArtists(song));
-        Assert.Equal(expected, XmlArtists(song));
-    }
-
     // =====================================================================
     // Serializer edge cases
     // =====================================================================
@@ -308,7 +209,7 @@ public class MultiArtistMatrixTests
     [Fact]
     public void Subsonic_EmptyArtists_ProducesEmptyArtistsCollection()
     {
-        var song = new Song { Title = "T", Artist = "Main", ExternalProvider = "deezer", ExternalId = "1" };
+        var song = new Song { Title = "T", Artist = "Main", ExternalProvider = "qobuz", ExternalId = "1" };
         Assert.Empty(JsonArtists(song));
         Assert.Empty(XmlArtists(song));
     }
@@ -320,15 +221,15 @@ public class MultiArtistMatrixTests
         {
             Title = "T",
             Artist = "A",
-            ExternalProvider = "deezer",
+            ExternalProvider = "qobuz",
             ExternalId = "1",
             Artists = new List<Artist>
             {
-                new() { Id = "ext-deezer-artist-1", Name = "A" },
-                new() { Id = "ext-deezer-artist-2", Name = "B" },
+                new() { Id = "ext-qobuz-artist-1", Name = "A" },
+                new() { Id = "ext-qobuz-artist-2", Name = "B" },
             }
         };
-        var expected = new[] { ("ext-deezer-artist-1", "A"), ("ext-deezer-artist-2", "B") };
+        var expected = new[] { ("ext-qobuz-artist-1", "A"), ("ext-qobuz-artist-2", "B") };
         Assert.Equal(expected, JsonArtists(song));
         Assert.Equal(expected, XmlArtists(song));
     }

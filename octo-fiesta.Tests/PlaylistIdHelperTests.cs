@@ -11,7 +11,7 @@ public class PlaylistIdHelperTests
     public void IsExternalPlaylist_WithValidPlaylistId_ReturnsTrue()
     {
         // Arrange
-        var id = "pl-deezer-123456";
+        var id = "pl-yandex-123456";
 
         // Act
         var result = PlaylistIdHelper.IsExternalPlaylist(id);
@@ -37,7 +37,7 @@ public class PlaylistIdHelperTests
     public void IsExternalPlaylist_WithUpperCasePrefix_ReturnsTrue()
     {
         // Arrange
-        var id = "PL-deezer-123456";
+        var id = "PL-yandex-123456";
 
         // Act
         var result = PlaylistIdHelper.IsExternalPlaylist(id);
@@ -50,7 +50,7 @@ public class PlaylistIdHelperTests
     public void IsExternalPlaylist_WithRegularAlbumId_ReturnsFalse()
     {
         // Arrange
-        var id = "ext-deezer-album-123456";
+        var id = "ext-qobuz-album-123456";
 
         // Act
         var result = PlaylistIdHelper.IsExternalPlaylist(id);
@@ -112,9 +112,9 @@ public class PlaylistIdHelperTests
     }
 
     [Fact]
-    public void IsExternalPlaylist_WithSquidWTFPlaylistId_ReturnsTrue()
+    public void IsExternalPlaylist_WithYouTubePlaylistId_ReturnsTrue()
     {
-        var id = "pl-squidwtf-12345678";
+        var id = "pl-youtube-12345678";
 
         // Act
         var result = PlaylistIdHelper.IsExternalPlaylist(id);
@@ -128,16 +128,16 @@ public class PlaylistIdHelperTests
     #region ParsePlaylistId Tests
 
     [Fact]
-    public void ParsePlaylistId_WithValidDeezerPlaylistId_ReturnsProviderAndExternalId()
+    public void ParsePlaylistId_WithValidYandexPlaylistId_ReturnsProviderAndExternalId()
     {
         // Arrange
-        var id = "pl-deezer-123456";
+        var id = "pl-yandex-123456";
 
         // Act
         var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
 
         // Assert
-        Assert.Equal("deezer", provider);
+        Assert.Equal("yandex", provider);
         Assert.Equal("123456", externalId);
     }
 
@@ -159,13 +159,13 @@ public class PlaylistIdHelperTests
     public void ParsePlaylistId_WithExternalIdContainingDashes_ParsesCorrectly()
     {
         // Arrange
-        var id = "pl-deezer-abc-def-123";
+        var id = "pl-yandex-abc-def-123";
 
         // Act
         var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
 
         // Assert
-        Assert.Equal("deezer", provider);
+        Assert.Equal("yandex", provider);
         Assert.Equal("abc-def-123", externalId);
     }
 
@@ -184,7 +184,7 @@ public class PlaylistIdHelperTests
     public void ParsePlaylistId_WithNonPlaylistId_ThrowsArgumentException()
     {
         // Arrange
-        var id = "ext-deezer-album-123456";
+        var id = "ext-qobuz-album-123456";
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => PlaylistIdHelper.ParsePlaylistId(id));
@@ -227,17 +227,17 @@ public class PlaylistIdHelperTests
     #region CreatePlaylistId Tests
 
     [Fact]
-    public void CreatePlaylistId_WithValidDeezerProviderAndId_ReturnsCorrectFormat()
+    public void CreatePlaylistId_WithValidYandexProviderAndId_ReturnsCorrectFormat()
     {
         // Arrange
-        var provider = "deezer";
+        var provider = "yandex";
         var externalId = "123456";
 
         // Act
         var result = PlaylistIdHelper.CreatePlaylistId(provider, externalId);
 
         // Assert
-        Assert.Equal("pl-deezer-123456", result);
+        Assert.Equal("pl-yandex-123456", result);
     }
 
     [Fact]
@@ -258,42 +258,42 @@ public class PlaylistIdHelperTests
     public void CreatePlaylistId_WithUpperCaseProvider_ConvertsToLowerCase()
     {
         // Arrange
-        var provider = "DEEZER";
+        var provider = "YANDEX";
         var externalId = "123456";
 
         // Act
         var result = PlaylistIdHelper.CreatePlaylistId(provider, externalId);
 
         // Assert
-        Assert.Equal("pl-deezer-123456", result);
+        Assert.Equal("pl-yandex-123456", result);
     }
 
     [Fact]
     public void CreatePlaylistId_WithMixedCaseProvider_ConvertsToLowerCase()
     {
         // Arrange
-        var provider = "DeEzEr";
+        var provider = "YaNdEx";
         var externalId = "123456";
 
         // Act
         var result = PlaylistIdHelper.CreatePlaylistId(provider, externalId);
 
         // Assert
-        Assert.Equal("pl-deezer-123456", result);
+        Assert.Equal("pl-yandex-123456", result);
     }
 
     [Fact]
     public void CreatePlaylistId_WithExternalIdContainingDashes_PreservesDashes()
     {
         // Arrange
-        var provider = "deezer";
+        var provider = "yandex";
         var externalId = "abc-def-123";
 
         // Act
         var result = PlaylistIdHelper.CreatePlaylistId(provider, externalId);
 
         // Assert
-        Assert.Equal("pl-deezer-abc-def-123", result);
+        Assert.Equal("pl-yandex-abc-def-123", result);
     }
 
     [Fact]
@@ -324,7 +324,7 @@ public class PlaylistIdHelperTests
     public void CreatePlaylistId_WithNullExternalId_ThrowsArgumentException()
     {
         // Arrange
-        var provider = "deezer";
+        var provider = "yandex";
         string? externalId = null;
 
         // Act & Assert
@@ -336,7 +336,7 @@ public class PlaylistIdHelperTests
     public void CreatePlaylistId_WithEmptyExternalId_ThrowsArgumentException()
     {
         // Arrange
-        var provider = "deezer";
+        var provider = "yandex";
         var externalId = "";
 
         // Act & Assert
@@ -352,7 +352,7 @@ public class PlaylistIdHelperTests
     public void RoundTrip_CreateAndParse_ReturnsOriginalValues()
     {
         // Arrange
-        var originalProvider = "deezer";
+        var originalProvider = "yandex";
         var originalExternalId = "123456";
 
         // Act
@@ -384,7 +384,7 @@ public class PlaylistIdHelperTests
     public void RoundTrip_WithComplexExternalId_PreservesValue()
     {
         // Arrange
-        var originalProvider = "deezer";
+        var originalProvider = "yandex";
         var originalExternalId = "abc-123-def-456";
 
         // Act

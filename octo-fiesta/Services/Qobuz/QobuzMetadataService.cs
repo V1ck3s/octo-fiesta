@@ -832,12 +832,11 @@ public class QobuzMetadataService : IMusicMetadataService
 
     /// <summary>
     /// Determines whether a song should be included based on the explicit content filter setting
-    /// Note: Qobuz doesn't have the same explicit content tagging as Deezer, so this is a no-op for now
+    /// Note: Qobuz's API doesn't expose an explicit-content flag, so this is a no-op for now
     /// </summary>
     private bool ShouldIncludeSong(Song song)
     {
-        // Qobuz API doesn't expose explicit content flags in the same way as Deezer
-        // We could implement this in the future if needed
+        // We could implement this in the future if Qobuz's API adds explicit-content flags
         return true;
     }
 }

@@ -39,9 +39,10 @@ body:
       description: Which part of the project does this relate to?
       options:
         - Subsonic API
-        - Deezer provider
+        - JioSaavn provider
         - Qobuz provider
-        - SquidWTF provider
+        - Yandex provider
+        - YouTube provider
         - Local library
         - Playlists
         - Docker / Deployment

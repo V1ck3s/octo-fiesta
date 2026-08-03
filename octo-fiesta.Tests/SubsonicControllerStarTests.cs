@@ -155,7 +155,7 @@ public class SubsonicControllerStarTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-album-12345" }
+                { "id", "ext-qobuz-album-12345" }
             });
 
         // Act
@@ -165,7 +165,7 @@ public class SubsonicControllerStarTests
         Assert.IsType<ContentResult>(result);
         var contentResult = (ContentResult)result;
         Assert.Contains("starred", contentResult.Content ?? "");
-        _mockDownloadService.Verify(x => x.DownloadFullAlbumInBackground("deezer", "12345"), Times.Once);
+        _mockDownloadService.Verify(x => x.DownloadFullAlbumInBackground("qobuz", "12345"), Times.Once);
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public class SubsonicControllerStarTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "albumId", "pl-deezer-12345" }
+                { "albumId", "pl-yandex-12345" }
             },
             playlistSyncService: playlistSyncService);
         
@@ -218,7 +218,7 @@ public class SubsonicControllerStarTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "pl-squidwtf-99999" }
+                { "id", "pl-qobuz-99999" }
             },
             playlistSyncService: playlistSyncService);
         
@@ -256,7 +256,7 @@ public class SubsonicControllerStarTests
             queryParams: new Dictionary<string, string>
             {
                 { "id", "some-regular-id" },
-                { "albumId", "pl-deezer-12345" }
+                { "albumId", "pl-yandex-12345" }
             },
             playlistSyncService: playlistSyncService);
         
@@ -277,8 +277,8 @@ public class SubsonicControllerStarTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "pl-deezer-11111" },
-                { "albumId", "pl-deezer-22222" }
+                { "id", "pl-yandex-11111" },
+                { "albumId", "pl-yandex-22222" }
             },
             playlistSyncService: playlistSyncService);
         
@@ -298,7 +298,7 @@ public class SubsonicControllerStarTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "albumId", "pl-deezer-12345" }
+                { "albumId", "pl-yandex-12345" }
             },
             playlistSyncService: null);
         
@@ -324,14 +324,14 @@ public class SubsonicControllerStarTests
     }
 
     [Fact]
-    public async Task Star_WithSquidWTFPlaylistInAlbumId_DetectsCorrectly()
+    public async Task Star_WithQobuzPlaylistInAlbumId_DetectsCorrectly()
     {
-        // Arrange - SquidWTF (Tidal) playlist via albumId
+        // Arrange - Qobuz playlist via albumId
         var playlistSyncService = CreateRealPlaylistSyncService();
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "albumId", "pl-squidwtf-tidal-playlist-123" }
+                { "albumId", "pl-qobuz-playlist-123" }
             },
             playlistSyncService: playlistSyncService);
         

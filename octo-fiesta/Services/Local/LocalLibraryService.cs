@@ -424,7 +424,7 @@ public class LocalLibraryService : ILocalLibraryService
         // Known types for the new format
         var knownTypes = new HashSet<string> { "song", "album", "artist" };
         
-        // New format: ext-{provider}-{type}-{id} (e.g., ext-deezer-artist-259)
+        // New format: ext-{provider}-{type}-{id} (e.g., ext-qobuz-artist-259)
         // Only use new format if parts[2] is a known type
         if (parts.Length >= 4 && knownTypes.Contains(parts[2]))
         {

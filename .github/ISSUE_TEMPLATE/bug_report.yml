@@ -24,10 +24,10 @@ body:
       description: Which music service are you using?
       options:
         - Local
-        - Deezer
+        - JioSaavn
         - Qobuz
-        - SquidWTF (Tidal)
-        - SquidWTF (Qobuz)
+        - Yandex
+        - YouTube
     validations:
       required: true
 
