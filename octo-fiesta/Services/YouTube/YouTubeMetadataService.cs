@@ -37,8 +37,11 @@ public class YouTubeMetadataService : IMusicMetadataService
         // YouTube Music's "Songs" filter reliably excludes non-music content (reaction videos,
         // streams, gameplay) that a plain YouTube search mixes in for artists who also
         // stream/vlog - but its flat-playlist entries carry no artist/duration/thumbnail data.
-        // So use it only to build an ordered allowlist of song video IDs, then pull the rich
-        // metadata from a normal YouTube search and keep only entries in that allowlist.
+        // Cross-referencing against a plain ytsearch was tried and dropped: for anything but an
+        // exact/unambiguous query, YouTube's general search ranking and YouTube Music's ranking
+        // barely overlap, so most songs never found a match. Resolving each song ID's full
+        // metadata individually is reliable instead - done in parallel since sequential lookups
+        // (~1s each) would blow past clients' search timeouts (e.g. Substreamer's is 5s).
         var songIds = await GetYouTubeMusicSongIdsAsync(query, effectiveLimit);
         if (songIds.Count == 0)
         {
@@ -46,60 +49,22 @@ public class YouTubeMetadataService : IMusicMetadataService
             return [];
         }
 
-        var args = new List<string>
+        using var throttle = new SemaphoreSlim(6);
+        var resolveTasks = songIds.Select(async id =>
         {
-            "--dump-single-json",
-            "--skip-download",
-            "--flat-playlist",
-            "--no-warnings",
-            $"ytsearch{Math.Min(effectiveLimit * 3, 50)}:{query}"
-        };
-
-        AddCookiesArgument(args);
-
-        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
-        if (result.ExitCode != 0)
-        {
-            _logger.LogWarning("YouTube search failed for query '{Query}'. stderr: {Error}", query, result.StandardError);
-            return [];
-        }
-
-        using var doc = JsonDocument.Parse(result.StandardOutput);
-        if (!doc.RootElement.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
-        {
-            _logger.LogInformation("YouTube search returned no entries for query '{Query}'", query);
-            return [];
-        }
-
-        var entryById = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries.EnumerateArray())
-        {
-            var id = TryGetString(entry, "id");
-            if (id != null)
+            await throttle.WaitAsync();
+            try
             {
-                entryById.TryAdd(id, entry);
+                return await GetSongAsync(ProviderName, id);
             }
-        }
-
-        var songs = new List<Song>();
-        foreach (var id in songIds)
-        {
-            if (songs.Count >= effectiveLimit)
+            finally
             {
-                break;
+                throttle.Release();
             }
+        });
 
-            if (!entryById.TryGetValue(id, out var entry))
-            {
-                continue;
-            }
-
-            var mapped = MapEntryToSong(entry);
-            if (mapped != null)
-            {
-                songs.Add(mapped);
-            }
-        }
+        var resolved = await Task.WhenAll(resolveTasks);
+        var songs = resolved.Where(s => s != null).Cast<Song>().ToList();
 
         _logger.LogInformation("YouTube search completed: query='{Query}', hits={Hits}", query, songs.Count);
         return songs;
