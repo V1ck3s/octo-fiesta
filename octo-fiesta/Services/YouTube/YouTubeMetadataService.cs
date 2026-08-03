@@ -34,13 +34,25 @@ public class YouTubeMetadataService : IMusicMetadataService
         var effectiveLimit = Math.Clamp(limit, 1, Math.Max(1, _settings.MaxResults));
         _logger.LogInformation("YouTube search started: query='{Query}', limit={Limit}", query, effectiveLimit);
 
+        // YouTube Music's "Songs" filter reliably excludes non-music content (reaction videos,
+        // streams, gameplay) that a plain YouTube search mixes in for artists who also
+        // stream/vlog - but its flat-playlist entries carry no artist/duration/thumbnail data.
+        // So use it only to build an ordered allowlist of song video IDs, then pull the rich
+        // metadata from a normal YouTube search and keep only entries in that allowlist.
+        var songIds = await GetYouTubeMusicSongIdsAsync(query, effectiveLimit);
+        if (songIds.Count == 0)
+        {
+            _logger.LogInformation("YouTube search returned no song results for query '{Query}'", query);
+            return [];
+        }
+
         var args = new List<string>
         {
             "--dump-single-json",
             "--skip-download",
             "--flat-playlist",
             "--no-warnings",
-            $"ytsearch{effectiveLimit}:{query}"
+            $"ytsearch{Math.Min(effectiveLimit * 3, 50)}:{query}"
         };
 
         AddCookiesArgument(args);
@@ -59,9 +71,29 @@ public class YouTubeMetadataService : IMusicMetadataService
             return [];
         }
 
-        var songs = new List<Song>();
+        var entryById = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in entries.EnumerateArray())
         {
+            var id = TryGetString(entry, "id");
+            if (id != null)
+            {
+                entryById.TryAdd(id, entry);
+            }
+        }
+
+        var songs = new List<Song>();
+        foreach (var id in songIds)
+        {
+            if (songs.Count >= effectiveLimit)
+            {
+                break;
+            }
+
+            if (!entryById.TryGetValue(id, out var entry))
+            {
+                continue;
+            }
+
             var mapped = MapEntryToSong(entry);
             if (mapped != null)
             {
@@ -71,6 +103,53 @@ public class YouTubeMetadataService : IMusicMetadataService
 
         _logger.LogInformation("YouTube search completed: query='{Query}', hits={Hits}", query, songs.Count);
         return songs;
+    }
+
+    /// <summary>
+    /// Video IDs YouTube Music classifies as "Songs" for this query, in relevance order.
+    /// Flat-playlist entries from this extractor carry only id/title - no artist, duration,
+    /// or thumbnail - so this is used purely as an allowlist, not as the song source itself.
+    /// </summary>
+    private async Task<List<string>> GetYouTubeMusicSongIdsAsync(string query, int limit)
+    {
+        var searchUrl = $"https://music.youtube.com/search?q={Uri.EscapeDataString(query)}#songs";
+        var args = new List<string>
+        {
+            "--dump-single-json",
+            "--skip-download",
+            "--flat-playlist",
+            "--no-warnings",
+            "--playlist-end",
+            limit.ToString(),
+            searchUrl
+        };
+
+        AddCookiesArgument(args);
+
+        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
+        if (result.ExitCode != 0)
+        {
+            _logger.LogWarning("YouTube Music song lookup failed for query '{Query}'. stderr: {Error}", query, result.StandardError);
+            return [];
+        }
+
+        using var doc = JsonDocument.Parse(result.StandardOutput);
+        if (!doc.RootElement.TryGetProperty("entries", out var entries) || entries.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var ids = new List<string>();
+        foreach (var entry in entries.EnumerateArray())
+        {
+            var id = TryGetString(entry, "id");
+            if (id != null)
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
     }
 
     public async Task<List<Album>> SearchAlbumsAsync(string query, int limit = 20)
