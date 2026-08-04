@@ -226,7 +226,7 @@ public class YandexMetadataServiceTests
     public async Task GetPlaylistAsync_WithWrongProvider_ReturnsNull()
     {
         // Act
-        var result = await _service.GetPlaylistAsync("deezer", "f3063016-5636-454e-916e-00a756e9b25d");
+        var result = await _service.GetPlaylistAsync("spotify", "f3063016-5636-454e-916e-00a756e9b25d");
         
         // Assert
         Assert.Null(result);
@@ -357,7 +357,7 @@ public class YandexMetadataServiceTests
     public async Task GetPlaylistTracksAsync_WithWrongProvider_ReturnsEmptyList()
     {
         // Act
-        var result = await _service.GetPlaylistTracksAsync("deezer", "12345");
+        var result = await _service.GetPlaylistTracksAsync("spotify", "12345");
         
         // Assert
         Assert.NotNull(result);
@@ -780,7 +780,7 @@ public class YandexMetadataServiceTests
     public async Task GetSongAsync_WithWrongProvider_ReturnsNull()
     {
         // Act
-        var result = await _service.GetSongAsync("deezer", "123456789");
+        var result = await _service.GetSongAsync("spotify", "123456789");
         
         // Assert
         Assert.Null(result);
@@ -866,7 +866,7 @@ public class YandexMetadataServiceTests
     public async Task GetAlbumAsync_WithWrongProvider_ReturnsNull()
     {
         // Act
-        var result = await _service.GetAlbumAsync("deezer", "222");
+        var result = await _service.GetAlbumAsync("spotify", "222");
         
         // Assert
         Assert.Null(result);

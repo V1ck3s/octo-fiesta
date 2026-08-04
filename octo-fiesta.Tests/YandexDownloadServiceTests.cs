@@ -770,7 +770,7 @@ public class YandexDownloadServiceTests : IDisposable
     {
         // Arrange
         var service = CreateService(oAuthToken: "test-token");
-        var albumId = "ext-deezer-album-60253780838";
+        var albumId = "ext-spotify-album-60253780838";
         // The method is protected, so we use Reflection to test it
         var extractExternalIdFromAlbumIdMethod = service.GetType().GetMethod(
             "ExtractExternalIdFromAlbumId",

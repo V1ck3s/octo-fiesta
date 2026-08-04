@@ -144,17 +144,17 @@ public class SubsonicControllerScrobbleTests
     {
         // Arrange
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-999"))
-            .Returns((true, "deezer", "song", "999"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-999"))
+            .Returns((true, "spotify", "song", "999"));
         _mockLocalLibraryService
-            .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "999"))
+            .Setup(x => x.GetLocalIdForExternalSongAsync("spotify", "999"))
             .ReturnsAsync((string?)null);
 
         HttpRequestMessage? capturedRequest = null;
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-999" },
+                { "id", "ext-spotify-song-999" },
                 { "submission", "true" },
                 { "f", "xml" }
             },

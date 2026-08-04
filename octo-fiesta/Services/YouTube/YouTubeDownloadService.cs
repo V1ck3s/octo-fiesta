@@ -12,6 +12,7 @@ public class YouTubeDownloadService : BaseDownloadService
     private const string Provider = "youtube";
     private const string AlbumPrefix = "ext-youtube-album-";
     private readonly YouTubeSettings _settings;
+    private readonly IYtDlpProcessRunner _processRunner;
     private readonly ILogger<YouTubeDownloadService> _logger;
 
     public YouTubeDownloadService(
@@ -21,11 +22,13 @@ public class YouTubeDownloadService : BaseDownloadService
         IMusicMetadataService metadataService,
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<YouTubeSettings> youtubeSettings,
+        IYtDlpProcessRunner processRunner,
         IServiceProvider serviceProvider,
         ILogger<YouTubeDownloadService> logger)
         : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _settings = youtubeSettings.Value;
+        _processRunner = processRunner;
         _logger = logger;
     }
 
@@ -39,7 +42,7 @@ public class YouTubeDownloadService : BaseDownloadService
             return false;
         }
 
-        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, ["--version"], CancellationToken.None);
+        var result = await _processRunner.ExecuteAsync(_settings.YtDlpPath, ["--version"], CancellationToken.None);
         if (result.ExitCode != 0)
         {
             _logger.LogWarning("yt-dlp is not available at '{Path}'. stderr: {Error}", _settings.YtDlpPath, result.StandardError);
@@ -77,7 +80,7 @@ public class YouTubeDownloadService : BaseDownloadService
         }
 
         _logger.LogInformation("YouTube download started: trackId={TrackId}, title='{Title}'", trackId, song.Title);
-        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, args, cancellationToken);
+        var result = await _processRunner.ExecuteAsync(_settings.YtDlpPath, args, cancellationToken);
         if (result.ExitCode != 0)
         {
             _logger.LogError("YouTube download failed: trackId={TrackId}, stderr={Error}", trackId, result.StandardError);

@@ -13,14 +13,17 @@ public class YouTubeMetadataService : IMusicMetadataService
     private const string AlbumPrefix = "ext-youtube-album-";
     private readonly ILogger<YouTubeMetadataService> _logger;
     private readonly YouTubeSettings _settings;
+    private readonly IYtDlpProcessRunner _processRunner;
     private readonly Dictionary<string, string> _artistNameByExternalId = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _artistLock = new();
 
     public YouTubeMetadataService(
         IOptions<YouTubeSettings> youtubeSettings,
+        IYtDlpProcessRunner processRunner,
         ILogger<YouTubeMetadataService> logger)
     {
         _settings = youtubeSettings.Value;
+        _processRunner = processRunner;
         _logger = logger;
     }
 
@@ -93,7 +96,7 @@ public class YouTubeMetadataService : IMusicMetadataService
 
         AddCookiesArgument(args);
 
-        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
+        var result = await _processRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
         if (result.ExitCode != 0)
         {
             _logger.LogWarning("YouTube Music song lookup failed for query '{Query}'. stderr: {Error}", query, result.StandardError);
@@ -227,7 +230,7 @@ public class YouTubeMetadataService : IMusicMetadataService
 
         AddCookiesArgument(args);
 
-        var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
+        var result = await _processRunner.ExecuteAsync(_settings.YtDlpPath, args, CancellationToken.None);
         if (result.ExitCode != 0)
         {
             _logger.LogWarning("YouTube metadata resolve failed for {ExternalId}. stderr: {Error}", externalId, result.StandardError);

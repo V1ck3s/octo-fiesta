@@ -16,7 +16,7 @@ namespace octo_fiesta.Tests;
 
 public class SubsonicControllerGetSongTests
 {
-    private const string ExternalId = "ext-squidwtf-song-4024016711";
+    private const string ExternalId = "ext-spotify-song-4024016711";
 
     private static SubsonicController CreateController(
         Mock<ILocalLibraryService> localLibraryServiceMock,
@@ -84,9 +84,9 @@ public class SubsonicControllerGetSongTests
         var localLibraryServiceMock = new Mock<ILocalLibraryService>();
         localLibraryServiceMock
             .Setup(x => x.ParseSongId(It.IsAny<string>()))
-            .Returns((true, "squidwtf", "4024016711"));
+            .Returns((true, "spotify", "4024016711"));
         localLibraryServiceMock
-            .Setup(x => x.GetLocalIdForExternalSongAsync("squidwtf", "4024016711"))
+            .Setup(x => x.GetLocalIdForExternalSongAsync("spotify", "4024016711"))
             .ReturnsAsync("navidrome-real-id");
 
         var metadataServiceMock = new Mock<IMusicMetadataService>();
@@ -98,7 +98,7 @@ public class SubsonicControllerGetSongTests
         Assert.IsType<FileContentResult>(result);
         Assert.Single(capturedProxyUrls);
         Assert.Contains("id=navidrome-real-id", capturedProxyUrls[0]);
-        Assert.DoesNotContain("ext-squidwtf", capturedProxyUrls[0]);
+        Assert.DoesNotContain("ext-spotify", capturedProxyUrls[0]);
         metadataServiceMock.Verify(x => x.GetSongAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 }

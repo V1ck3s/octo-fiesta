@@ -60,7 +60,7 @@ public class SubsonicControllerStreamTests
             new Mock<ILogger<SubsonicController>>().Object);
 
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.QueryString = new QueryString("?id=ext-deezer-song-123");
+        httpContext.Request.QueryString = new QueryString("?id=ext-spotify-song-123");
         httpContext.RequestAborted = requestAbortedToken;
 
         controller.ControllerContext = new ControllerContext
@@ -77,12 +77,12 @@ public class SubsonicControllerStreamTests
         var localLibraryServiceMock = new Mock<ILocalLibraryService>();
         localLibraryServiceMock
             .Setup(x => x.ParseSongId(It.IsAny<string>()))
-            .Returns((true, "deezer", "123"));
+            .Returns((true, "spotify", "123"));
 
         var downloadServiceMock = new Mock<IDownloadService>();
         CancellationToken capturedToken = default;
         downloadServiceMock
-            .Setup(x => x.DownloadAndStreamAsync("deezer", "123", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadAndStreamAsync("spotify", "123", It.IsAny<CancellationToken>()))
             .Callback<string, string, CancellationToken>((_, _, token) => capturedToken = token)
             .ReturnsAsync(((Stream)new MemoryStream([1, 2, 3]), "song.mp3"));
 
@@ -111,11 +111,11 @@ public class SubsonicControllerStreamTests
         var localLibraryServiceMock = new Mock<ILocalLibraryService>();
         localLibraryServiceMock
             .Setup(x => x.ParseSongId(It.IsAny<string>()))
-            .Returns((true, "deezer", "123"));
+            .Returns((true, "spotify", "123"));
 
         var downloadServiceMock = new Mock<IDownloadService>();
         downloadServiceMock
-            .Setup(x => x.DownloadAndStreamAsync("deezer", "123", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadAndStreamAsync("spotify", "123", It.IsAny<CancellationToken>()))
             .ReturnsAsync(((Stream)new MemoryStream([1, 2, 3]), filePath));
 
         var hostLifetimeMock = new Mock<IHostApplicationLifetime>();
@@ -139,11 +139,11 @@ public class SubsonicControllerStreamTests
         var localLibraryServiceMock = new Mock<ILocalLibraryService>();
         localLibraryServiceMock
             .Setup(x => x.ParseSongId(It.IsAny<string>()))
-            .Returns((true, "deezer", "123"));
+            .Returns((true, "spotify", "123"));
 
         var downloadServiceMock = new Mock<IDownloadService>();
         downloadServiceMock
-            .Setup(x => x.DownloadAndStreamAsync("deezer", "123", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadAndStreamAsync("spotify", "123", It.IsAny<CancellationToken>()))
             .Returns<string, string, CancellationToken>((_, _, token) =>
             {
                 token.ThrowIfCancellationRequested();
@@ -169,7 +169,7 @@ public class SubsonicControllerStreamTests
         var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, objectResult.StatusCode);
         downloadServiceMock.Verify(
-            x => x.DownloadAndStreamAsync("deezer", "123", It.Is<CancellationToken>(t => t.IsCancellationRequested)),
+            x => x.DownloadAndStreamAsync("spotify", "123", It.Is<CancellationToken>(t => t.IsCancellationRequested)),
             Times.Once);
     }
 }

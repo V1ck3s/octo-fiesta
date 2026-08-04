@@ -7,11 +7,13 @@ namespace octo_fiesta.Services.YouTube;
 public class YouTubeStartupValidator : BaseStartupValidator
 {
     private readonly YouTubeSettings _settings;
+    private readonly IYtDlpProcessRunner _processRunner;
 
-    public YouTubeStartupValidator(IOptions<YouTubeSettings> settings, IHttpClientFactory httpClientFactory)
+    public YouTubeStartupValidator(IOptions<YouTubeSettings> settings, IHttpClientFactory httpClientFactory, IYtDlpProcessRunner processRunner)
         : base(httpClientFactory.CreateClient())
     {
         _settings = settings.Value;
+        _processRunner = processRunner;
     }
 
     public override string ServiceName => "YouTube";
@@ -47,7 +49,7 @@ public class YouTubeStartupValidator : BaseStartupValidator
 
         try
         {
-            var result = await YtDlpProcessRunner.ExecuteAsync(_settings.YtDlpPath, ["--version"], cancellationToken);
+            var result = await _processRunner.ExecuteAsync(_settings.YtDlpPath, ["--version"], cancellationToken);
             if (result.ExitCode != 0)
             {
                 WriteStatus("yt-dlp", "UNAVAILABLE", ConsoleColor.Red);

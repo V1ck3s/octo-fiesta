@@ -39,6 +39,7 @@ builder.Services.Configure<JioSaavnSettings>(
 builder.Services.Configure<LyricsSettings>(
     builder.Configuration.GetSection("Lyrics"));
 builder.Services.AddSingleton<JioSaavnApiClient>();
+builder.Services.AddSingleton<IYtDlpProcessRunner, YtDlpProcessRunner>();
 
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();

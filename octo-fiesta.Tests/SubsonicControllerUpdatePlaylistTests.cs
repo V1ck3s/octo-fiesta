@@ -150,21 +150,21 @@ public class SubsonicControllerUpdatePlaylistTests
     {
         // Arrange
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
-            .Returns((true, "deezer", "song", "456"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-456"))
+            .Returns((true, "spotify", "song", "456"));
         _mockLocalLibraryService
-            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("spotify", "456"))
             .ReturnsAsync((string?)null)
             .ReturnsAsync("777");
 
         _mockDownloadService
-            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.PermanentizeCachedSongAsync("spotify", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
         _mockDownloadService
-            .Setup(x => x.DownloadSongToPermanentAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadSongToPermanentAsync("spotify", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync("/tmp/downloads/song.flac");
         _mockLocalLibraryService
-            .Setup(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.WaitForLocalIdAfterScanAsync("spotify", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync("777");
 
         HttpRequestMessage? capturedRequest = null;
@@ -172,7 +172,7 @@ public class SubsonicControllerUpdatePlaylistTests
             queryParams: new Dictionary<string, string>
             {
                 { "playlistId", "42" },
-                { "songIdToAdd", "ext-deezer-song-456" },
+                { "songIdToAdd", "ext-spotify-song-456" },
                 { "f", "json" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -192,15 +192,15 @@ public class SubsonicControllerUpdatePlaylistTests
         Assert.Contains("songIdToAdd=777", requestUrl);
 
         _mockDownloadService.Verify(
-            x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            x => x.PermanentizeCachedSongAsync("spotify", "456", It.IsAny<CancellationToken>()),
             Times.Once);
         _mockDownloadService.Verify(
-            x => x.DownloadSongToPermanentAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            x => x.DownloadSongToPermanentAsync("spotify", "456", It.IsAny<CancellationToken>()),
             Times.Once);
         _mockDownloadService.Verify(
             x => x.DownloadSongAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
         Times.Never);
-        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()), Times.Once);
+        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("spotify", "456", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -208,18 +208,18 @@ public class SubsonicControllerUpdatePlaylistTests
     {
         // Arrange
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
-            .Returns((true, "deezer", "song", "456"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-456"))
+            .Returns((true, "spotify", "song", "456"));
         _mockLocalLibraryService
-            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .SetupSequence(x => x.GetLocalIdForExternalSongAsync("spotify", "456"))
             .ReturnsAsync((string?)null)
             .ReturnsAsync("777");
 
         _mockDownloadService
-            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.PermanentizeCachedSongAsync("spotify", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _mockLocalLibraryService
-            .Setup(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()))
+            .Setup(x => x.WaitForLocalIdAfterScanAsync("spotify", "456", It.IsAny<CancellationToken>()))
             .ReturnsAsync("777");
 
         HttpRequestMessage? capturedRequest = null;
@@ -227,7 +227,7 @@ public class SubsonicControllerUpdatePlaylistTests
             queryParams: new Dictionary<string, string>
             {
                 { "playlistId", "42" },
-                { "songIdToAdd", "ext-deezer-song-456" },
+                { "songIdToAdd", "ext-spotify-song-456" },
                 { "f", "json" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -247,7 +247,7 @@ public class SubsonicControllerUpdatePlaylistTests
         Assert.Contains("songIdToAdd=777", requestUrl);
 
         _mockDownloadService.Verify(
-            x => x.PermanentizeCachedSongAsync("deezer", "456", It.IsAny<CancellationToken>()),
+            x => x.PermanentizeCachedSongAsync("spotify", "456", It.IsAny<CancellationToken>()),
             Times.Once);
         _mockDownloadService.Verify(
             x => x.DownloadSongToPermanentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
@@ -255,7 +255,7 @@ public class SubsonicControllerUpdatePlaylistTests
         _mockDownloadService.Verify(
             x => x.DownloadSongAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("deezer", "456", It.IsAny<CancellationToken>()), Times.Once);
+        _mockLocalLibraryService.Verify(x => x.WaitForLocalIdAfterScanAsync("spotify", "456", It.IsAny<CancellationToken>()), Times.Once);
     }
 
 }

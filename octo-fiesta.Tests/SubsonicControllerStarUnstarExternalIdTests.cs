@@ -147,13 +147,13 @@ public class SubsonicControllerStarUnstarExternalIdTests
         var downloadCompleted = new ManualResetEventSlim(false);
 
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-999"))
-            .Returns((true, "deezer", "song", "999"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-999"))
+            .Returns((true, "spotify", "song", "999"));
         _mockLocalLibraryService
-            .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "999"))
+            .Setup(x => x.GetLocalIdForExternalSongAsync("spotify", "999"))
             .ReturnsAsync((string?)null);
         _mockDownloadService
-            .Setup(x => x.DownloadSongToPermanentAsync("deezer", "999", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadSongToPermanentAsync("spotify", "999", It.IsAny<CancellationToken>()))
             .ReturnsAsync("local-id-999")
             .Callback(downloadCompleted.Set);
 
@@ -161,7 +161,7 @@ public class SubsonicControllerStarUnstarExternalIdTests
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-999" },
+                { "id", "ext-spotify-song-999" },
                 { "f", "xml" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -180,7 +180,7 @@ public class SubsonicControllerStarUnstarExternalIdTests
         Assert.Contains("status=\"ok\"", contentResult.Content ?? "");
         Assert.Null(capturedRequest); // does not relay to the backend
         _mockDownloadService.Verify(
-            x => x.DownloadSongToPermanentAsync("deezer", "999", It.IsAny<CancellationToken>()), Times.Once);
+            x => x.DownloadSongToPermanentAsync("spotify", "999", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -224,17 +224,17 @@ public class SubsonicControllerStarUnstarExternalIdTests
     {
         // Arrange
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-456"))
-            .Returns((true, "deezer", "song", "456"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-456"))
+            .Returns((true, "spotify", "song", "456"));
         _mockLocalLibraryService
-            .Setup(x => x.GetLocalIdForExternalSongAsync("deezer", "456"))
+            .Setup(x => x.GetLocalIdForExternalSongAsync("spotify", "456"))
             .ReturnsAsync((string?)null);
 
         HttpRequestMessage? capturedRequest = null;
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-456" },
+                { "id", "ext-spotify-song-456" },
                 { "f", "xml" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK)
@@ -264,17 +264,17 @@ public class SubsonicControllerStarUnstarExternalIdTests
         });
 
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-789"))
-            .Returns((true, "deezer", "song", "789"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-789"))
+            .Returns((true, "spotify", "song", "789"));
         
         _mockDownloadService
-            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "789", It.IsAny<CancellationToken>()))
+            .Setup(x => x.PermanentizeCachedSongAsync("spotify", "789", It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-789" },
+                { "id", "ext-spotify-song-789" },
                 { "f", "xml" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK),
@@ -287,7 +287,7 @@ public class SubsonicControllerStarUnstarExternalIdTests
         var contentResult = Assert.IsType<ContentResult>(result);
         Assert.Contains("status=\"ok\"", contentResult.Content ?? "");
         
-        _mockDownloadService.Verify(x => x.PermanentizeCachedSongAsync("deezer", "789", It.IsAny<CancellationToken>()), Times.Once);
+        _mockDownloadService.Verify(x => x.PermanentizeCachedSongAsync("spotify", "789", It.IsAny<CancellationToken>()), Times.Once);
         _mockDownloadService.Verify(x => x.DownloadSongToPermanentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -304,23 +304,23 @@ public class SubsonicControllerStarUnstarExternalIdTests
         var downloadCompleted = new ManualResetEventSlim(false);
 
         _mockLocalLibraryService
-            .Setup(x => x.ParseExternalId("ext-deezer-song-789"))
-            .Returns((true, "deezer", "song", "789"));
+            .Setup(x => x.ParseExternalId("ext-spotify-song-789"))
+            .Returns((true, "spotify", "song", "789"));
         
         _mockDownloadService
-            .Setup(x => x.PermanentizeCachedSongAsync("deezer", "789", It.IsAny<CancellationToken>()))
+            .Setup(x => x.PermanentizeCachedSongAsync("spotify", "789", It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         // Mock the DownloadSongToPermanentAsync to return a value, as it's now awaited in ScheduleDownloadOfStarredSong
         _mockDownloadService
-            .Setup(x => x.DownloadSongToPermanentAsync("deezer", "789", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DownloadSongToPermanentAsync("spotify", "789", It.IsAny<CancellationToken>()))
             .ReturnsAsync("local-id-789")
             .Callback(downloadCompleted.Set);
 
         var controller = CreateController(
             queryParams: new Dictionary<string, string>
             {
-                { "id", "ext-deezer-song-789" },
+                { "id", "ext-spotify-song-789" },
                 { "f", "xml" }
             },
             proxyResponse: new HttpResponseMessage(HttpStatusCode.OK),
@@ -336,6 +336,6 @@ public class SubsonicControllerStarUnstarExternalIdTests
         Assert.Contains("status=\"ok\"", contentResult.Content ?? "");
         
         // Verify that download was scheduled
-        _mockDownloadService.Verify(x => x.DownloadSongToPermanentAsync("deezer", "789", It.IsAny<CancellationToken>()), Times.Once);
+        _mockDownloadService.Verify(x => x.DownloadSongToPermanentAsync("spotify", "789", It.IsAny<CancellationToken>()), Times.Once);
     }
 }

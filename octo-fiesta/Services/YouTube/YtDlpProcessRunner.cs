@@ -2,11 +2,19 @@ using System.Diagnostics;
 
 namespace octo_fiesta.Services.YouTube;
 
-internal static class YtDlpProcessRunner
+public interface IYtDlpProcessRunner
 {
-    internal sealed record ExecutionResult(int ExitCode, string StandardOutput, string StandardError);
+    Task<YtDlpProcessRunner.ExecutionResult> ExecuteAsync(
+        string ytDlpPath,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken);
+}
 
-    public static async Task<ExecutionResult> ExecuteAsync(
+public sealed class YtDlpProcessRunner : IYtDlpProcessRunner
+{
+    public sealed record ExecutionResult(int ExitCode, string StandardOutput, string StandardError);
+
+    public async Task<ExecutionResult> ExecuteAsync(
         string ytDlpPath,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)

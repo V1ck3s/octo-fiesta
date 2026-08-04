@@ -205,7 +205,7 @@ public class SubsonicModelMapperTests
         {
             Songs = new List<Song>
             {
-                new Song { Title = "Keine Angst", Artist = "Danger Dan", ExternalProvider = "squidwtf", ExternalId = "4024016711" }
+                new Song { Title = "Keine Angst", Artist = "Danger Dan", ExternalProvider = "spotify", ExternalId = "4024016711" }
             },
             Albums = new List<Album>(),
             Artists = new List<Artist>()

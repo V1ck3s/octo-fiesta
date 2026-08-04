@@ -89,7 +89,7 @@ public class QobuzDownloadServiceTests : IDisposable
 
         var serviceProviderMock = new Mock<IServiceProvider>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(octo_fiesta.Services.Subsonic.PlaylistSyncService)))
-            .Returns(null);
+            .Returns((object?)null);
 
         return new QobuzDownloadService(
             _httpClientFactoryMock.Object,

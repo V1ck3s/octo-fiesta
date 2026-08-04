@@ -79,11 +79,11 @@ public class LocalLibraryServiceTests : IDisposable
     public void ParseSongId_WithExternalId_ReturnsCorrectParts()
     {
         // Act
-        var (isExternal, provider, externalId) = _service.ParseSongId("ext-deezer-123456");
+        var (isExternal, provider, externalId) = _service.ParseSongId("ext-spotify-123456");
 
         // Assert
         Assert.True(isExternal);
-        Assert.Equal("deezer", provider);
+        Assert.Equal("spotify", provider);
         Assert.Equal("123456", externalId);
     }
 
@@ -115,7 +115,7 @@ public class LocalLibraryServiceTests : IDisposable
     public async Task GetLocalPathForExternalSongAsync_WhenNotRegistered_ReturnsNull()
     {
         // Act
-        var result = await _service.GetLocalPathForExternalSongAsync("deezer", "nonexistent");
+        var result = await _service.GetLocalPathForExternalSongAsync("spotify", "nonexistent");
 
         // Assert
         Assert.Null(result);
@@ -130,7 +130,7 @@ public class LocalLibraryServiceTests : IDisposable
             Title = "Test Song",
             Artist = "Test Artist",
             Album = "Test Album",
-            ExternalProvider = "deezer",
+            ExternalProvider = "spotify",
             ExternalId = "123456"
         };
         var localPath = Path.Combine(_testDownloadPath, "test-song.mp3");
@@ -140,7 +140,7 @@ public class LocalLibraryServiceTests : IDisposable
 
         // Act
         await _service.RegisterDownloadedSongAsync(song, localPath);
-        var result = await _service.GetLocalPathForExternalSongAsync("deezer", "123456");
+        var result = await _service.GetLocalPathForExternalSongAsync("spotify", "123456");
 
         // Assert
         Assert.Equal(localPath, result);
@@ -155,7 +155,7 @@ public class LocalLibraryServiceTests : IDisposable
             Title = "Deleted Song",
             Artist = "Test Artist",
             Album = "Test Album",
-            ExternalProvider = "deezer",
+            ExternalProvider = "spotify",
             ExternalId = "999999"
         };
         var localPath = Path.Combine(_testDownloadPath, "deleted-song.mp3");
@@ -166,7 +166,7 @@ public class LocalLibraryServiceTests : IDisposable
         File.Delete(localPath);
 
         // Act
-        var result = await _service.GetLocalPathForExternalSongAsync("deezer", "999999");
+        var result = await _service.GetLocalPathForExternalSongAsync("spotify", "999999");
 
         // Assert
         Assert.Null(result);
@@ -223,7 +223,7 @@ public class LocalLibraryServiceTests : IDisposable
             Title = "Scanned Song",
             Artist = "Scan Artist",
             Album = "Scan Album",
-            ExternalProvider = "deezer",
+            ExternalProvider = "spotify",
             ExternalId = "scan-id"
         };
         var localPath = Path.Combine(_testDownloadPath, "scan-song.mp3");
@@ -286,7 +286,7 @@ public class LocalLibraryServiceTests : IDisposable
                 };
             });
 
-        var result = await _service.WaitForLocalIdAfterScanAsync("deezer", "scan-id");
+        var result = await _service.WaitForLocalIdAfterScanAsync("spotify", "scan-id");
 
         Assert.Equal("555", result);
     }
@@ -295,13 +295,13 @@ public class LocalLibraryServiceTests : IDisposable
     public async Task GetLocalIdForExternalSongAsync_WithoutMapping_ResolvesViaMetadataAndSearch3()
     {
         _mockMetadataService
-            .Setup(x => x.GetSongAsync("deezer", "fallback-id"))
+            .Setup(x => x.GetSongAsync("spotify", "fallback-id"))
             .ReturnsAsync(new Song
             {
                 Title = "Fallback Song",
                 Artist = "Fallback Artist",
                 Album = "Fallback Album",
-                ExternalProvider = "deezer",
+                ExternalProvider = "spotify",
                 ExternalId = "fallback-id"
             });
 
@@ -334,20 +334,20 @@ public class LocalLibraryServiceTests : IDisposable
                 };
             });
 
-        var result = await _service.GetLocalIdForExternalSongAsync("deezer", "fallback-id");
+        var result = await _service.GetLocalIdForExternalSongAsync("spotify", "fallback-id");
 
         Assert.Equal("777", result);
     }
 
     [Theory]
-    [InlineData("ext-deezer-123", true, "deezer", "123")]
+    [InlineData("ext-spotify-123", true, "spotify", "123")]
     [InlineData("ext-spotify-abc123", true, "spotify", "abc123")]
     [InlineData("ext-tidal-999-888", true, "tidal", "999-888")]
-    [InlineData("ext-deezer-song-123456", true, "deezer", "123456")]  // New format - extracts numeric ID
+    [InlineData("ext-spotify-song-123456", true, "spotify", "123456")]  // New format - extracts numeric ID
     [InlineData("123456", false, null, null)]
     [InlineData("", false, null, null)]
     [InlineData("ext-", false, null, null)]
-    [InlineData("ext-deezer", false, null, null)]
+    [InlineData("ext-spotify", false, null, null)]
     public void ParseSongId_VariousInputs_ReturnsExpected(string songId, bool expectedIsExternal, string? expectedProvider, string? expectedExternalId)
     {
         // Act
@@ -360,16 +360,16 @@ public class LocalLibraryServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("ext-deezer-song-123456", true, "deezer", "song", "123456")]
-    [InlineData("ext-deezer-album-789012", true, "deezer", "album", "789012")]
-    [InlineData("ext-deezer-artist-259", true, "deezer", "artist", "259")]
+    [InlineData("ext-spotify-song-123456", true, "spotify", "song", "123456")]
+    [InlineData("ext-spotify-album-789012", true, "spotify", "album", "789012")]
+    [InlineData("ext-spotify-artist-259", true, "spotify", "artist", "259")]
     [InlineData("ext-spotify-song-abc123", true, "spotify", "song", "abc123")]
-    [InlineData("ext-deezer-123", true, "deezer", "song", "123")]  // Legacy format defaults to song
+    [InlineData("ext-spotify-123", true, "spotify", "song", "123")]  // Legacy format defaults to song
     [InlineData("ext-tidal-999", true, "tidal", "song", "999")]    // Legacy format defaults to song
     [InlineData("123456", false, null, null, null)]
     [InlineData("", false, null, null, null)]
     [InlineData("ext-", false, null, null, null)]
-    [InlineData("ext-deezer", false, null, null, null)]
+    [InlineData("ext-spotify", false, null, null, null)]
     public void ParseExternalId_VariousInputs_ReturnsExpected(string id, bool expectedIsExternal, string? expectedProvider, string? expectedType, string? expectedExternalId)
     {
         // Act
