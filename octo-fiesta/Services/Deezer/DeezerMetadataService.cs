@@ -423,10 +423,14 @@ public class DeezerMetadataService : IMusicMetadataService
         var externalId = track.GetProperty("id").GetInt64().ToString();
         
         // Try to get track_position from API, fallback to provided index
-        int? trackNumber = track.TryGetProperty("track_position", out var trackPos) 
-            ? trackPos.GetInt32() 
+        int? trackNumber = track.TryGetProperty("track_position", out var trackPos)
+            ? trackPos.GetInt32()
             : fallbackTrackNumber;
-        
+
+        int? discNumber = track.TryGetProperty("disk_number", out var diskNum)
+            ? diskNum.GetInt32()
+            : null;
+
         // Explicit content lyrics value
         int? explicitContentLyrics = track.TryGetProperty("explicit_content_lyrics", out var ecl) 
             ? ecl.GetInt32() 
@@ -456,6 +460,7 @@ public class DeezerMetadataService : IMusicMetadataService
                 ? duration.GetInt32()
                 : null,
             Track = trackNumber,
+            DiscNumber = discNumber,
             CoverArtUrl = track.TryGetProperty("album", out var albumForCover) &&
                           albumForCover.TryGetProperty("cover_medium", out var cover)
                 ? cover.GetString()
