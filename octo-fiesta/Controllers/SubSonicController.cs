@@ -407,29 +407,6 @@ public class SubsonicController : ControllerBase
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
 
-        var externalArtists = await _metadataService.SearchArtistsAsync(artistName, 1);
-        var externalAlbums = new List<Album>();
-        
-        if (externalArtists.Count > 0)
-        {
-            var externalArtist = externalArtists[0];
-            if (externalArtist.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
-            {
-                externalAlbums = await _metadataService.GetArtistAlbumsAsync(externalArtist.ExternalProvider!, externalArtist.ExternalId!);
-                
-                // Fill artist info for each album (external API may not include it in artist/albums endpoint)
-                // Use local artist ID and name so albums link back to the local artist
-                foreach (var album in externalAlbums)
-                {
-                    if (string.IsNullOrEmpty(album.Artist))
-                    {
-                        album.Artist = artistName;
-                    }
-                    album.ArtistId = localArtistId;
-                }
-            }
-        }
-
         var localAlbumNames = new HashSet<string>();
         foreach (var album in localAlbums)
         {
@@ -438,6 +415,44 @@ public class SubsonicController : ControllerBase
                 var normalizedName = StringNormalizer.CreateComparisonKey(nameObj?.ToString() ?? "");
                 localAlbumNames.Add(normalizedName);
             }
+        }
+
+        var candidates = (await _metadataService.SearchArtistsAsync(artistName, 20))
+            .Where(a => !string.IsNullOrEmpty(a.ExternalId) && a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(a => a.AlbumCount ?? 0)
+            .ThenByDescending(a => string.Equals(a.Name, artistName, StringComparison.Ordinal))
+            .ToList();
+
+        var externalAlbums = new List<Album>();
+        List<Album>? firstCandidateAlbums = null;
+
+        foreach (var candidate in candidates.Take(5))
+        {
+            var candidateAlbums = await _metadataService.GetArtistAlbumsAsync(candidate.ExternalProvider!, candidate.ExternalId!);
+            firstCandidateAlbums ??= candidateAlbums;
+
+            if (localAlbumNames.Count == 0 ||
+                candidateAlbums.Any(a => localAlbumNames.Contains(StringNormalizer.CreateComparisonKey(a.Title))))
+            {
+                externalAlbums = candidateAlbums;
+                break;
+            }
+        }
+
+        if (externalAlbums.Count == 0 && firstCandidateAlbums != null)
+        {
+            externalAlbums = firstCandidateAlbums;
+        }
+
+        // Fill artist info for each album (external API may not include it in artist/albums endpoint)
+        // Use local artist ID and name so albums link back to the local artist
+        foreach (var album in externalAlbums)
+        {
+            if (string.IsNullOrEmpty(album.Artist))
+            {
+                album.Artist = artistName;
+            }
+            album.ArtistId = localArtistId;
         }
 
         var mergedAlbums = localAlbums.ToList();
