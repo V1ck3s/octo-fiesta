@@ -79,3 +79,6 @@ __MACOSX/
 .AppleDouble
 .LSOverride
 Icon[]
+
+# Node (deploy/jiosaavn-api)
+node_modules/

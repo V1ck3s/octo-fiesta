@@ -85,5 +85,17 @@ services:
       # ===== JIOSAAVN SETTINGS =====
       # Preferred JioSaavn quality: 96, 160, or 320 (default: 320)
       - JioSaavn__Quality=${JIOSAAVN_QUALITY:-320}
+      # Base URL of the jiosaavn-api service below (default: internal docker network address)
+      - JioSaavn__ApiBaseUrl=${JIOSAAVN_API_BASE_URL:-http://jiosaavn-api:3000}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
+    depends_on:
+      - jiosaavn-api
+
+  # Self-hosted JioSaavn API (see deploy/jiosaavn-api). Public third-party instances of this
+  # API have repeatedly gone offline without notice, so octo-fiesta talks to your own instance.
+  jiosaavn-api:
+    build:
+      context: ./deploy/jiosaavn-api
+    container_name: jiosaavn-api
+    restart: unless-stopped

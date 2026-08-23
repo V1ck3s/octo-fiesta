@@ -1,0 +1,13 @@
+{
+  "name": "octo-fiesta-jiosaavn-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted instance of the ODSkyler/jiosaavn-api handlers, wrapped in a standalone Express server for Docker deployment.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

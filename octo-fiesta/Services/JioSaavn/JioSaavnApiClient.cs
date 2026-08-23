@@ -13,8 +13,6 @@ namespace octo_fiesta.Services.JioSaavn;
 /// </summary>
 public sealed class JioSaavnApiClient
 {
-    private const string SearchBaseUrl = "https://rtmx.vercel.app/api/songs?q=";
-    private const string SongDetailsBaseUrl = "https://sda.rhythmax.workers.dev/song?url=";
     private static readonly byte[] DesKey = Encoding.ASCII.GetBytes("38346591");
     private static readonly Regex QualitySuffixRegex = new(
         @"_\d+\.mp4(\?.*)?$",
@@ -48,7 +46,7 @@ public sealed class JioSaavnApiClient
 
         var encodedQuery = Uri.EscapeDataString(query.Trim());
         using var response = await _httpClient.GetAsync(
-            $"{SearchBaseUrl}{encodedQuery}",
+            $"{_settings.ApiBaseUrl}/api/songs?q={encodedQuery}",
             cancellationToken);
 
         response.EnsureSuccessStatusCode();
@@ -79,9 +77,12 @@ public sealed class JioSaavnApiClient
             throw new ArgumentException("Song URL cannot be null or empty.", nameof(permaUrl));
         }
 
-        var encodedSongUrl = Uri.EscapeDataString(permaUrl.Trim());
+        // The self-hosted API's song-details endpoint takes JioSaavn's own song token (the
+        // last path segment of the perma URL), not the full URL.
+        var token = ExtractTokenFromPermaUrl(permaUrl);
+        var encodedToken = Uri.EscapeDataString(token);
         using var response = await _httpClient.GetAsync(
-            $"{SongDetailsBaseUrl}{encodedSongUrl}",
+            $"{_settings.ApiBaseUrl}/api/song?token={encodedToken}",
             cancellationToken);
 
         response.EnsureSuccessStatusCode();
@@ -234,6 +235,17 @@ public sealed class JioSaavnApiClient
         return int.TryParse(_settings.Quality, out var parsed)
             ? NormalizeQuality(parsed)
             : 320;
+    }
+
+    /// <summary>
+    /// JioSaavn's song token is the last path segment of its perma URL, e.g.
+    /// "https://www.jiosaavn.com/song/title/QToYZ01jfVc" -> "QToYZ01jfVc".
+    /// </summary>
+    private static string ExtractTokenFromPermaUrl(string permaUrl)
+    {
+        var trimmed = permaUrl.Trim().TrimEnd('/');
+        var lastSlash = trimmed.LastIndexOf('/');
+        return lastSlash >= 0 ? trimmed[(lastSlash + 1)..] : trimmed;
     }
 }
 
