@@ -949,6 +949,12 @@ public class SubsonicController : ControllerBase
         var parameters = await ExtractAllParameters();
         var format = parameters.GetValueOrDefault("f", "xml");
 
+        _logger.LogInformation(
+            "Star request: id=[{Id}], albumId=[{AlbumId}], artistId=[{ArtistId}]",
+            parameters.GetValueOrDefault("id", ""),
+            parameters.GetValueOrDefault("albumId", ""),
+            parameters.GetValueOrDefault("artistId", ""));
+
         // Check if this is a playlist
         var playlistId = GetExternalPlaylistIdFromStarParameters(parameters);
         if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
