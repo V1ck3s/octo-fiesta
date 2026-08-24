@@ -996,6 +996,22 @@ public class SubsonicController : ControllerBase
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
 
+        var (isExternalArtist, artistProvider, artistExternalId, rawArtistId) = GetExternalArtistFromStarParameters(parameters);
+        if (isExternalArtist)
+        {
+            _logger.LogInformation("Starring external artist {ArtistId}, triggering discography download", rawArtistId);
+            // In Cache mode, download directly to permanent storage
+            if (_subsonicSettings.StorageMode == StorageMode.Cache)
+            {
+                _downloadService.DownloadArtistDiscographyInBackgroundToPermanent(artistProvider!, artistExternalId!);
+            }
+            else
+            {
+                _downloadService.DownloadArtistDiscographyInBackground(artistProvider!, artistExternalId!);
+            }
+            return _responseBuilder.CreateResponse(format, "starred", new { });
+        }
+
         // Check if this is an external song in Cache mode
         if (_subsonicSettings.StorageMode == StorageMode.Cache && parameters.TryGetValue("id", out var id))
         {
@@ -1263,6 +1279,49 @@ public class SubsonicController : ControllerBase
 
         var (isExternal, parsedProvider, type, parsedExternalId) = _localLibraryService.ParseExternalId(id);
         if (!isExternal || !string.Equals(type, "album", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(parsedProvider) || string.IsNullOrEmpty(parsedExternalId))
+        {
+            return false;
+        }
+
+        provider = parsedProvider;
+        externalId = parsedExternalId;
+        return true;
+    }
+
+    private (bool IsExternalArtist, string? Provider, string? ExternalId, string RawArtistId) GetExternalArtistFromStarParameters(Dictionary<string, string> parameters)
+    {
+        var id = parameters.GetValueOrDefault("id", "");
+        if (TryParseExternalArtistId(id, out var provider, out var externalId))
+        {
+            return (true, provider, externalId, id);
+        }
+
+        var artistId = parameters.GetValueOrDefault("artistId", "");
+        if (TryParseExternalArtistId(artistId, out provider, out externalId))
+        {
+            return (true, provider, externalId, artistId);
+        }
+
+        return (false, null, null, string.Empty);
+    }
+
+    private bool TryParseExternalArtistId(string id, out string? provider, out string? externalId)
+    {
+        provider = null;
+        externalId = null;
+
+        if (string.IsNullOrWhiteSpace(id) || PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            return false;
+        }
+
+        var (isExternal, parsedProvider, type, parsedExternalId) = _localLibraryService.ParseExternalId(id);
+        if (!isExternal || !string.Equals(type, "artist", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

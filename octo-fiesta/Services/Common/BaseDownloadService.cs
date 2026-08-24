@@ -211,6 +211,77 @@ public abstract class BaseDownloadService : IDownloadService
         });
     }
 
+    public void DownloadArtistDiscographyInBackground(string externalProvider, string artistExternalId)
+    {
+        DownloadArtistDiscographyInBackgroundInternal(externalProvider, artistExternalId, forcePermanent: false);
+    }
+
+    /// <summary>
+    /// Downloads every album/track an artist has on the external provider in background,
+    /// forcing permanent storage even in Cache mode. Used when starring an artist in Cache mode.
+    /// </summary>
+    public void DownloadArtistDiscographyInBackgroundToPermanent(string externalProvider, string artistExternalId)
+    {
+        DownloadArtistDiscographyInBackgroundInternal(externalProvider, artistExternalId, forcePermanent: true);
+    }
+
+    private void DownloadArtistDiscographyInBackgroundInternal(string externalProvider, string artistExternalId, bool forcePermanent)
+    {
+        if (externalProvider != ProviderName)
+        {
+            Logger.LogWarning("Provider '{Provider}' is not supported for artist discography download", externalProvider);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DownloadArtistDiscographyAsync(artistExternalId, forcePermanent);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to download discography for artist {ArtistId}", artistExternalId);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Downloads every album the artist has, one at a time. Reuses DownloadFullAlbumAsync per
+    /// album so per-track dedup/existing-file/cache-vs-permanent handling stays consistent with
+    /// a regular album download - the only difference is looping over multiple albums.
+    /// </summary>
+    private async Task DownloadArtistDiscographyAsync(string artistExternalId, bool forcePermanent)
+    {
+        var albums = await MetadataService.GetArtistAlbumsAsync(ProviderName, artistExternalId);
+        if (albums.Count == 0)
+        {
+            Logger.LogWarning("No albums found for artist {ArtistId} on provider {Provider} - nothing to download", artistExternalId, ProviderName);
+            return;
+        }
+
+        Logger.LogInformation("Starting discography download for artist {ArtistId}: {AlbumCount} album(s)", artistExternalId, albums.Count);
+
+        foreach (var album in albums)
+        {
+            if (string.IsNullOrEmpty(album.ExternalId))
+            {
+                continue;
+            }
+
+            try
+            {
+                await DownloadFullAlbumAsync(album.ExternalId, forcePermanent);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to download album '{AlbumTitle}' ({AlbumId}) for artist {ArtistId}", album.Title, album.ExternalId, artistExternalId);
+            }
+        }
+
+        Logger.LogInformation("Completed discography download for artist {ArtistId}", artistExternalId);
+    }
+
     /// <summary>
     /// Moves a cached song to permanent storage. Used when starring a song in Cache mode.
     /// If the song is not in cache, returns false (caller should handle this case).

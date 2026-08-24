@@ -322,9 +322,58 @@ public class QobuzDownloadServiceTests : IDisposable
 
         // Act - Should not throw (fire-and-forget)
         service.DownloadRemainingAlbumTracksInBackground("qobuz", "123456", "111");
-        
+
         // Assert - Just verify it doesn't throw, actual download is async
         Assert.True(true);
+    }
+
+    #endregion
+
+    #region DownloadArtistDiscographyInBackground Tests
+
+    [Fact]
+    public void DownloadArtistDiscographyInBackground_WithUnsupportedProvider_DoesNotThrow()
+    {
+        // Arrange
+        var service = CreateService(userAuthToken: "test-token", userId: "123");
+
+        // Act & Assert - Should not throw, just log warning
+        service.DownloadArtistDiscographyInBackground("spotify", "259");
+    }
+
+    [Fact]
+    public void DownloadArtistDiscographyInBackground_WithQobuzProvider_StartsBackgroundTask()
+    {
+        // Arrange
+        _metadataServiceMock
+            .Setup(s => s.GetArtistAlbumsAsync("qobuz", "259"))
+            .ReturnsAsync(new List<Album>
+            {
+                new Album { Id = "ext-qobuz-album-111", ExternalId = "111", Title = "Album One" },
+                new Album { Id = "ext-qobuz-album-222", ExternalId = "222", Title = "Album Two" }
+            });
+
+        var service = CreateService(userAuthToken: "test-token", userId: "123");
+
+        // Act - Should not throw (fire-and-forget)
+        service.DownloadArtistDiscographyInBackground("qobuz", "259");
+
+        // Assert - Just verify it doesn't throw, actual download is async
+        Assert.True(true);
+    }
+
+    [Fact]
+    public void DownloadArtistDiscographyInBackgroundToPermanent_WithQobuzProvider_StartsBackgroundTask()
+    {
+        // Arrange
+        _metadataServiceMock
+            .Setup(s => s.GetArtistAlbumsAsync("qobuz", "259"))
+            .ReturnsAsync(new List<Album>());
+
+        var service = CreateService(userAuthToken: "test-token", userId: "123");
+
+        // Act & Assert - Should not throw (fire-and-forget)
+        service.DownloadArtistDiscographyInBackgroundToPermanent("qobuz", "259");
     }
 
     #endregion

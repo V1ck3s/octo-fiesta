@@ -61,7 +61,23 @@ public interface IDownloadService
     /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
     /// <param name="albumExternalId">The album ID on the external provider</param>
     void DownloadFullAlbumInBackgroundToPermanent(string externalProvider, string albumExternalId);
-    
+
+    /// <summary>
+    /// Downloads every album/track an artist has on the external provider, in background.
+    /// Providers without a real artist-albums API (e.g. JioSaavn) return nothing to download.
+    /// </summary>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
+    /// <param name="artistExternalId">The artist ID on the external provider</param>
+    void DownloadArtistDiscographyInBackground(string externalProvider, string artistExternalId);
+
+    /// <summary>
+    /// Downloads every album/track an artist has on the external provider in background,
+    /// forcing permanent storage even in Cache mode. Used when starring an artist in Cache mode.
+    /// </summary>
+    /// <param name="externalProvider">The provider (qobuz, yandex, etc.)</param>
+    /// <param name="artistExternalId">The artist ID on the external provider</param>
+    void DownloadArtistDiscographyInBackgroundToPermanent(string externalProvider, string artistExternalId);
+
     /// <summary>
     /// Checks if a song is currently being downloaded
     /// </summary>

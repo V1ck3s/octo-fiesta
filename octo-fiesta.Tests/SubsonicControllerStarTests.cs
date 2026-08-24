@@ -190,6 +190,47 @@ public class SubsonicControllerStarTests
     }
 
     [Fact]
+    public async Task Star_WithExternalArtistIdInId_TriggersDiscographyDownload()
+    {
+        // Arrange
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "ext-qobuz-artist-259" }
+            });
+
+        // Act
+        var result = await controller.Star();
+
+        // Assert - should return success & trigger discography download based on id
+        Assert.IsType<ContentResult>(result);
+        var contentResult = (ContentResult)result;
+        Assert.Contains("starred", contentResult.Content ?? "");
+        _mockDownloadService.Verify(x => x.DownloadArtistDiscographyInBackground("qobuz", "259"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Star_WithExternalArtistIdInArtistId_AndNonArtistInId_UsesArtistIdFallback()
+    {
+        // Arrange
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string>
+            {
+                { "id", "some-regular-id" },
+                { "artistId", "ext-qobuz-artist-259" }
+            });
+
+        // Act
+        var result = await controller.Star();
+
+        // Assert - should return success & trigger discography download based on artistId, not id
+        Assert.IsType<ContentResult>(result);
+        var contentResult = (ContentResult)result;
+        Assert.Contains("starred", contentResult.Content ?? "");
+        _mockDownloadService.Verify(x => x.DownloadArtistDiscographyInBackground("qobuz", "259"), Times.Once);
+    }
+
+    [Fact]
     public async Task Star_WithPlaylistIdInAlbumId_DetectsPlaylistAndTriggersDownload()
     {
         // Arrange - client sends playlist ID as albumId (this is the bug fix)
