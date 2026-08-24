@@ -1018,6 +1018,19 @@ public class SubsonicController : ControllerBase
             return _responseBuilder.CreateResponse(format, "starred", new { });
         }
 
+        // The artistId isn't one of ours, but the client is unambiguously asking to favorite an
+        // artist (that's what the artistId param means). This happens once any song by that
+        // artist has been downloaded and scanned - Navidrome then has its own local artist
+        // record, and clients naturally switch to referencing that native ID instead of ours.
+        // Best-effort: resolve the local artist's name, look it up on the active external
+        // provider, and kick off its discography download too - without blocking or altering
+        // the normal local favorite below.
+        var fallbackArtistId = parameters.GetValueOrDefault("artistId", "");
+        if (!string.IsNullOrEmpty(fallbackArtistId) && !_localLibraryService.ParseExternalId(fallbackArtistId).isExternal)
+        {
+            _ = Task.Run(() => TryDownloadDiscographyForLocalArtistAsync(fallbackArtistId, parameters));
+        }
+
         // Check if this is an external song in Cache mode
         if (_subsonicSettings.StorageMode == StorageMode.Cache && parameters.TryGetValue("id", out var id))
         {
@@ -1340,6 +1353,69 @@ public class SubsonicController : ControllerBase
         provider = parsedProvider;
         externalId = parsedExternalId;
         return true;
+    }
+
+    /// <summary>
+    /// Best-effort bridge for artists that have "gone local": resolves the local Navidrome
+    /// artist's name, searches for a same-named artist on the active external provider, and
+    /// triggers a discography download for that match if found. Never throws - this always
+    /// runs fire-and-forget alongside the normal local favorite.
+    /// </summary>
+    private async Task TryDownloadDiscographyForLocalArtistAsync(string localArtistId, Dictionary<string, string> starParameters)
+    {
+        try
+        {
+            var relayParameters = new Dictionary<string, string>(starParameters)
+            {
+                ["id"] = localArtistId,
+                ["f"] = "json"
+            };
+
+            var (body, _) = await _proxyService.RelayAsync("rest/getArtist", relayParameters);
+            using var doc = JsonDocument.Parse(body);
+
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var response) ||
+                !response.TryGetProperty("artist", out var artistElement) ||
+                !artistElement.TryGetProperty("name", out var nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String)
+            {
+                _logger.LogInformation("Could not resolve local artist {LocalArtistId} to a name, skipping discography lookup", localArtistId);
+                return;
+            }
+
+            var artistName = nameElement.GetString();
+            if (string.IsNullOrWhiteSpace(artistName))
+            {
+                return;
+            }
+
+            var candidates = await _metadataService.SearchArtistsAsync(artistName, 5);
+            var match = candidates.FirstOrDefault(a => string.Equals(a.Name, artistName, StringComparison.OrdinalIgnoreCase))
+                        ?? candidates.FirstOrDefault();
+
+            if (match == null || string.IsNullOrEmpty(match.ExternalProvider) || string.IsNullOrEmpty(match.ExternalId))
+            {
+                _logger.LogInformation("No external match found for local artist '{ArtistName}' ({LocalArtistId})", artistName, localArtistId);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Local artist '{ArtistName}' ({LocalArtistId}) matched external artist {Provider}:{ExternalId}, triggering discography download",
+                artistName, localArtistId, match.ExternalProvider, match.ExternalId);
+
+            if (_subsonicSettings.StorageMode == StorageMode.Cache)
+            {
+                _downloadService.DownloadArtistDiscographyInBackgroundToPermanent(match.ExternalProvider, match.ExternalId);
+            }
+            else
+            {
+                _downloadService.DownloadArtistDiscographyInBackground(match.ExternalProvider, match.ExternalId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve discography download for local artist {LocalArtistId}", localArtistId);
+        }
     }
 
     private async Task<string?> ResolvePlaylistSongIdAsync(string songId, CancellationToken cancellationToken)

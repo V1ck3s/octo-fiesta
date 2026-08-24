@@ -5,12 +5,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Moq.Protected;
 using octo_fiesta.Controllers;
+using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
 using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Subsonic;
+using System.Net;
 
 namespace octo_fiesta.Tests;
 
@@ -70,12 +73,13 @@ public class SubsonicControllerStarTests
 
     private SubsonicController CreateController(
         Dictionary<string, string>? queryParams = null,
-        PlaylistSyncService? playlistSyncService = null)
+        PlaylistSyncService? playlistSyncService = null,
+        HttpMessageHandler? httpMessageHandler = null)
     {
         // We can't easily mock SubsonicProxyService (concrete class with HttpClient dependency)
         // So we create a real one with a mocked HttpClient
-        var mockHttpHandler = new Mock<HttpMessageHandler>();
-        var httpClient = new HttpClient(mockHttpHandler.Object);
+        var mockHttpHandler = httpMessageHandler ?? new Mock<HttpMessageHandler>().Object;
+        var httpClient = new HttpClient(mockHttpHandler);
         var mockHttpClientFactory = new Mock<IHttpClientFactory>();
         mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
         
@@ -229,6 +233,96 @@ public class SubsonicControllerStarTests
         Assert.Contains("starred", contentResult.Content ?? "");
         _mockDownloadService.Verify(x => x.DownloadArtistDiscographyInBackground("qobuz", "259"), Times.Once);
     }
+
+    private static Mock<HttpMessageHandler> CreateGetArtistHandler(string artistJsonName)
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler
+            .Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent(
+                    "{\"subsonic-response\":{\"status\":\"ok\",\"artist\":{\"id\":\"local123\",\"name\":\"" + artistJsonName + "\"}}}")
+            });
+        return handler;
+    }
+
+    #region Star() Local Artist -> External Discography Bridge Tests
+
+    [Fact]
+    public async Task Star_WithLocalArtistId_ResolvesMatchingExternalArtistAndTriggersDiscography()
+    {
+        // Arrange - artistId is a native Navidrome ID (no ext- prefix), simulating an artist
+        // that already has one downloaded song and so now resolves locally instead of externally
+        var handler = CreateGetArtistHandler("FACE");
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string> { { "artistId", "local123" } },
+            httpMessageHandler: handler.Object);
+
+        _mockMetadataService
+            .Setup(x => x.SearchArtistsAsync("FACE", 5))
+            .ReturnsAsync(new List<Artist>
+            {
+                new() { Id = "ext-youtube-artist-UC1", Name = "FACE", ExternalProvider = "youtube", ExternalId = "UC1" }
+            });
+
+        // Act - the local artistId isn't recognized as external, so this falls through to the
+        // normal relay-to-Navidrome path (mocked here to return the same getArtist JSON back,
+        // since only the discography side effect is under test, not the relay response itself)
+        var result = await controller.Star();
+        await Task.Delay(200); // let the fire-and-forget resolution task run
+
+        // Assert - the relay still completes normally...
+        Assert.NotNull(result);
+        // ...and the matching external artist's discography download gets triggered alongside it
+        _mockDownloadService.Verify(x => x.DownloadArtistDiscographyInBackground("youtube", "UC1"), Times.Once);
+    }
+
+    [Fact]
+    public async Task Star_WithLocalArtistId_WhenNoExternalMatchFound_DoesNotTriggerDownload()
+    {
+        // Arrange
+        var handler = CreateGetArtistHandler("Some Local Only Band");
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string> { { "artistId", "local456" } },
+            httpMessageHandler: handler.Object);
+
+        _mockMetadataService
+            .Setup(x => x.SearchArtistsAsync("Some Local Only Band", 5))
+            .ReturnsAsync(new List<Artist>());
+
+        // Act
+        await controller.Star();
+        await Task.Delay(200);
+
+        // Assert
+        _mockDownloadService.Verify(
+            x => x.DownloadArtistDiscographyInBackground(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Star_WithExternalArtistId_DoesNotAlsoRunLocalArtistBridge()
+    {
+        // Arrange - a proper external artistId should take the direct path only, never the
+        // local-resolution fallback (which would be redundant and would waste a getArtist call)
+        var controller = CreateController(
+            queryParams: new Dictionary<string, string> { { "artistId", "ext-qobuz-artist-259" } });
+
+        // Act
+        await controller.Star();
+        await Task.Delay(50);
+
+        // Assert - SearchArtistsAsync is only used by the local-artist bridge, so it staying
+        // uncalled proves that path never ran
+        _mockMetadataService.Verify(x => x.SearchArtistsAsync(It.IsAny<string>(), It.IsAny<int>()), Times.Never);
+    }
+
+    #endregion
 
     [Fact]
     public async Task Star_WithPlaylistIdInAlbumId_DetectsPlaylistAndTriggersDownload()
