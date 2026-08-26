@@ -144,6 +144,11 @@ var app = builder.Build();
 // Enable request body buffering FIRST to allow multiple reads (for proxy forwarding)
 app.UseRequestBodyBuffering();
 
+// CORS runs before authentication so preflight (OPTIONS) requests and browser
+// media/XHR requests get Access-Control-* headers even when auth later rejects
+// them - otherwise the browser only ever sees an opaque CORS failure.
+app.UseCors();
+
 // Validate Subsonic authentication BEFORE any endpoint processing
 // This prevents unauthenticated access to external resources
 app.UseSubsonicAuthentication();
@@ -159,8 +164,6 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAuthorization();
-
-app.UseCors();
 
 app.MapControllers();
 

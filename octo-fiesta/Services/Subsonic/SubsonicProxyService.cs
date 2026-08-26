@@ -130,91 +130,111 @@ public class SubsonicProxyService
         return (body, contentType, (int)response.StatusCode);
     }
 
-    private static readonly string[] StreamingRequiredHeaders =
+    // Response headers relayed verbatim so media playback, seeking and caching work.
+    // CORS headers are added by the CORS middleware; everything playback-relevant is here.
+    private static readonly string[] StreamResponseHeaders =
     {
-        "Accept-Ranges",
-        "Content-Range",
+        "Content-Type",
         "Content-Length",
+        "Content-Range",
+        "Content-Disposition",
+        "Accept-Ranges",
         "ETag",
-        "Last-Modified"
+        "Last-Modified",
+        "Cache-Control",
+        "Expires",
+        "X-Content-Duration",
+        "X-Content-Type-Options"
     };
 
     /// <summary>
-    /// Relays a stream request to the Subsonic server with range processing support.
+    /// Relays a stream request to the Subsonic server as a transparent passthrough,
+    /// preserving the upstream status code, range/partial-content semantics and headers.
     /// </summary>
     public async Task<IActionResult> RelayStreamAsync(
         Dictionary<string, string> parameters,
         CancellationToken cancellationToken)
     {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null)
+        {
+            return new ObjectResult(new { error = "HTTP context not available" })
+            {
+                StatusCode = 500
+            };
+        }
+
+        var incomingRequest = httpContext.Request;
+        var outgoingResponse = httpContext.Response;
+
+        var query = string.Join("&", parameters.Select(kv =>
+            $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+        var url = $"{_subsonicSettings.Url}/rest/stream?{query}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        // Forward conditional / range headers so the client can seek and resume.
+        foreach (var name in new[] { "Range", "If-Range", "If-None-Match", "If-Modified-Since" })
+        {
+            if (incomingRequest.Headers.TryGetValue(name, out var value))
+            {
+                request.Headers.TryAddWithoutValidation(name, value.ToArray());
+            }
+        }
+
+        HttpResponseMessage response;
         try
         {
-            // Get HTTP context for request/response forwarding
-            var httpContext = _httpContextAccessor.HttpContext;
-            if (httpContext == null)
-            {
-                return new ObjectResult(new { error = "HTTP context not available" })
-                {
-                    StatusCode = 500
-                };
-            }
-            
-            var incomingRequest = httpContext.Request;
-            var outgoingResponse = httpContext.Response;
-
-            var query = string.Join("&", parameters.Select(kv => 
-                $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
-            var url = $"{_subsonicSettings.Url}/rest/stream?{query}";
-            
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-
-            // Forward Range headers for progressive streaming support (iOS clients)
-            if (incomingRequest.Headers.TryGetValue("Range", out var range))
-            {
-                request.Headers.TryAddWithoutValidation("Range", range.ToArray());
-            }
-            
-            if (incomingRequest.Headers.TryGetValue("If-Range", out var ifRange))
-            {
-                request.Headers.TryAddWithoutValidation("If-Range", ifRange.ToArray());
-            }
-            
-            var response = await _httpClient.SendAsync(
-                request, 
-                HttpCompletionOption.ResponseHeadersRead, 
+            response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
-            
-            if (!response.IsSuccessStatusCode)
-            {
-                return new StatusCodeResult((int)response.StatusCode);
-            }
-
-            // Forward HTTP status code (e.g., 206 Partial Content for range requests)
-            outgoingResponse.StatusCode = (int)response.StatusCode;
-
-            // Forward streaming-required headers from upstream response
-            foreach (var header in StreamingRequiredHeaders)
-            {
-                if (response.Headers.TryGetValues(header, out var values) ||
-                    response.Content.Headers.TryGetValues(header, out values))
-                {
-                    outgoingResponse.Headers[header] = values.ToArray();
-                }
-            }
-
-            var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            var contentType = response.Content.Headers.ContentType?.ToString() ?? "audio/mpeg";
-            
-            return new FileStreamResult(stream, contentType)
-            {
-                EnableRangeProcessing = true
-            };
         }
         catch (Exception ex)
         {
             return new ObjectResult(new { error = $"Error streaming from Subsonic: {ex.Message}" })
             {
-                StatusCode = 500
+                StatusCode = 502
             };
+        }
+
+        using (response)
+        {
+            // Relay the upstream status verbatim (200, 206, 304, 416, 404, ...).
+            outgoingResponse.StatusCode = (int)response.StatusCode;
+
+            foreach (var name in StreamResponseHeaders)
+            {
+                if (response.Headers.TryGetValues(name, out var values) ||
+                    response.Content.Headers.TryGetValues(name, out values))
+                {
+                    outgoingResponse.Headers[name] = values.ToArray();
+                }
+            }
+
+            if (!outgoingResponse.Headers.ContainsKey("Accept-Ranges"))
+            {
+                outgoingResponse.Headers["Accept-Ranges"] = "bytes";
+            }
+
+            // A media response with no Content-Type invites browser range/sniffing
+            // failures (Firefox ORB), so fall back to a generic audio type.
+            if (string.IsNullOrEmpty(outgoingResponse.Headers["Content-Type"]))
+            {
+                outgoingResponse.Headers["Content-Type"] = "audio/mpeg";
+            }
+
+            // No body for "not modified" / "precondition failed".
+            if (response.Content is null
+                || response.StatusCode is System.Net.HttpStatusCode.NotModified
+                or System.Net.HttpStatusCode.PreconditionFailed)
+            {
+                return new EmptyResult();
+            }
+
+            await using var upstream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await upstream.CopyToAsync(outgoingResponse.Body, cancellationToken);
+            return new EmptyResult();
         }
     }
 }

@@ -14,6 +14,7 @@ public class SubsonicProxyServiceTests
     private readonly SubsonicProxyService _service;
     private readonly Mock<HttpMessageHandler> _mockHttpMessageHandler;
     private readonly Mock<IHttpClientFactory> _mockHttpClientFactory;
+    private readonly DefaultHttpContext _httpContext;
 
     public SubsonicProxyServiceTests()
     {
@@ -23,15 +24,16 @@ public class SubsonicProxyServiceTests
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockHttpClientFactory.Setup(x => x.CreateClient(It.IsAny<string>())).Returns(httpClient);
 
-        var settings = Options.Create(new SubsonicSettings 
-        { 
-            Url = "http://localhost:4533" 
+        var settings = Options.Create(new SubsonicSettings
+        {
+            Url = "http://localhost:4533"
         });
 
-        var httpContext = new DefaultHttpContext();
+        _httpContext = new DefaultHttpContext();
+        _httpContext.Response.Body = new MemoryStream();
         var httpContextAccessor = new HttpContextAccessor
         {
-            HttpContext = httpContext
+            HttpContext = _httpContext
         };
 
         _service = new SubsonicProxyService(_mockHttpClientFactory.Object, settings, httpContextAccessor);
@@ -230,7 +232,7 @@ public class SubsonicProxyServiceTests
     }
 
     [Fact]
-    public async Task RelayStreamAsync_SuccessfulRequest_ReturnsFileStreamResult()
+    public async Task RelayStreamAsync_SuccessfulRequest_RelaysBodyStatusAndHeaders()
     {
         // Arrange
         var streamContent = new byte[] { 1, 2, 3, 4, 5 };
@@ -246,8 +248,8 @@ public class SubsonicProxyServiceTests
                 ItExpr.IsAny<CancellationToken>())
             .ReturnsAsync(responseMessage);
 
-        var parameters = new Dictionary<string, string> 
-        { 
+        var parameters = new Dictionary<string, string>
+        {
             { "id", "song123" },
             { "u", "admin" }
         };
@@ -256,13 +258,15 @@ public class SubsonicProxyServiceTests
         var result = await _service.RelayStreamAsync(parameters, CancellationToken.None);
 
         // Assert
-        var fileResult = Assert.IsType<FileStreamResult>(result);
-        Assert.Equal("audio/mpeg", fileResult.ContentType);
-        Assert.True(fileResult.EnableRangeProcessing);
+        Assert.IsType<EmptyResult>(result);
+        Assert.Equal(200, _httpContext.Response.StatusCode);
+        Assert.Equal("audio/mpeg", _httpContext.Response.Headers["Content-Type"].ToString());
+        Assert.Equal("bytes", _httpContext.Response.Headers["Accept-Ranges"].ToString());
+        Assert.Equal(streamContent, ((MemoryStream)_httpContext.Response.Body).ToArray());
     }
 
     [Fact]
-    public async Task RelayStreamAsync_HttpError_ReturnsStatusCodeResult()
+    public async Task RelayStreamAsync_HttpError_RelaysUpstreamStatus()
     {
         // Arrange
         var responseMessage = new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -279,12 +283,12 @@ public class SubsonicProxyServiceTests
         var result = await _service.RelayStreamAsync(parameters, CancellationToken.None);
 
         // Assert
-        var statusResult = Assert.IsType<StatusCodeResult>(result);
-        Assert.Equal(404, statusResult.StatusCode);
+        Assert.IsType<EmptyResult>(result);
+        Assert.Equal(404, _httpContext.Response.StatusCode);
     }
 
     [Fact]
-    public async Task RelayStreamAsync_Exception_ReturnsObjectResultWith500()
+    public async Task RelayStreamAsync_Exception_ReturnsObjectResultWith502()
     {
         // Arrange
         _mockHttpMessageHandler.Protected()
@@ -300,11 +304,11 @@ public class SubsonicProxyServiceTests
 
         // Assert
         var objectResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, objectResult.StatusCode);
+        Assert.Equal(502, objectResult.StatusCode);
     }
 
     [Fact]
-    public async Task RelayStreamAsync_DefaultContentType_UsesAudioMpeg()
+    public async Task RelayStreamAsync_MissingUpstreamContentType_FallsBackToAudioMpeg()
     {
         // Arrange
         var streamContent = new byte[] { 1, 2, 3 };
@@ -326,8 +330,8 @@ public class SubsonicProxyServiceTests
         var result = await _service.RelayStreamAsync(parameters, CancellationToken.None);
 
         // Assert
-        var fileResult = Assert.IsType<FileStreamResult>(result);
-        Assert.Equal("audio/mpeg", fileResult.ContentType);
+        Assert.IsType<EmptyResult>(result);
+        Assert.Equal("audio/mpeg", _httpContext.Response.Headers["Content-Type"].ToString());
     }
 
     [Fact]
