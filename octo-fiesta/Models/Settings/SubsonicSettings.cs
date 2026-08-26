@@ -74,6 +74,7 @@ public enum MusicService
     
     /// <summary>
     /// SquidWTF music service (supports Qobuz and Tidal backends)
+    /// DEPRECATED: upstream squid.wtf music services are down; may be removed in a future release
     /// </summary>
     SquidWTF,
 
@@ -121,11 +122,11 @@ public class SubsonicSettings
     public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
     
     /// <summary>
-    /// Music service to use (default: SquidWTF)
+    /// Music service to use (default: Deezer)
     /// Environment variable: MUSIC_SERVICE
-    /// Values: "Deezer", "Qobuz", "SquidWTF"
+    /// Values: "Deezer", "Qobuz", "SquidWTF" (deprecated), "Yandex"
     /// </summary>
-    public MusicService MusicService { get; set; } = MusicService.SquidWTF;
+    public MusicService MusicService { get; set; } = MusicService.Deezer;
     
     /// <summary>
     /// Storage mode for downloaded files (default: Permanent)
