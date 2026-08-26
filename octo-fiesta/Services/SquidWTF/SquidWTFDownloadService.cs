@@ -12,7 +12,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Download service implementation using SquidWTF API
-/// Supports Qobuz, Tidal, Amazon Music, and Deemix backends
+/// Supports Qobuz and Tidal backends
 /// No decryption needed - SquidWTF returns direct streaming URLs
 /// </summary>
 public class SquidWTFDownloadService : BaseDownloadService
@@ -24,24 +24,18 @@ public class SquidWTFDownloadService : BaseDownloadService
     
     // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string AmazonBaseUrl = "https://amz.squid.wtf";
-    private const string DeemixBaseUrl = "https://deemix.squid.wtf";
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    private const string AmazonCaptchaTokenHeader = "X-Captcha-Token";
 
     // Quality mappings
     // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
     // Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
-    // Amazon: best (FLAC 24-bit), hd (FLAC 16-bit), standard (AAC 256kbps), opus (Opus), atmos (Dolby Atmos)
 
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
-    private bool IsAmazonSource => _squidWTFSettings.Source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase);
-    private bool IsDeemixSource => _squidWTFSettings.Source.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
     protected override string ProviderName => "squidwtf";
 
@@ -75,19 +69,6 @@ public class SquidWTFDownloadService : BaseDownloadService
                 using var request = new HttpRequestMessage(HttpMethod.Get, $"{QobuzBaseUrl}/api/get-music?q=test&offset=0");
                 request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
                 var response = await _httpClient.SendAsync(request);
-                return response.IsSuccessStatusCode;
-            }
-
-            if (IsAmazonSource)
-            {
-                // Verify captcha challenge endpoint is reachable
-                var response = await _httpClient.GetAsync($"{AmazonBaseUrl}/api/captcha/challenge");
-                return response.IsSuccessStatusCode;
-            }
-
-            if (IsDeemixSource)
-            {
-                var response = await _httpClient.GetAsync($"{DeemixBaseUrl}/api/health");
                 return response.IsSuccessStatusCode;
             }
 
@@ -125,8 +106,6 @@ public class SquidWTFDownloadService : BaseDownloadService
             return _squidWTFSettings.Quality;
 
         if (IsQobuzSource) return "27";
-        if (IsAmazonSource) return "ultrahd";
-        if (IsDeemixSource) return "FLAC";
         return "HI_RES_LOSSLESS";
     }
 
@@ -134,10 +113,6 @@ public class SquidWTFDownloadService : BaseDownloadService
     {
         if (IsQobuzSource)
             return await DownloadTrackQobuzAsync(trackId, song, cancellationToken);
-        if (IsAmazonSource)
-            return await DownloadTrackAmazonAsync(trackId, song, cancellationToken);
-        if (IsDeemixSource)
-            return await DownloadTrackDeemixAsync(trackId, song, cancellationToken);
         return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
     }
 
@@ -221,181 +196,6 @@ public class SquidWTFDownloadService : BaseDownloadService
             "FLAC_16" or "FLAC" or "6" => "6",
             "MP3_320" or "MP3" or "5" => "5",
             _ => "27"
-        };
-    }
-
-    #endregion
-
-    #region Deemix Download
-
-    private async Task<DownloadResult> DownloadTrackDeemixAsync(string trackId, Song song, CancellationToken cancellationToken)
-    {
-        // Deemix applies its configured quality server-side and returns a fully decrypted audio stream.
-        // Do not POST /api/settings here: its settings are shared by the public instance.
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{DeemixBaseUrl}/api/download/stream/{Uri.EscapeDataString(trackId)}?blob=1");
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var format = response.Headers.TryGetValues("X-Actual-Format", out var values)
-            ? values.FirstOrDefault()?.ToUpperInvariant()
-            : null;
-        format ??= response.Content.Headers.ContentType?.MediaType?.Contains("flac", StringComparison.OrdinalIgnoreCase) == true ? "FLAC" : "MP3";
-        var extension = format == "FLAC" ? ".flac" : ".mp3";
-        var quality = format == "FLAC" ? "FLAC" : format is "MP3_320" or "MP3_128" ? format : "MP3";
-
-        Logger.LogInformation("Got Deemix stream for track {TrackId}: {Title} ({Format})", trackId, song.Title, format);
-        return new DownloadResult(await HttpResponseStream.CreateAsync(response, cancellationToken), extension, quality);
-    }
-
-    #endregion
-
-    #region Amazon Music Download
-
-    private async Task<DownloadResult> DownloadTrackAmazonAsync(string trackAsin, Song song, CancellationToken cancellationToken)
-    {
-        var tier = GetAmazonTier();
-        var country = _squidWTFSettings.Country;
-
-        const int maxAttempts = 3;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            bool forceRefresh = attempt > 1;
-            var (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: forceRefresh, cancellationToken);
-            var trackResponse = await FetchAmazonTrackAsync(trackAsin, tier, country, token, sessionCookie, cancellationToken);
-
-            if (trackResponse == null)
-            {
-                Logger.LogWarning("Amazon Music track request failed (attempt {Attempt}/{Max}), will refresh token", attempt, maxAttempts);
-                continue;
-            }
-
-            if (string.IsNullOrEmpty(trackResponse.Stream?.Url))
-            {
-                Logger.LogWarning("Amazon Music returned no stream URL (attempt {Attempt}/{Max})", attempt, maxAttempts);
-                continue;
-            }
-
-            var cencKey = trackResponse.Drm?.Key;
-            Logger.LogInformation("Got Amazon Music stream URL for track {TrackAsin}: {Title} (codec: {Codec}, tier: {Tier}, attempt: {Attempt}, hasKey: {HasKey})",
-                trackAsin, song.Title, trackResponse.Stream.Codec ?? "?", tier, attempt, cencKey != null);
-
-            var streamUrl = trackResponse.Stream.Url;
-            if (streamUrl.StartsWith("/")) streamUrl = $"{AmazonBaseUrl}{streamUrl}";
-
-            try
-            {
-                var downloadStream = await GetAmazonStreamAsync(streamUrl, token, sessionCookie, cancellationToken);
-                var codec = (trackResponse.Stream.Codec ?? "").ToLowerInvariant();
-                var (extension, quality) = GetAmazonExtensionAndQuality(codec, tier);
-                return new DownloadResult(downloadStream, extension, quality, CencKey: cencKey);
-            }
-            catch (TimeoutException ex)
-            {
-                Logger.LogWarning("Amazon Music stream stalled on attempt {Attempt}/{Max}: {Message} — retrying with fresh URL", attempt, maxAttempts, ex.Message);
-                // Stream URL is single-use; loop will fetch a new one
-            }
-        }
-
-        throw new Exception($"Failed to download Amazon Music track {trackAsin} after {maxAttempts} attempts");
-    }
-
-    private static void AddAmazonBrowserHeaders(HttpRequestMessage req, string sessionCookie, string token)
-    {
-        req.Headers.Add("Cookie", sessionCookie);
-        req.Headers.Add(AmazonCaptchaTokenHeader, token);
-        req.Headers.Add("Origin", AmazonBaseUrl);
-        req.Headers.Add("Referer", AmazonBaseUrl + "/");
-        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-        req.Headers.Add("Accept", "*/*");
-        req.Headers.Add("Accept-Language", "en-US,en;q=0.9");
-        req.Headers.Add("Sec-Fetch-Site", "same-origin");
-        req.Headers.Add("Sec-Fetch-Mode", "cors");
-        req.Headers.Add("Sec-Fetch-Dest", "empty");
-        req.Headers.Add("sec-ch-ua", "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Google Chrome\";v=\"137\"");
-        req.Headers.Add("sec-ch-ua-mobile", "?0");
-        req.Headers.Add("sec-ch-ua-platform", "\"Linux\"");
-    }
-
-    private async Task<AmazonMusicTrackResponse?> FetchAmazonTrackAsync(
-        string asin, string tier, string country, string token, string sessionCookie, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var body = System.Text.Json.JsonSerializer.Serialize(new { asin, tier, country });
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}/api/track");
-            request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-            AddAmazonBrowserHeaders(request, sessionCookie, token);
-
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            {
-                return null; // Signal to caller to refresh token
-            }
-
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            Logger.LogDebug("Amazon /api/track response for {Asin}: {Json}", asin, json);
-            return System.Text.Json.JsonSerializer.Deserialize<AmazonMusicTrackResponse>(json);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.LogWarning(ex, "Amazon Music /api/track request failed for {Asin}", asin);
-            return null;
-        }
-    }
-
-    private async Task<Stream> GetAmazonStreamAsync(string url, string token, string sessionCookie, CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        AddAmazonBrowserHeaders(request, sessionCookie, token);
-
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-
-        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-            response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-        {
-            // One more attempt with a fresh token
-            var (freshToken, freshCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true, cancellationToken);
-            using var retryRequest = new HttpRequestMessage(HttpMethod.Get, url);
-            AddAmazonBrowserHeaders(retryRequest, freshCookie, freshToken);
-            response = await _httpClient.SendAsync(retryRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        }
-
-        response.EnsureSuccessStatusCode();
-        return await HttpResponseStream.CreateAsync(response, cancellationToken);
-    }
-
-    private string GetAmazonTier()
-    {
-        var quality = _squidWTFSettings.Quality;
-
-        if (string.IsNullOrEmpty(quality))
-            return "best"; // Default to FLAC 24-bit
-
-        return quality.ToUpperInvariant() switch
-        {
-            "FLAC_24" or "FLAC_24_192" or "ULTRAHD" or "BEST" => "best",
-            "FLAC_16" or "FLAC" or "HD" => "hd",
-            "AAC" or "AAC_256" or "HIGH" or "STANDARD" => "standard",
-            "OPUS" => "opus",
-            "ATMOS" => "atmos",
-            _ => "best"
-        };
-    }
-
-    private static (string Extension, string Quality) GetAmazonExtensionAndQuality(string codec, string tier)
-    {
-        // All Amazon Music streams are CMAF/MP4; after in-place CENC decryption the
-        // container is preserved, so the extension is always .m4a.
-        // TagLib and Navidrome handle FLAC-in-MP4 and Opus-in-MP4 correctly.
-        return codec switch
-        {
-            "flac"  => (".m4a", tier == "hd" ? "FLAC_16" : "FLAC_24"),
-            "opus"  => (".m4a", "OPUS_320"),
-            "atmos" => (".m4a", "ATMOS"),
-            _       => (".m4a", "AAC_256"),
         };
     }
 

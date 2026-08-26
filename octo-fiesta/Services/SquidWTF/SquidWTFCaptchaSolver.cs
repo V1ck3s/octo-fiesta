@@ -20,13 +20,6 @@ public class SquidWTFCaptchaSolver
     private string? _cookieHeader;
     private DateTimeOffset _cookieExpiresAt = DateTimeOffset.MinValue;
 
-    // Token-based captcha cache (Amazon Music uses X-Captcha-Token instead of a cookie)
-    private string? _captchaToken;
-    private string? _amazonSessionCookie;   // amz_web_sess — must accompany every API request
-    private DateTimeOffset _tokenExpiresAt = DateTimeOffset.MinValue;
-    private static readonly TimeSpan TokenValidity = TimeSpan.FromMinutes(13);
-    private readonly SemaphoreSlim _tokenLock = new(1, 1);
-
     public SquidWTFCaptchaSolver(
         IHttpClientFactory httpClientFactory,
         ILogger<SquidWTFCaptchaSolver> logger)
@@ -61,105 +54,6 @@ public class SquidWTFCaptchaSolver
         {
             _lock.Release();
         }
-    }
-
-    /// <summary>
-    /// Returns (X-Captcha-Token, amz_web_sess cookie value) for Amazon Music (amz.squid.wtf).
-    /// Both values must be sent with every API request.
-    /// </summary>
-    public async Task<(string Token, string SessionCookie)> GetAmazonCaptchaTokenAsync(
-        string baseUrl,
-        bool forceRefresh = false,
-        CancellationToken cancellationToken = default)
-    {
-        if (!forceRefresh && _captchaToken != null && _amazonSessionCookie != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-            return (_captchaToken, _amazonSessionCookie);
-
-        await _tokenLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (!forceRefresh && _captchaToken != null && _amazonSessionCookie != null && DateTimeOffset.UtcNow < _tokenExpiresAt)
-                return (_captchaToken, _amazonSessionCookie);
-
-            (_captchaToken, _amazonSessionCookie) = await SolveAndVerifyAmazonAsync(baseUrl, cancellationToken);
-            _tokenExpiresAt = DateTimeOffset.UtcNow + TokenValidity;
-            return (_captchaToken, _amazonSessionCookie);
-        }
-        finally
-        {
-            _tokenLock.Release();
-        }
-    }
-
-    private async Task<(string Token, string SessionCookie)> SolveAndVerifyAmazonAsync(string baseUrl, CancellationToken ct)
-    {
-        // Use a dedicated client with its own CookieContainer so the amz_web_sess cookie
-        // set on the page load is forwarded to /api/captcha/challenge and /api/captcha/verify.
-        var cookieContainer = new System.Net.CookieContainer();
-        using var handler = new HttpClientHandler { CookieContainer = cookieContainer };
-        using var http = new HttpClient(handler, disposeHandler: false);
-
-        var trimmed = baseUrl.TrimEnd('/');
-
-        // Fetch the root page to capture amz_web_sess cookie and extract webNonce.
-        var pageHtml = await http.GetStringAsync(trimmed + "/", ct);
-        var webNonce = ExtractAmzWebNonce(pageHtml)
-            ?? throw new InvalidOperationException("Could not extract window.__AMZ_WEB.n from amz.squid.wtf page");
-
-        using var challengeResp = await http.GetAsync($"{trimmed}/api/captcha/challenge", ct);
-        var challengeJson = await challengeResp.Content.ReadAsStringAsync(ct);
-        challengeResp.EnsureSuccessStatusCode();
-
-        using var challengeDoc = JsonDocument.Parse(challengeJson);
-        var root = challengeDoc.RootElement;
-
-        // Support both { parameters: {...} } and flat { nonce, salt, ... }
-        JsonElement parameters;
-        if (root.TryGetProperty("parameters", out var parametersEl))
-            parameters = parametersEl;
-        else
-            parameters = root;
-
-        var (counter, derivedKeyHex, elapsedMs) = SolveChallenge(parameters, ct);
-
-        var solutionJson = JsonSerializer.Serialize(new { counter, derivedKey = derivedKeyHex, time = elapsedMs });
-        var payloadJson = $"{{\"challenge\":{challengeJson.TrimEnd()},\"solution\":{solutionJson}}}";
-        var payloadB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson));
-        var verifyBody = JsonSerializer.Serialize(new { payload = payloadB64, webNonce });
-
-        _logger.LogInformation("Amazon captcha: solved in {ElapsedMs}ms (counter={Counter}), verifying...", elapsedMs, counter);
-        using var content = new StringContent(verifyBody, Encoding.UTF8, "application/json");
-        using var verifyResp = await http.PostAsync($"{trimmed}/api/captcha/verify", content, ct);
-
-        var verifyJson = await verifyResp.Content.ReadAsStringAsync(ct);
-        _logger.LogDebug("Amazon captcha verify response ({Status}): {Json}", (int)verifyResp.StatusCode, verifyJson);
-
-        if (!verifyResp.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"Amazon captcha verify returned {(int)verifyResp.StatusCode}: {verifyJson}");
-        }
-
-        using var verifyDoc = JsonDocument.Parse(verifyJson);
-        if (!verifyDoc.RootElement.TryGetProperty("token", out var tokenElement) ||
-            tokenElement.ValueKind != JsonValueKind.String)
-        {
-            throw new InvalidOperationException($"Amazon captcha verify did not return a token. Response: {verifyJson}");
-        }
-
-        var token = tokenElement.GetString()
-            ?? throw new InvalidOperationException("Amazon captcha token is null");
-
-        // Extract amz_web_sess value so callers can include it in subsequent API requests.
-        var sessionCookieValue = cookieContainer
-            .GetCookies(new Uri(trimmed))["amz_web_sess"]?.Value
-            ?? throw new InvalidOperationException("amz_web_sess cookie not found after captcha verify");
-
-        _logger.LogInformation(
-            "Amazon Music captcha solved in {ElapsedMs}ms (counter={Counter}), session valid ~{Minutes} min",
-            elapsedMs, counter, (int)TokenValidity.TotalMinutes);
-
-        return (token, $"amz_web_sess={sessionCookieValue}");
     }
 
     private async Task<string> SolveAndVerifyAsync(string baseUrl, CancellationToken ct)
@@ -200,9 +94,7 @@ public class SquidWTFCaptchaSolver
     }
 
     /// <summary>
-    /// ALTCHA v2 solver. Supports two algorithm variants:
-    ///   - "PBKDF2/SHA-256": password = nonce+counter, PBKDF2 derive, check prefix (amz.squid.wtf)
-    ///   - chained SHA-256 (legacy, no algorithm field): salt+nonce+counter hashed `cost` times (qobuz.squid.wtf)
+    /// ALTCHA v2 solver, chained SHA-256 variant: salt+nonce+counter hashed `cost` times (qobuz.squid.wtf).
     /// The server picks a solution counter in advance; we find it by iterating from 0.
     /// </summary>
     public static (int Counter, string DerivedKeyHex, long ElapsedMs) SolveChallenge(
@@ -215,73 +107,40 @@ public class SquidWTFCaptchaSolver
         var keyLength = parameters.GetProperty("keyLength").GetInt32();
         var keyPrefix = Convert.FromHexString(parameters.GetProperty("keyPrefix").GetString()!);
 
-        var algorithm = parameters.TryGetProperty("algorithm", out var algEl) ? algEl.GetString() : null;
-
         // password buf: nonce bytes followed by 4-byte big-endian counter
         var password = new byte[nonce.Length + 4];
         Array.Copy(nonce, password, nonce.Length);
 
         var sw = Stopwatch.StartNew();
 
-        if (algorithm?.StartsWith("PBKDF2", StringComparison.OrdinalIgnoreCase) == true)
+        // Chained SHA-256 variant (qobuz.squid.wtf)
+        var initial = new byte[salt.Length + password.Length];
+        Array.Copy(salt, 0, initial, 0, salt.Length);
+
+        var derived = new byte[keyLength];
+        Span<byte> hashBuf = stackalloc byte[32];
+
+        for (var counter = 0; counter < MaxSolverIterations; counter++)
         {
-            // PBKDF2/SHA-256 variant (amz.squid.wtf)
-            for (var counter = 0; counter < MaxSolverIterations; counter++)
+            ct.ThrowIfCancellationRequested();
+
+            BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
+            Array.Copy(password, 0, initial, salt.Length, password.Length);
+
+            SHA256.HashData(initial, hashBuf);
+            hashBuf[..keyLength].CopyTo(derived);
+
+            for (var i = 1; i < cost; i++)
             {
-                ct.ThrowIfCancellationRequested();
-                BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
-
-                var derived = Rfc2898DeriveBytes.Pbkdf2(
-                    password,
-                    salt,
-                    cost,
-                    HashAlgorithmName.SHA256,
-                    keyLength);
-
-                if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
-                    return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
-            }
-        }
-        else
-        {
-            // Chained SHA-256 variant (qobuz.squid.wtf, no algorithm field)
-            var initial = new byte[salt.Length + password.Length];
-            Array.Copy(salt, 0, initial, 0, salt.Length);
-
-            var derived = new byte[keyLength];
-            Span<byte> hashBuf = stackalloc byte[32];
-
-            for (var counter = 0; counter < MaxSolverIterations; counter++)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                BinaryPrimitives.WriteUInt32BigEndian(password.AsSpan(nonce.Length), (uint)counter);
-                Array.Copy(password, 0, initial, salt.Length, password.Length);
-
-                SHA256.HashData(initial, hashBuf);
+                SHA256.HashData(derived, hashBuf);
                 hashBuf[..keyLength].CopyTo(derived);
-
-                for (var i = 1; i < cost; i++)
-                {
-                    SHA256.HashData(derived, hashBuf);
-                    hashBuf[..keyLength].CopyTo(derived);
-                }
-
-                if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
-                    return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
             }
+
+            if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
+                return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
         }
 
         throw new InvalidOperationException(
             $"captcha solver exhausted {MaxSolverIterations} iterations without finding a match");
-    }
-
-    private static readonly System.Text.RegularExpressions.Regex AmzWebNonceRegex =
-        new(@"__AMZ_WEB\s*=\s*\{""n""\s*:\s*""([^""]+)""", System.Text.RegularExpressions.RegexOptions.Compiled);
-
-    private static string? ExtractAmzWebNonce(string html)
-    {
-        var m = AmzWebNonceRegex.Match(html);
-        return m.Success ? m.Groups[1].Value : null;
     }
 }

@@ -89,10 +89,9 @@ else if (musicService == MusicService.SquidWTF)
 {
     var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
     var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
-    var isDeemixSource = squidWtfSource.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
-    // Tidal and Deemix expose playlists through their SquidWTF APIs.
-    if (enableExternalPlaylists && (isTidalSource || isDeemixSource))
+    // Only Tidal exposes playlists through its SquidWTF API.
+    if (enableExternalPlaylists && isTidalSource)
     {
         builder.Services.AddSingleton<PlaylistSyncService>();
     }

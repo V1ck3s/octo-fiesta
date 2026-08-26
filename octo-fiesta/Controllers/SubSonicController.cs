@@ -790,13 +790,6 @@ public class SubsonicController : ControllerBase
                 
             case "song":
             default:
-                // Fast path: check the in-memory cover cache (populated during search/album lookup)
-                // before making an expensive API call just for cover art.
-                if (_metadataService is SquidWTFMetadataService squidService)
-                {
-                    coverUrl = squidService.GetCachedCoverUrl(coverExternalId!);
-                }
-
                 if (coverUrl == null)
                 {
                     var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
@@ -820,31 +813,6 @@ public class SubsonicController : ControllerBase
         {
             using var httpClient = new HttpClient();
             using var req = new HttpRequestMessage(HttpMethod.Get, coverUrl);
-
-            // amz.squid.wtf image proxy requires the captcha token
-            if (coverUrl.Contains("amz.squid.wtf", StringComparison.OrdinalIgnoreCase))
-            {
-                var captchaSolver = HttpContext.RequestServices.GetService<SquidWTFCaptchaSolver>();
-                if (captchaSolver != null)
-                {
-                    try
-                    {
-                        var (token, sessionCookie) = await captchaSolver.GetAmazonCaptchaTokenAsync("https://amz.squid.wtf");
-                        req.Headers.Add("X-Captcha-Token", token);
-                        req.Headers.Add("Cookie", sessionCookie);
-                        req.Headers.Add("Origin", "https://amz.squid.wtf");
-                        req.Headers.Add("Referer", "https://amz.squid.wtf/");
-                        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-                        req.Headers.Add("Sec-Fetch-Site", "same-origin");
-                        req.Headers.Add("Sec-Fetch-Mode", "cors");
-                        req.Headers.Add("Sec-Fetch-Dest", "empty");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Could not get Amazon captcha token for cover art");
-                    }
-                }
-            }
 
             var response = await httpClient.SendAsync(req);
             if (response.IsSuccessStatusCode)

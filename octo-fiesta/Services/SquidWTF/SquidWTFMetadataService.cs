@@ -10,7 +10,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Metadata service implementation using SquidWTF API
-/// Supports Qobuz, Tidal, Amazon Music, and Deemix backends
+/// Supports Qobuz and Tidal backends
 /// </summary>
 public class SquidWTFMetadataService : IMusicMetadataService
 {
@@ -18,54 +18,30 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private readonly SquidWTFSettings _settings;
     private readonly SubsonicSettings _subsonicSettings;
     private readonly SquidWTFInstanceManager _instanceManager;
-    private readonly SquidWTFCaptchaSolver _captchaSolver;
     private readonly ILogger<SquidWTFMetadataService> _logger;
-
-    // Cover URL cache: ASIN → cover URL, populated from search results so getCoverArt
-    // can serve covers without making an extra /api/track call.
-    // Capped at 2000 entries; cleared when full to avoid unbounded growth on long-running instances.
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _coverCache = new();
-    private const int CoverCacheMaxEntries = 2000;
-
-    public string? GetCachedCoverUrl(string asin) =>
-        _coverCache.TryGetValue(asin, out var url) ? url : null;
-
-    private void CacheCoverUrl(string asin, string url)
-    {
-        if (_coverCache.Count >= CoverCacheMaxEntries)
-            _coverCache.Clear();
-        _coverCache[asin] = url;
-    }
 
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    private const string AmazonBaseUrl = "https://amz.squid.wtf";
-    private const string DeemixBaseUrl = "https://deemix.squid.wtf";
 
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    private const string AmazonCaptchaTokenHeader = "X-Captcha-Token";
 
     private bool IsQobuzSource => _settings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
-    private bool IsAmazonSource => _settings.Source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase);
-    private bool IsDeemixSource => _settings.Source.Equals("Deemix", StringComparison.OrdinalIgnoreCase);
 
     public SquidWTFMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptions<SquidWTFSettings> settings,
         IOptions<SubsonicSettings> subsonicSettings,
         SquidWTFInstanceManager instanceManager,
-        SquidWTFCaptchaSolver captchaSolver,
         ILogger<SquidWTFMetadataService> logger)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
         _subsonicSettings = subsonicSettings.Value;
         _instanceManager = instanceManager;
-        _captchaSolver = captchaSolver;
         _logger = logger;
     }
 
@@ -77,10 +53,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await SearchSongsQobuzAsync(query, limit);
-            if (IsAmazonSource)
-                return await SearchSongsAmazonAsync(query, limit);
-            if (IsDeemixSource)
-                return await SearchSongsDeemixAsync(query, limit);
             return await SearchSongsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -96,10 +68,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await SearchAlbumsQobuzAsync(query, limit);
-            if (IsAmazonSource)
-                return await SearchAlbumsAmazonAsync(query, limit);
-            if (IsDeemixSource)
-                return await SearchAlbumsDeemixAsync(query, limit);
             return await SearchAlbumsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -115,10 +83,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await SearchArtistsQobuzAsync(query, limit);
-            if (IsAmazonSource)
-                return new List<Artist>(); // Amazon Music API doesn't expose artist search
-            if (IsDeemixSource)
-                return await SearchArtistsDeemixAsync(query, limit);
             return await SearchArtistsTidalAsync(query, limit);
         }
         catch (Exception ex)
@@ -173,10 +137,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await GetSongQobuzAsync(externalId);
-            if (IsAmazonSource)
-                return await GetSongAmazonAsync(externalId);
-            if (IsDeemixSource)
-                return await GetSongDeemixAsync(externalId);
             return await GetSongTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -194,10 +154,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await GetAlbumQobuzAsync(externalId);
-            if (IsAmazonSource)
-                return await GetAlbumAmazonAsync(externalId);
-            if (IsDeemixSource)
-                return await GetAlbumDeemixAsync(externalId);
             return await GetAlbumTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -215,10 +171,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await GetArtistQobuzAsync(externalId);
-            if (IsAmazonSource)
-                return null; // Amazon Music API doesn't expose individual artist lookup
-            if (IsDeemixSource)
-                return await GetArtistDeemixAsync(externalId);
             return await GetArtistTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -236,10 +188,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
         {
             if (IsQobuzSource)
                 return await GetArtistAlbumsQobuzAsync(externalId);
-            if (IsAmazonSource)
-                return new List<Album>(); // Amazon Music API doesn't expose artist album lists
-            if (IsDeemixSource)
-                return await GetArtistAlbumsDeemixAsync(externalId);
             return await GetArtistAlbumsTidalAsync(externalId);
         }
         catch (Exception ex)
@@ -253,10 +201,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         try
         {
-            if (IsDeemixSource)
-                return await SearchPlaylistsDeemixAsync(query, limit);
             // Only Tidal supports playlist search via SquidWTF's original APIs
-            if (!IsQobuzSource && !IsAmazonSource)
+            if (!IsQobuzSource)
                 return await SearchPlaylistsTidalAsync(query, limit);
 
             return new List<ExternalPlaylist>();
@@ -274,9 +220,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         try
         {
-            if (IsDeemixSource)
-                return await GetPlaylistDeemixAsync(externalId);
-            if (!IsQobuzSource && !IsAmazonSource)
+            if (!IsQobuzSource)
                 return await GetPlaylistTidalAsync(externalId);
 
             return null;
@@ -294,9 +238,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
         try
         {
-            if (IsDeemixSource)
-                return await GetPlaylistTracksDeemixAsync(externalId);
-            if (!IsQobuzSource && !IsAmazonSource)
+            if (!IsQobuzSource)
                 return await GetPlaylistTracksTidalAsync(externalId);
 
             return new List<Song>();
@@ -310,148 +252,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
 
     #endregion
 
-    #region Deemix Backend Methods
-
-    private async Task<List<Song>> SearchSongsDeemixAsync(string query, int limit)
-        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=track&limit={limit}&index=0"))
-            .Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
-
-    private async Task<List<Album>> SearchAlbumsDeemixAsync(string query, int limit)
-        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=album&limit={limit}&index=0"))
-            .Select(MapDeemixAlbumToAlbum).ToList();
-
-    private async Task<List<Artist>> SearchArtistsDeemixAsync(string query, int limit)
-        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=artist&limit={limit}&index=0"))
-            .Select(MapDeemixArtistToArtist).ToList();
-
-    private async Task<List<ExternalPlaylist>> SearchPlaylistsDeemixAsync(string query, int limit)
-        => (await GetDeemixDataAsync($"/api/search?q={Uri.EscapeDataString(query)}&type=playlist&limit={limit}&index=0"))
-            .Select(MapDeemixPlaylistToExternalPlaylist).ToList();
-
-    private async Task<Song?> GetSongDeemixAsync(string trackId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/track?id={Uri.EscapeDataString(trackId)}");
-        return document == null ? null : MapDeemixTrackToSong(document.RootElement);
-    }
-
-    private async Task<Album?> GetAlbumDeemixAsync(string albumId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/album?id={Uri.EscapeDataString(albumId)}");
-        if (document == null || HasDeemixError(document.RootElement)) return null;
-        var album = MapDeemixAlbumToAlbum(document.RootElement);
-        if (document.RootElement.TryGetProperty("tracks", out var tracks) && tracks.ValueKind == JsonValueKind.Array)
-        {
-            album.Songs = tracks.EnumerateArray().Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
-            foreach (var song in album.Songs)
-            {
-                song.AlbumId = album.Id;
-                song.Album = album.Title;
-                song.AlbumArtist = album.Artist;
-                song.TotalTracks ??= album.SongCount;
-                song.Year ??= album.Year;
-                song.CoverArtUrl ??= album.CoverArtUrl;
-                song.CoverArtUrlLarge ??= album.CoverArtUrlLarge;
-            }
-        }
-        return album;
-    }
-
-    private async Task<Artist?> GetArtistDeemixAsync(string artistId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/artist?id={Uri.EscapeDataString(artistId)}");
-        return document == null || HasDeemixError(document.RootElement) ? null : MapDeemixArtistToArtist(document.RootElement);
-    }
-
-    private async Task<List<Album>> GetArtistAlbumsDeemixAsync(string artistId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/artist/discography?id={Uri.EscapeDataString(artistId)}");
-        if (document == null || !document.RootElement.TryGetProperty("all", out var all) || all.ValueKind != JsonValueKind.Array) return new();
-        return all.EnumerateArray().Select(MapDeemixAlbumToAlbum).ToList();
-    }
-
-    private async Task<ExternalPlaylist?> GetPlaylistDeemixAsync(string playlistId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/playlist?id={Uri.EscapeDataString(playlistId)}");
-        return document == null || HasDeemixError(document.RootElement) ? null : MapDeemixPlaylistToExternalPlaylist(document.RootElement);
-    }
-
-    private async Task<List<Song>> GetPlaylistTracksDeemixAsync(string playlistId)
-    {
-        using var document = await GetDeemixDocumentAsync($"/api/playlist?id={Uri.EscapeDataString(playlistId)}");
-        if (document == null || !document.RootElement.TryGetProperty("tracks", out var tracks) || tracks.ValueKind != JsonValueKind.Array) return new();
-        return tracks.EnumerateArray().Select(MapDeemixTrackToSong).Where(ShouldIncludeSong).ToList();
-    }
-
-    private async Task<List<JsonElement>> GetDeemixDataAsync(string path)
-    {
-        using var document = await GetDeemixDocumentAsync(path);
-        if (document == null || !document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return new();
-        return data.EnumerateArray().Select(x => x.Clone()).ToList();
-    }
-
-    private async Task<JsonDocument?> GetDeemixDocumentAsync(string path)
-    {
-        try
-        {
-            using var response = await _httpClient.GetAsync($"{DeemixBaseUrl}{path}");
-            if (!response.IsSuccessStatusCode) { _logger.LogWarning("Deemix API returned {StatusCode} for {Path}", response.StatusCode, path); return null; }
-            return JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
-        }
-        catch (Exception ex) { _logger.LogError(ex, "Failed to request Deemix {Path}", path); return null; }
-    }
-
-    private Song MapDeemixTrackToSong(JsonElement track)
-    {
-        var album = GetDeemixObject(track, "album");
-        var artist = GetDeemixObject(track, "artist");
-        var artistId = GetDeemixString(artist, "id");
-        var artistExternalId = DeemixArtistId(artistId);
-        var artistName = GetDeemixString(artist, "name");
-        var albumId = GetDeemixString(album, "id");
-        return new Song {
-            Title = GetDeemixString(track, "title") ?? "", Artist = artistName ?? "", ArtistId = artistExternalId,
-            Artists = string.IsNullOrEmpty(artistName) ? new() : new() { new Artist { Id = artistExternalId ?? "", Name = artistName, IsLocal = false, ExternalProvider = "squidwtf", ExternalId = artistId } },
-            Album = GetDeemixString(album, "title") ?? "", AlbumId = string.IsNullOrEmpty(albumId) ? null : $"ext-squidwtf-album-{albumId}",
-            Duration = GetDeemixInt(track, "duration"), Track = GetDeemixInt(track, "track_position"), DiscNumber = GetDeemixInt(track, "disk_number"),
-            Year = GetDeemixYear(track), ReleaseDate = GetDeemixString(track, "release_date"), Bpm = GetDeemixInt(track, "bpm"), Isrc = GetDeemixString(track, "isrc"),
-            ExplicitContentLyrics = GetDeemixInt(track, "explicit_content_lyrics"), CoverArtUrl = GetDeemixCover(track, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(track, album, "cover_xl"), ReleaseType = GetDeemixString(album, "record_type"),
-            IsLocal = false, ExternalProvider = "squidwtf", ExternalId = GetDeemixString(track, "id") };
-    }
-
-    private Album MapDeemixAlbumToAlbum(JsonElement album)
-    {
-        var artist = GetDeemixObject(album, "artist"); var id = GetDeemixString(album, "id") ?? "";
-        return new Album { Id = $"ext-squidwtf-album-{id}", Title = GetDeemixString(album, "title") ?? "", Artist = GetDeemixString(artist, "name") ?? "", ArtistId = DeemixArtistId(GetDeemixString(artist, "id")), Year = GetDeemixYear(album), SongCount = GetDeemixInt(album, "nb_tracks"), Genre = GetDeemixString(album, "genre"), ReleaseType = GetDeemixString(album, "record_type"), CoverArtUrl = GetDeemixCover(album, album, "cover_medium"), CoverArtUrlLarge = GetDeemixCover(album, album, "cover_xl"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
-    }
-
-    private Artist MapDeemixArtistToArtist(JsonElement artist)
-    {
-        var id = GetDeemixString(artist, "id");
-        return new Artist { Id = DeemixArtistId(id) ?? "", Name = GetDeemixString(artist, "name") ?? "", ImageUrl = GetDeemixString(artist, "picture_xl") ?? GetDeemixString(artist, "picture_medium"), AlbumCount = GetDeemixInt(artist, "nb_album"), IsLocal = false, ExternalProvider = "squidwtf", ExternalId = id };
-    }
-
-    private static string? DeemixArtistId(string? rawId) => string.IsNullOrEmpty(rawId) ? null : $"ext-squidwtf-artist-{rawId}";
-
-    private ExternalPlaylist MapDeemixPlaylistToExternalPlaylist(JsonElement playlist)
-    {
-        var id = GetDeemixString(playlist, "id") ?? ""; var creator = GetDeemixObject(playlist, "creator");
-        return new ExternalPlaylist { Id = Common.PlaylistIdHelper.CreatePlaylistId("squidwtf", id), Name = GetDeemixString(playlist, "title") ?? "", Description = GetDeemixString(playlist, "description"), CuratorName = GetDeemixString(creator, "name"), Provider = "squidwtf", ExternalId = id, TrackCount = GetDeemixInt(playlist, "nb_tracks") ?? 0, Duration = GetDeemixInt(playlist, "duration") ?? 0, CoverUrl = GetDeemixString(playlist, "picture_xl") ?? GetDeemixString(playlist, "picture_medium") };
-    }
-
-    private static bool HasDeemixError(JsonElement value) => value.TryGetProperty("error", out _);
-    private static JsonElement GetDeemixObject(JsonElement value, string name) => value.TryGetProperty(name, out var result) && result.ValueKind == JsonValueKind.Object ? result : default;
-    private static string? GetDeemixString(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out var result) ? result.ValueKind == JsonValueKind.String ? result.GetString() : result.ValueKind == JsonValueKind.Number ? result.GetRawText() : null : null;
-    private static int? GetDeemixInt(JsonElement value, string name)
-    {
-        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(name, out var result)) return null;
-        if (result.ValueKind == JsonValueKind.Number && result.TryGetInt32(out var number)) return number;
-        if (result.ValueKind == JsonValueKind.String && int.TryParse(result.GetString(), out var parsed)) return parsed;
-        return null;
-    }
-    private static int? GetDeemixYear(JsonElement value) { var date = GetDeemixString(value, "release_date"); return date is { Length: >= 4 } && int.TryParse(date[..4], out var year) ? year : null; }
-    private static string? GetDeemixCover(JsonElement track, JsonElement album, string name) => GetDeemixString(track, name) ?? GetDeemixString(album, name) ?? GetDeemixString(track, name == "cover_xl" ? "cover" : "cover");
-
-    #endregion
 
     #region Qobuz Backend Methods
 
@@ -628,311 +428,6 @@ public class SquidWTFMetadataService : IMusicMetadataService
             _logger.LogError(ex, "Failed to send Qobuz request to {Url}", url);
             return null;
         }
-    }
-
-    #endregion
-
-    #region Amazon Music Backend Methods
-
-    private async Task<List<Song>> SearchSongsAmazonAsync(string query, int limit)
-    {
-        var response = await SendAmazonPostAsync("/api/search",
-            new { query, country = _settings.Country, content_type = "TRACK", limit = Math.Max(limit, 25) });
-
-        if (response == null) return new List<Song>();
-
-        var searchResponse = JsonSerializer.Deserialize<AmazonMusicSearchResponse>(response);
-        if (searchResponse?.TrackList == null) return new List<Song>();
-
-        return searchResponse.TrackList
-            .Where(t => !string.IsNullOrEmpty(t.Asin))
-            .Take(limit)
-            .Select(MapAmazonSearchTrackToSong)
-            .Where(ShouldIncludeSong)
-            .ToList();
-    }
-
-    private async Task<List<Album>> SearchAlbumsAmazonAsync(string query, int limit)
-    {
-        var response = await SendAmazonPostAsync("/api/search",
-            new { query, country = _settings.Country, content_type = "ALBUM", limit = Math.Max(limit, 25) });
-
-        if (response == null) return new List<Album>();
-
-        var searchResponse = JsonSerializer.Deserialize<AmazonMusicSearchResponse>(response);
-        if (searchResponse?.AlbumList == null) return new List<Album>();
-
-        return searchResponse.AlbumList
-            .Where(a => !string.IsNullOrEmpty(a.Asin))
-            .Take(limit)
-            .Select(MapAmazonSearchAlbumToAlbum)
-            .ToList();
-    }
-
-    private async Task<Song?> GetSongAmazonAsync(string trackAsin)
-    {
-        var response = await SendAmazonPostAsync("/api/track",
-            new { asin = trackAsin, tier = "best", country = _settings.Country });
-
-        if (response == null) return null;
-
-        var trackResponse = JsonSerializer.Deserialize<AmazonMusicTrackResponse>(response);
-        if (trackResponse?.Metadata == null) return null;
-
-        return MapAmazonTrackMetadataToSong(trackAsin, trackResponse.Metadata);
-    }
-
-    private async Task<Album?> GetAlbumAmazonAsync(string albumAsin)
-    {
-        // Use /api/queue with the constructed Amazon Music album URL to get track listing
-        var albumUrl = BuildAmazonAlbumUrl(albumAsin, _settings.Country);
-        var response = await SendAmazonPostAsync("/api/queue",
-            new { url = albumUrl, country = _settings.Country });
-
-        if (response == null) return null;
-
-        var queueResponse = JsonSerializer.Deserialize<AmazonMusicQueueResponse>(response);
-        if (queueResponse?.Queue == null || queueResponse.Queue.Count == 0) return null;
-
-        var firstItem = queueResponse.Queue[0];
-        var album = new Album
-        {
-            Id = $"ext-squidwtf-album-{albumAsin}",
-            Title = firstItem.Album ?? "",
-            Artist = firstItem.AlbumArtist ?? "",
-            ArtistId = null,
-            Year = ParseAmazonYear(firstItem.Year, firstItem.Date),
-            SongCount = queueResponse.Queue.Count,
-            CoverArtUrl = ResolveAmazonCoverUrl(firstItem.Cover ?? firstItem.Thumbnail),
-            CoverArtUrlLarge = ResolveAmazonCoverUrl(firstItem.Cover ?? firstItem.Thumbnail),
-            IsLocal = false,
-            ExternalProvider = "squidwtf",
-            ExternalId = albumAsin
-        };
-
-        foreach (var item in queueResponse.Queue)
-        {
-            if (string.IsNullOrEmpty(item.Asin)) continue;
-
-            var song = MapAmazonQueueItemToSong(item);
-            song.Album = album.Title;
-            song.AlbumId = album.Id;
-            song.AlbumArtist = album.Artist;
-            song.Year ??= album.Year;
-            song.TotalTracks ??= album.SongCount;
-
-            if (string.IsNullOrEmpty(song.CoverArtUrl))
-                song.CoverArtUrl = album.CoverArtUrl;
-            if (string.IsNullOrEmpty(song.CoverArtUrlLarge))
-                song.CoverArtUrlLarge = album.CoverArtUrlLarge;
-
-            if (ShouldIncludeSong(song))
-                album.Songs.Add(song);
-        }
-
-        return album;
-    }
-
-    private static void AddAmazonBrowserHeaders(HttpRequestMessage req, string sessionCookie, string token)
-    {
-        req.Headers.Add("Cookie", sessionCookie);
-        req.Headers.Add(AmazonCaptchaTokenHeader, token);
-        req.Headers.Add("Origin", AmazonBaseUrl);
-        req.Headers.Add("Referer", AmazonBaseUrl + "/");
-        req.Headers.Add("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36");
-        req.Headers.Add("Accept", "*/*");
-        req.Headers.Add("Accept-Language", "en-US,en;q=0.9");
-        req.Headers.Add("Sec-Fetch-Site", "same-origin");
-        req.Headers.Add("Sec-Fetch-Mode", "cors");
-        req.Headers.Add("Sec-Fetch-Dest", "empty");
-        req.Headers.Add("sec-ch-ua", "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\", \"Google Chrome\";v=\"137\"");
-        req.Headers.Add("sec-ch-ua-mobile", "?0");
-        req.Headers.Add("sec-ch-ua-platform", "\"Linux\"");
-    }
-
-    private async Task<string?> SendAmazonPostAsync(string path, object body)
-    {
-        try
-        {
-            var (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl);
-            var json = JsonSerializer.Serialize(body);
-
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
-            request.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            AddAmazonBrowserHeaders(request, sessionCookie, token);
-
-            var response = await _httpClient.SendAsync(request);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-            {
-                // Captcha token expired — refresh and retry once
-                (token, sessionCookie) = await _captchaSolver.GetAmazonCaptchaTokenAsync(AmazonBaseUrl, forceRefresh: true);
-                using var retryRequest = new HttpRequestMessage(HttpMethod.Post, $"{AmazonBaseUrl}{path}");
-                retryRequest.Content = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
-                AddAmazonBrowserHeaders(retryRequest, sessionCookie, token);
-                response = await _httpClient.SendAsync(retryRequest);
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Amazon Music API returned {StatusCode} for {Path}", response.StatusCode, path);
-                return null;
-            }
-
-            return await response.Content.ReadAsStringAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send Amazon Music request to {Path}", path);
-            return null;
-        }
-    }
-
-    private string BuildAmazonAlbumUrl(string albumAsin, string country)
-    {
-        var domain = country switch
-        {
-            "DE" => "music.amazon.de",
-            "AU" => "music.amazon.com.au",
-            _ => "music.amazon.com"
-        };
-        return $"https://{domain}/albums/{albumAsin}";
-    }
-
-    private static string? ResolveAmazonCoverUrl(string? cover)
-    {
-        if (string.IsNullOrEmpty(cover)) return null;
-        if (cover.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return cover;
-        if (cover.StartsWith("/")) return $"{AmazonBaseUrl}{cover}";
-        return $"{AmazonBaseUrl}/api/image?url={Uri.EscapeDataString(cover)}";
-    }
-
-    private static int? ParseAmazonYear(string? year, string? date)
-    {
-        if (!string.IsNullOrEmpty(year) && int.TryParse(year, out var y)) return y;
-        if (!string.IsNullOrEmpty(date) && date.Length >= 4 && int.TryParse(date[..4], out var dy)) return dy;
-        return null;
-    }
-
-    private static int? ParseAmazonJsonElementAsInt(JsonElement? element)
-    {
-        if (element == null) return null;
-        var e = element.Value;
-        if (e.ValueKind == JsonValueKind.Number && e.TryGetInt32(out var i)) return i;
-        if (e.ValueKind == JsonValueKind.String && int.TryParse(e.GetString(), out var s)) return s;
-        return null;
-    }
-
-    #endregion
-
-    #region Mapping Methods - Amazon Music
-
-    private Song MapAmazonSearchTrackToSong(AmazonMusicSearchTrack track)
-    {
-        var externalId = track.Asin!;
-        var artistName = track.PrimaryArtistName ?? track.ArtistName ?? track.AlbumArtistName ?? "";
-        var albumTitle = track.Album?.Title ?? "";
-        var coverUrl = ResolveAmazonCoverUrl(track.Album?.Image ?? track.Image ?? track.Cover);
-        if (coverUrl != null) CacheCoverUrl(externalId, coverUrl);
-
-        // Use the song's own external ID as AlbumId so clients that use albumId for cover
-        // art lookup (instead of the coverArt attribute) still call getCoverArt correctly.
-        // Amazon search results don't include an album ASIN, so there's no real album to link.
-        var songId = $"ext-squidwtf-song-{externalId}";
-        return new Song
-        {
-            Title = track.Title ?? "",
-            Artist = artistName,
-            Artists = !string.IsNullOrEmpty(artistName)
-                ? new List<Artist> { new Artist { Id = "", Name = artistName, IsLocal = false, ExternalProvider = "squidwtf" } }
-                : new List<Artist>(),
-            Album = albumTitle,
-            AlbumId = songId,
-            CoverArtUrl = coverUrl,
-            CoverArtUrlLarge = coverUrl,
-            IsLocal = false,
-            ExternalProvider = "squidwtf",
-            ExternalId = externalId
-        };
-    }
-
-    private Song MapAmazonTrackMetadataToSong(string trackAsin, AmazonMusicTrackMetadata meta)
-    {
-        var year = ParseAmazonYear(meta.Year, meta.Date);
-        var coverUrl = ResolveAmazonCoverUrl(meta.CoverCdn ?? meta.Cover);
-        var contributors = new List<string>();
-        if (!string.IsNullOrEmpty(meta.Composer)) contributors.Add(meta.Composer);
-
-        return new Song
-        {
-            Title = meta.Title ?? "",
-            Artist = meta.Artist ?? "",
-            Artists = !string.IsNullOrEmpty(meta.Artist)
-                ? new List<Artist> { new Artist { Id = "", Name = meta.Artist, IsLocal = false, ExternalProvider = "squidwtf" } }
-                : new List<Artist>(),
-            Album = meta.Album ?? "",
-            AlbumId = !string.IsNullOrEmpty(meta.AlbumAsin) ? $"ext-squidwtf-album-{meta.AlbumAsin}" : null,
-            AlbumArtist = meta.AlbumArtist,
-            Track = ParseAmazonJsonElementAsInt(meta.TrackNumber),
-            DiscNumber = ParseAmazonJsonElementAsInt(meta.DiscNumber),
-            TotalTracks = ParseAmazonJsonElementAsInt(meta.TrackTotal),
-            Year = year,
-            Genre = meta.Genre,
-            Isrc = meta.Isrc,
-            Copyright = meta.Copyright,
-            Contributors = contributors,
-            CoverArtUrl = coverUrl,
-            CoverArtUrlLarge = coverUrl,
-            IsLocal = false,
-            ExternalProvider = "squidwtf",
-            ExternalId = trackAsin
-        };
-    }
-
-    private Song MapAmazonQueueItemToSong(AmazonMusicQueueItem item)
-    {
-        var year = ParseAmazonYear(item.Year, item.Date);
-        var coverUrl = ResolveAmazonCoverUrl(item.Cover ?? item.Thumbnail);
-        if (coverUrl != null && item.Asin != null) CacheCoverUrl(item.Asin, coverUrl);
-
-        return new Song
-        {
-            Title = item.Title ?? "",
-            Artist = item.AlbumArtist ?? "",
-            Artists = !string.IsNullOrEmpty(item.AlbumArtist)
-                ? new List<Artist> { new Artist { Id = "", Name = item.AlbumArtist, IsLocal = false, ExternalProvider = "squidwtf" } }
-                : new List<Artist>(),
-            AlbumArtist = item.AlbumArtist,
-            Track = ParseAmazonJsonElementAsInt(item.TrackNumber),
-            DiscNumber = ParseAmazonJsonElementAsInt(item.DiscNumber),
-            Year = year,
-            CoverArtUrl = coverUrl,
-            CoverArtUrlLarge = coverUrl,
-            IsLocal = false,
-            ExternalProvider = "squidwtf",
-            ExternalId = item.Asin!
-        };
-    }
-
-    private Album MapAmazonSearchAlbumToAlbum(AmazonMusicSearchAlbum album)
-    {
-        var externalId = album.Asin!;
-        var artistName = album.PrimaryArtistName ?? album.ArtistName ?? album.AlbumArtistName ?? "";
-        var coverUrl = ResolveAmazonCoverUrl(album.Image ?? album.Cover);
-
-        return new Album
-        {
-            Id = $"ext-squidwtf-album-{externalId}",
-            Title = album.Title ?? "",
-            Artist = artistName,
-            ArtistId = null,
-            CoverArtUrl = coverUrl,
-            CoverArtUrlLarge = coverUrl,
-            IsLocal = false,
-            ExternalProvider = "squidwtf",
-            ExternalId = externalId
-        };
     }
 
     #endregion

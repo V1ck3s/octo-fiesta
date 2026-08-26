@@ -35,18 +35,24 @@ public class SquidWTFStartupValidator : BaseStartupValidator
 
         WriteStatus("SquidWTF Source", source, ConsoleColor.Cyan);
         WriteStatus("SquidWTF Quality", quality, ConsoleColor.Cyan);
+        WriteStatus("SquidWTF Provider", "DEPRECATED", ConsoleColor.Red);
+        WriteDetail("The upstream squid.wtf music services are down (qobuz.squid.wtf no longer resolves,");
+        WriteDetail("Tidal public instances only serve search results and 30s previews).");
+        WriteDetail("Switch to another provider (e.g. MUSIC_SERVICE=Deezer). SquidWTF may be removed in a future release.");
+
+        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase) ||
+            source.Equals("Deemix", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteStatus("SquidWTF Source Error", "REMOVED", ConsoleColor.Red);
+            WriteDetail($"The '{source}' backend has been removed (upstream service discontinued). Falling back to Tidal.");
+        }
         if (usedDefaultFallback && !string.IsNullOrWhiteSpace(configuredQuality))
         {
             WriteStatus("SquidWTF Quality Warning", "INCOMPATIBLE CONFIG", ConsoleColor.Yellow);
             WriteDetail($"Quality '{configuredQuality}' is not valid for source '{source}'. Falling back to default quality.");
         }
 
-        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
-        {
-            WriteStatus("Amazon Country", _settings.Country, ConsoleColor.Cyan);
-        }
-
-        if (_settings.InstanceTimeoutSeconds > 0 && !source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
+        if (_settings.InstanceTimeoutSeconds > 0)
         {
             WriteStatus("Instance Timeout", $"{_settings.InstanceTimeoutSeconds}s", ConsoleColor.Cyan);
         }
@@ -65,14 +71,6 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
             {
                 return await ValidateQobuzAsync(cancellationToken);
-            }
-            else if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
-            {
-                return await ValidateAmazonAsync(cancellationToken);
-            }
-            else if (source.Equals("Deemix", StringComparison.OrdinalIgnoreCase))
-            {
-                return await ValidateDeemixAsync(cancellationToken);
             }
             else
             {
@@ -115,48 +113,6 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             WriteDetail("Service may be temporarily unavailable");
             return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF returned code");
         }
-    }
-
-    private async Task<ValidationResult> ValidateAmazonAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await _httpClient.GetAsync("https://amz.squid.wtf/api/captcha/challenge", cancellationToken);
-
-            if (response.IsSuccessStatusCode)
-            {
-                WriteStatus("SquidWTF API", "REACHABLE", ConsoleColor.Green);
-                WriteDetail("No account credentials required - powered by Amazon Music");
-                return ValidationResult.Success("SquidWTF Amazon Music validation completed");
-            }
-            else
-            {
-                WriteStatus("SquidWTF API", $"HTTP {(int)response.StatusCode}", ConsoleColor.Yellow);
-                WriteDetail("Service may be temporarily unavailable");
-                return ValidationResult.Failure($"{response.StatusCode}", "SquidWTF Amazon Music returned error code");
-            }
-        }
-        catch (Exception ex)
-        {
-            WriteStatus("SquidWTF API", "UNREACHABLE", ConsoleColor.Red);
-            WriteDetail(ex.Message);
-            return ValidationResult.Failure("-1", $"Cannot connect to Amazon Music SquidWTF: {ex.Message}");
-        }
-    }
-
-    private async Task<ValidationResult> ValidateDeemixAsync(CancellationToken cancellationToken)
-    {
-        var response = await _httpClient.GetAsync("https://deemix.squid.wtf/api/health", cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            return ValidationResult.Failure($"{response.StatusCode}", "Deemix SquidWTF returned error code");
-
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
-        var authenticated = document.RootElement.TryGetProperty("authenticated", out var value) && value.ValueKind == JsonValueKind.True;
-        WriteStatus("SquidWTF API", authenticated ? "REACHABLE" : "UNAUTHENTICATED", authenticated ? ConsoleColor.Green : ConsoleColor.Yellow);
-        WriteDetail(authenticated ? "Shared Deezer session pool is available - powered by Deemix" : "Deemix is reachable but has no authenticated Deezer session");
-        return authenticated
-            ? ValidationResult.Success("SquidWTF Deemix validation completed")
-            : ValidationResult.Failure("AUTH_REQUIRED", "Deemix has no authenticated session");
     }
 
     private async Task<ValidationResult> ValidateTidalAsync(CancellationToken cancellationToken)
@@ -263,30 +219,6 @@ public class SquidWTFStartupValidator : BaseStartupValidator
                 "FLAC_16" or "FLAC" or "6" => ("FLAC 16-bit", false),
                 "MP3_320" or "MP3" or "5" => ("MP3 320kbps", false),
                 _ => ("FLAC 24-bit/192kHz (default)", true)
-            };
-        }
-
-        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase))
-        {
-            return quality switch
-            {
-                "FLAC_24" or "FLAC_24_192" or "ULTRAHD" or "BEST" => ("Ultra HD FLAC 24-bit", false),
-                "FLAC_16" or "FLAC" or "HD" => ("HD FLAC 16-bit", false),
-                "AAC" or "AAC_256" or "HIGH" or "STANDARD" => ("High (256 kbps AAC)", false),
-                "OPUS" => ("Opus", false),
-                "ATMOS" => ("Dolby Atmos", false),
-                _ => ("Ultra HD FLAC 24-bit (default)", true)
-            };
-        }
-
-        if (source.Equals("Deemix", StringComparison.OrdinalIgnoreCase))
-        {
-            return quality switch
-            {
-                "FLAC" => ("FLAC (server default)", false),
-                "MP3" or "MP3_320" or "320" => ("MP3 320 kbps (server-dependent)", false),
-                "MP3_128" or "128" => ("MP3 128 kbps (server-dependent)", false),
-                _ => ("FLAC (server default)", true)
             };
         }
 

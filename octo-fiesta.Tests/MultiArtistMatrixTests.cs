@@ -116,13 +116,11 @@ public class MultiArtistMatrixTests
         });
         var instanceManager = new SquidWTFInstanceManager(
             factory, settings, Mock.Of<ILogger<SquidWTFInstanceManager>>());
-        var captchaSolver = new SquidWTFCaptchaSolver(factory, Mock.Of<ILogger<SquidWTFCaptchaSolver>>());
         return new SquidWTFMetadataService(
             factory,
             settings,
             Options.Create(new SubsonicSettings()),
             instanceManager,
-            captchaSolver,
             Mock.Of<ILogger<SquidWTFMetadataService>>());
     }
 
