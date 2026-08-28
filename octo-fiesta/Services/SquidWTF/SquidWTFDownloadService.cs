@@ -272,6 +272,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         var manifestText = Encoding.UTF8.GetString(manifestBytes);
         var manifestMimeType = trackResponse.ManifestMimeType ?? "";
 
+        TidalManifest? manifest;
         if (manifestMimeType.Contains("dash+xml") || manifestMimeType.Contains("application/dash"))
         {
             try
@@ -281,26 +282,13 @@ public class SquidWTFDownloadService : BaseDownloadService
                     "Parsed DASH manifest for track {TrackId}: {SegmentCount} segments, codecs={Codecs}",
                     trackId, parsed.Urls.Count, parsed.Codecs);
 
-                // Account without HI_RES entitlement gets a ~30s preview, not the full track;
-                // fall back to LOSSLESS which it can stream in full. (see #269)
-                if (quality == "HI_RES_LOSSLESS"
-                    && IsPreviewManifest(parsed.DurationSeconds, expectedDurationSeconds))
-                {
-                    Logger.LogWarning(
-                        "HI_RES_LOSSLESS returned a ~{PreviewDuration:0}s preview for track {TrackId} " +
-                        "(expected ~{Expected}s), falling back to LOSSLESS",
-                        parsed.DurationSeconds, trackId, expectedDurationSeconds);
-                    return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
-                }
-
-                var manifest = new TidalManifest
+                manifest = new TidalManifest
                 {
                     MimeType = parsed.MimeType ?? "audio/mp4",
                     Codecs = parsed.Codecs,
                     Urls = parsed.Urls.ToList(),
                     DurationSeconds = parsed.DurationSeconds,
                 };
-                return (manifest, quality);
             }
             catch (Exception ex) when (quality == "HI_RES_LOSSLESS")
             {
@@ -310,20 +298,44 @@ public class SquidWTFDownloadService : BaseDownloadService
                 return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
             }
         }
+        else
+        {
+            manifest = JsonSerializer.Deserialize<TidalManifest>(manifestText);
+        }
 
-        var jsonManifest = JsonSerializer.Deserialize<TidalManifest>(manifestText);
-        return (jsonManifest, quality);
+        // The instance's Tidal account is not entitled to stream this track in full and only
+        // serves a ~30s clip. An account without HI_RES entitlement can still stream LOSSLESS
+        // in full (see #269); otherwise fail rather than land a 30s clip in the library.
+        if (IsPreview(trackResponse, manifest?.DurationSeconds, expectedDurationSeconds))
+        {
+            var reason = trackResponse.PreviewReason ?? $"~{manifest?.DurationSeconds:0}s of ~{expectedDurationSeconds}s";
+
+            if (quality == "HI_RES_LOSSLESS")
+            {
+                Logger.LogWarning(
+                    "HI_RES_LOSSLESS returned a preview for track {TrackId} ({Reason}), falling back to LOSSLESS",
+                    trackId, reason);
+                return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
+            }
+
+            throw new InvalidOperationException(
+                $"Tidal instance only serves a preview of track {trackId} ({reason}). " +
+                "Full tracks require an instance backed by a subscribed Tidal account.");
+        }
+
+        return (manifest, quality);
     }
 
-    // Only flag a preview when a meaningfully longer track is expected, to avoid false
-    // positives on genuinely short tracks.
+    // Only flag a preview from its duration when a meaningfully longer track is expected,
+    // to avoid false positives on genuinely short tracks.
     private const int PreviewMinExpectedDurationSeconds = 45;
     private const double PreviewMaxDurationRatio = 0.5;
 
-    private static bool IsPreviewManifest(double? manifestDurationSeconds, int? expectedDurationSeconds)
-        => manifestDurationSeconds is > 0
-           && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
-           && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio;
+    private static bool IsPreview(TidalTrackResponse track, double? manifestDurationSeconds, int? expectedDurationSeconds)
+        => string.Equals(track.AssetPresentation, "PREVIEW", StringComparison.OrdinalIgnoreCase)
+           || (manifestDurationSeconds is > 0
+               && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
+               && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio);
 
     private string GetTidalQuality()
     {

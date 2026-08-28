@@ -366,6 +366,44 @@ public class SquidWTFTidalDashTests : IDisposable
         Assert.Equal("flac", manifest!.Codecs);
     }
 
+    [Fact]
+    public async Task GetTidalManifestAsync_HiResPreviewPresentation_FallsBackToLossless()
+    {
+        // Instance flags the clip explicitly via assetPresentation, regardless of duration.
+        var flac = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+            """{"mimeType":"audio/flac","codecs":"flac","urls":["https://cdn.example/x.flac"]}"""));
+
+        var previewTrackJson = "{\"data\":{\"assetPresentation\":\"PREVIEW\",\"previewReason\":\"FULL_REQUIRES_SUBSCRIPTION\",\"manifest\":\"" + flac + "\",\"manifestMimeType\":\"application/vnd.tidal.bts\"}}";
+        var fullTrackJson = "{\"data\":{\"assetPresentation\":\"FULL\",\"manifest\":\"" + flac + "\",\"manifestMimeType\":\"application/vnd.tidal.bts\"}}";
+
+        var (service, _) = BuildService(req =>
+            req.RequestUri!.Query.Contains("quality=HI_RES_LOSSLESS")
+                ? BuildResponse(HttpStatusCode.OK, previewTrackJson)
+                : BuildResponse(HttpStatusCode.OK, fullTrackJson));
+
+        var (manifest, quality) = await service.GetTidalManifestAsync("1", "HI_RES_LOSSLESS", null, CancellationToken.None);
+
+        Assert.NotNull(manifest);
+        Assert.Equal("LOSSLESS", quality);
+    }
+
+    [Fact]
+    public async Task GetTidalManifestAsync_LosslessPreview_Throws()
+    {
+        // Public Monochrome/hifi-api instances without a subscribed account serve a 30s
+        // preview at every quality; the download must fail instead of saving the clip.
+        var flac = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+            """{"mimeType":"audio/flac","codecs":"flac","urls":["https://cdn.example/x.flac"]}"""));
+        var previewTrackJson = "{\"data\":{\"assetPresentation\":\"PREVIEW\",\"previewReason\":\"FULL_REQUIRES_SUBSCRIPTION\",\"manifest\":\"" + flac + "\",\"manifestMimeType\":\"application/vnd.tidal.bts\"}}";
+
+        var (service, _) = BuildService(_ => BuildResponse(HttpStatusCode.OK, previewTrackJson));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.GetTidalManifestAsync("1", "LOSSLESS", 240, CancellationToken.None));
+
+        Assert.Contains("FULL_REQUIRES_SUBSCRIPTION", ex.Message);
+    }
+
     // --- helpers --------------------------------------------------------------------------
 
     private static HttpResponseMessage BuildResponse(HttpStatusCode status, string body)

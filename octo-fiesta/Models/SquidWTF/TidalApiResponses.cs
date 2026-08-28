@@ -263,7 +263,10 @@ public class TidalTrackResponse
     
     [JsonPropertyName("assetPresentation")]
     public string? AssetPresentation { get; set; }
-    
+
+    [JsonPropertyName("previewReason")]
+    public string? PreviewReason { get; set; }
+
     [JsonPropertyName("audioQuality")]
     public string? AudioQuality { get; set; }
     
