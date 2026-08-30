@@ -8,6 +8,7 @@ using Moq.Protected;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
 using octo_fiesta.Services.Local;
+using octo_fiesta.Services.Common;
 using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Subsonic;
 

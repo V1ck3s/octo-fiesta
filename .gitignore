@@ -73,6 +73,10 @@ obj/
 # Downloaded music files
 octo-fiesta/downloads/
 
+# Tidal OAuth token store
+tidal-tokens.json
+config/
+
 # macOS
 .DS_Store
 __MACOSX/
