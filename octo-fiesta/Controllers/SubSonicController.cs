@@ -522,6 +522,81 @@ public class SubsonicController : ControllerBase
         });
     }
 
+    private static readonly string[] CollaborationWords = { "feat", "featuring", "ft", "with", "and", "x" };
+
+    /// <summary>
+    /// True when a candidate album is credited to the same artist, allowing the provider to
+    /// spell out collaborators the library leaves out, as in "No Etiquette feat. Rayna" or
+    /// "Dion &amp; The Belmonts". A homonym like "Gary Grimes" does not extend "Grimes" and
+    /// is rejected.
+    /// </summary>
+    private static bool IsSameArtistOrCollaboration(string? candidateArtist, string artistName)
+    {
+        var candidateKey = StringNormalizer.CreateComparisonKey(candidateArtist);
+        var artistKey = StringNormalizer.CreateComparisonKey(artistName);
+
+        if (candidateKey.Length == 0 || artistKey.Length == 0)
+        {
+            return false;
+        }
+
+        if (candidateKey == artistKey)
+        {
+            return true;
+        }
+
+        if (!ExtendsAtWordBoundary(candidateKey, artistKey))
+        {
+            return false;
+        }
+
+        var suffix = candidateKey[artistKey.Length..].TrimStart();
+        if (suffix.StartsWith('&') || suffix.StartsWith(','))
+        {
+            return true;
+        }
+
+        var firstWord = suffix.Split(' ')[0].Trim('.');
+        return CollaborationWords.Contains(firstWord);
+    }
+
+    /// <summary>
+    /// True when one title is the other followed by an edition suffix, such as "Visions" and
+    /// "Visions (Deluxe Edition)". The suffix has to open on punctuation, so a longer title
+    /// that keeps naming things, like "The Best Of Dion &amp; The Belmonts", stays a distinct
+    /// album, and so does a title that merely contains the other, like "Starhand Visions".
+    /// </summary>
+    private static bool IsSameAlbumWithEditionSuffix(string? candidateTitle, string albumName)
+    {
+        var candidateKey = StringNormalizer.CreateComparisonKey(candidateTitle);
+        var albumKey = StringNormalizer.CreateComparisonKey(albumName);
+
+        if (candidateKey.Length == 0 || albumKey.Length == 0)
+        {
+            return false;
+        }
+
+        return HasEditionSuffix(candidateKey, albumKey) || HasEditionSuffix(albumKey, candidateKey);
+    }
+
+    private static bool HasEditionSuffix(string longer, string shorter)
+    {
+        if (!ExtendsAtWordBoundary(longer, shorter))
+        {
+            return false;
+        }
+
+        var suffix = longer[shorter.Length..].TrimStart();
+        return suffix.StartsWith('(') || suffix.StartsWith('[') || suffix.StartsWith('-') || suffix.StartsWith(':');
+    }
+
+    private static bool ExtendsAtWordBoundary(string longer, string shorter)
+    {
+        return longer.Length > shorter.Length
+            && longer.StartsWith(shorter, StringComparison.Ordinal)
+            && !char.IsLetterOrDigit(longer[shorter.Length]);
+    }
+
     /// <summary>
     /// Enriches local albums with external songs.
     /// </summary>
@@ -671,33 +746,22 @@ public class SubsonicController : ControllerBase
         var searchQuery = $"{artistName} {albumName}";
         var externalAlbumsSearch = await _metadataService.SearchAlbumsAsync(searchQuery, 5);
         Album? externalAlbum = null;
-        
-        // Find matching album on external service (exact match first)
-        foreach (var candidate in externalAlbumsSearch)
-        {
-            if (candidate.Artist != null && 
-                candidate.Artist.Equals(artistName, StringComparison.OrdinalIgnoreCase) &&
-                candidate.Title.Equals(albumName, StringComparison.OrdinalIgnoreCase))
-            {
-                externalAlbum = await _metadataService.GetAlbumAsync(candidate.ExternalProvider!, candidate.ExternalId!);
-                break;
-            }
-        }
 
-        // Fallback to fuzzy match
-        if (externalAlbum == null)
+        // Only a candidate credited to the same artist can be merged, otherwise a homonym
+        // such as "Gary Grimes" pours its tracks into an album by "Grimes".
+        var sameArtistCandidates = externalAlbumsSearch
+            .Where(c => IsSameArtistOrCollaboration(c.Artist, artistName))
+            .ToList();
+
+        var albumKey = StringNormalizer.CreateComparisonKey(albumName);
+        var match = sameArtistCandidates
+                .FirstOrDefault(c => StringNormalizer.CreateComparisonKey(c.Title) == albumKey)
+            ?? sameArtistCandidates
+                .FirstOrDefault(c => IsSameAlbumWithEditionSuffix(c.Title, albumName));
+
+        if (match != null)
         {
-            foreach (var candidate in externalAlbumsSearch)
-            {
-                if (candidate.Artist != null && 
-                    candidate.Artist.Contains(artistName, StringComparison.OrdinalIgnoreCase) &&
-                    (candidate.Title.Contains(albumName, StringComparison.OrdinalIgnoreCase) ||
-                     albumName.Contains(candidate.Title, StringComparison.OrdinalIgnoreCase)))
-                {
-                    externalAlbum = await _metadataService.GetAlbumAsync(candidate.ExternalProvider!, candidate.ExternalId!);
-                    break;
-                }
-            }
+            externalAlbum = await _metadataService.GetAlbumAsync(match.ExternalProvider!, match.ExternalId!);
         }
 
         var localSongTitles = new HashSet<string>();
