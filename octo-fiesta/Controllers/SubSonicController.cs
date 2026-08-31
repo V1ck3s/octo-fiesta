@@ -366,7 +366,21 @@ public class SubsonicController : ControllerBase
                     album.ArtistId = artist.Id;
                 }
             }
-            
+
+            // The library can hold albums the provider does not list, and a client that
+            // navigated here from an external track would otherwise never see them.
+            var ownedAlbums = await GetLocalArtistAlbumsAsync(artist.Name, parameters);
+            if (ownedAlbums.Count > 0)
+            {
+                var ownedTitles = ownedAlbums
+                    .Select(a => StringNormalizer.CreateComparisonKey(a.Title))
+                    .ToHashSet();
+
+                albums = ownedAlbums
+                    .Concat(albums.Where(a => !ownedTitles.Contains(StringNormalizer.CreateComparisonKey(a.Title))))
+                    .ToList();
+            }
+
             return _responseBuilder.CreateArtistResponse(format, artist, albums);
         }
 
@@ -828,6 +842,168 @@ public class SubsonicController : ControllerBase
     }
 
     #region Helper Methods
+
+    /// <summary>
+    /// Returns the albums the library owns for an artist, matched by name. Empty when the
+    /// backing Subsonic server knows no artist under that name.
+    /// </summary>
+    private async Task<List<Album>> GetLocalArtistAlbumsAsync(string artistName, Dictionary<string, string> parameters)
+    {
+        var albums = new List<Album>();
+
+        if (string.IsNullOrWhiteSpace(artistName))
+        {
+            return albums;
+        }
+
+        var localArtistId = await FindLocalArtistIdAsync(artistName, parameters);
+        if (string.IsNullOrEmpty(localArtistId))
+        {
+            return albums;
+        }
+
+        var artistParameters = BuildJsonRelayParameters(parameters);
+        artistParameters["id"] = localArtistId;
+
+        var result = await _proxyService.RelaySafeAsync("rest/getArtist", artistParameters);
+        if (!result.Success || result.Body == null)
+        {
+            return albums;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(result.Body));
+            if (doc.RootElement.TryGetProperty("subsonic-response", out var response) &&
+                response.TryGetProperty("artist", out var artistElement) &&
+                artistElement.TryGetProperty("album", out var albumArray) &&
+                albumArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var albumElement in albumArray.EnumerateArray())
+                {
+                    var album = ParseLocalAlbum(albumElement);
+                    if (album != null)
+                    {
+                        albums.Add(album);
+                    }
+                }
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, "Could not parse local albums of artist {ArtistName}", artistName);
+        }
+
+        return albums;
+    }
+
+    /// <summary>
+    /// Looks up a local artist by name, keeping the richest one when the library holds homonyms.
+    /// </summary>
+    private async Task<string?> FindLocalArtistIdAsync(string artistName, Dictionary<string, string> parameters)
+    {
+        var searchParameters = BuildJsonRelayParameters(parameters);
+        searchParameters["query"] = artistName;
+        searchParameters["artistCount"] = "20";
+        searchParameters["albumCount"] = "0";
+        searchParameters["songCount"] = "0";
+
+        var result = await _proxyService.RelaySafeAsync("rest/search3", searchParameters);
+        if (!result.Success || result.Body == null)
+        {
+            return null;
+        }
+
+        var nameKey = StringNormalizer.CreateComparisonKey(artistName);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(Encoding.UTF8.GetString(result.Body));
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var response) ||
+                !response.TryGetProperty("searchResult3", out var searchResult) ||
+                !searchResult.TryGetProperty("artist", out var artistArray) ||
+                artistArray.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            string? bestId = null;
+            var bestAlbumCount = -1;
+
+            foreach (var artistElement in artistArray.EnumerateArray())
+            {
+                var name = artistElement.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
+                if (StringNormalizer.CreateComparisonKey(name) != nameKey)
+                {
+                    continue;
+                }
+
+                var id = artistElement.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+                if (string.IsNullOrEmpty(id))
+                {
+                    continue;
+                }
+
+                var albumCount = artistElement.TryGetProperty("albumCount", out var countElement) &&
+                                 countElement.TryGetInt32(out var count)
+                    ? count
+                    : 0;
+
+                if (albumCount > bestAlbumCount)
+                {
+                    bestId = id;
+                    bestAlbumCount = albumCount;
+                }
+            }
+
+            return bestId;
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex, "Could not parse local artist search for {ArtistName}", artistName);
+            return null;
+        }
+    }
+
+    private static Album? ParseLocalAlbum(JsonElement element)
+    {
+        var id = element.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+        var name = element.TryGetProperty("name", out var nameElement) ? nameElement.GetString() : null;
+
+        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name))
+        {
+            return null;
+        }
+
+        return new Album
+        {
+            Id = id,
+            Title = name,
+            Artist = element.TryGetProperty("artist", out var artistElement) ? artistElement.GetString() ?? "" : "",
+            ArtistId = element.TryGetProperty("artistId", out var artistIdElement) ? artistIdElement.GetString() : null,
+            Year = element.TryGetProperty("year", out var yearElement) && yearElement.TryGetInt32(out var year) ? year : null,
+            SongCount = element.TryGetProperty("songCount", out var countElement) && countElement.TryGetInt32(out var count) ? count : null,
+            Genre = element.TryGetProperty("genre", out var genreElement) ? genreElement.GetString() : null,
+            IsLocal = true
+        };
+    }
+
+    /// <summary>
+    /// Copies the client credentials for a server-to-server relay, dropping the parameters
+    /// of the incoming request and forcing JSON so the answer can be parsed whatever
+    /// format the client asked for.
+    /// </summary>
+    private static Dictionary<string, string> BuildJsonRelayParameters(Dictionary<string, string> parameters)
+    {
+        var relayParameters = new Dictionary<string, string>(parameters);
+        relayParameters.Remove("id");
+        relayParameters.Remove("query");
+        relayParameters.Remove("artistCount");
+        relayParameters.Remove("albumCount");
+        relayParameters.Remove("songCount");
+        relayParameters["f"] = "json";
+        return relayParameters;
+    }
 
     private IActionResult MergeSearchResults(
         (byte[]? Body, string? ContentType, bool Success) subsonicResult,

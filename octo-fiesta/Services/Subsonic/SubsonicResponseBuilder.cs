@@ -602,7 +602,7 @@ public class SubsonicResponseBuilder
             new XAttribute("name", album.Title),
             new XAttribute("artist", album.Artist ?? ""),
             new XAttribute("artistId", album.ArtistId ?? string.Empty),
-            new XAttribute("songCount", album.Songs?.Count ?? album.SongCount ?? 0),
+            new XAttribute("songCount", album.Songs?.Count > 0 ? album.Songs.Count : album.SongCount ?? 0),
             new XAttribute("duration", totalDuration),
             new XAttribute("created", System.DateTime.UtcNow.ToString("o")),
             new XAttribute("isExternal", (!album.IsLocal).ToString().ToLower()),
