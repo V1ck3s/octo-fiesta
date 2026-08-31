@@ -419,7 +419,7 @@ public class SubsonicController : ControllerBase
         }
         else
         {
-            artistXml = ParseNavidromeArtistXml(navidromeContent);
+            artistXml = ParseNavidromeXmlElement(navidromeContent, "artist");
             artistName = artistXml?.Attribute("name")?.Value ?? "";
         }
 
@@ -437,7 +437,7 @@ public class SubsonicController : ControllerBase
                 localAlbumNames.Add(normalizedName);
             }
         }
-        foreach (var album in LocalAlbumElements(artistXml))
+        foreach (var album in ChildElements(artistXml, "album"))
         {
             localAlbumNames.Add(StringNormalizer.CreateComparisonKey(album.Attribute("name")?.Value));
         }
@@ -493,7 +493,7 @@ public class SubsonicController : ControllerBase
             {
                 artistXml!.Add(_responseBuilder.ConvertAlbumToXml(externalAlbum, ns));
             }
-            artistXml!.SetAttributeValue("albumCount", LocalAlbumElements(artistXml).Count());
+            artistXml!.SetAttributeValue("albumCount", ChildElements(artistXml, "album").Count());
 
             var doc = new XDocument(
                 new XElement(ns + "subsonic-response",
@@ -628,12 +628,14 @@ public class SubsonicController : ControllerBase
         }
 
         var navidromeContent = Encoding.UTF8.GetString(navidromeResult.Body);
+        var isJson = format == "json" || navidromeResult.ContentType?.Contains("json") == true;
         string albumName = "";
         string artistName = "";
         var localSongs = new List<object>();
         object? albumData = null;
+        XElement? albumXml = null;
 
-        if (format == "json" || navidromeResult.ContentType?.Contains("json") == true)
+        if (isJson)
         {
             var jsonDoc = JsonDocument.Parse(navidromeContent);
             if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
@@ -653,7 +655,15 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        if (string.IsNullOrEmpty(albumName) || string.IsNullOrEmpty(artistName) || albumData == null)
+        else
+        {
+            albumXml = ParseNavidromeXmlElement(navidromeContent, "album");
+            albumName = albumXml?.Attribute("name")?.Value ?? "";
+            artistName = albumXml?.Attribute("artist")?.Value ?? "";
+        }
+
+        if (string.IsNullOrEmpty(albumName) || string.IsNullOrEmpty(artistName) ||
+            (isJson ? albumData == null : albumXml == null))
         {
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
@@ -690,29 +700,64 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        if (externalAlbum != null && externalAlbum.Songs.Count > 0)
+        var localSongTitles = new HashSet<string>();
+        foreach (var song in localSongs)
         {
-            var localSongTitles = new HashSet<string>();
-            foreach (var song in localSongs)
+            if (song is Dictionary<string, object> dict && dict.TryGetValue("title", out var titleObj))
             {
-                if (song is Dictionary<string, object> dict && dict.TryGetValue("title", out var titleObj))
-                {
-                    var normalizedTitle = StringNormalizer.CreateComparisonKey(titleObj?.ToString() ?? "");
-                    localSongTitles.Add(normalizedTitle);
-                }
+                localSongTitles.Add(StringNormalizer.CreateComparisonKey(titleObj?.ToString() ?? ""));
+            }
+        }
+        foreach (var song in ChildElements(albumXml, "song"))
+        {
+            localSongTitles.Add(StringNormalizer.CreateComparisonKey(song.Attribute("title")?.Value));
+        }
+
+        var newSongs = externalAlbum?.Songs
+            .Where(s => !localSongTitles.Contains(StringNormalizer.CreateComparisonKey(s.Title)))
+            .ToList() ?? new List<Song>();
+
+        // XML clients get the Navidrome album element back untouched, missing tracks
+        // appended, so their local songs keep every attribute the server sent.
+        if (!isJson)
+        {
+            if (newSongs.Count == 0)
+            {
+                return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/xml");
             }
 
-            var mergedSongs = localSongs.ToList();
-            foreach (var externalSong in externalAlbum.Songs)
+            var ns = XNamespace.Get("http://subsonic.org/restapi");
+            var albumId = albumXml!.Attribute("id")?.Value;
+            var songElements = ChildElements(albumXml, "song").ToList();
+            songElements.AddRange(newSongs.Select(s => _responseBuilder.ConvertSongToXml(s, ns, albumId)));
+
+            foreach (var songElement in ChildElements(albumXml, "song").ToList())
             {
-                var normalizedExternalTitle = StringNormalizer.CreateComparisonKey(externalSong.Title);
-                if (!localSongTitles.Contains(normalizedExternalTitle))
-                {
-                    mergedSongs.Add(_responseBuilder.ConvertSongToJson(externalSong));
-                }
+                songElement.Remove();
             }
 
-            mergedSongs = mergedSongs
+            var orderedSongs = songElements
+                .OrderBy(e => XmlAttributeInt(e, "discNumber"))
+                .ThenBy(e => XmlAttributeInt(e, "track"))
+                .ToList();
+
+            albumXml.Add(orderedSongs);
+            albumXml.SetAttributeValue("songCount", orderedSongs.Count);
+            albumXml.SetAttributeValue("duration", orderedSongs.Sum(e => XmlAttributeInt(e, "duration")));
+
+            var doc = new XDocument(
+                new XElement(ns + "subsonic-response",
+                    new XAttribute("status", "ok"),
+                    new XAttribute("version", "1.16.1"),
+                    albumXml));
+
+            return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
+        }
+
+        if (newSongs.Count > 0 && albumData is Dictionary<string, object> albumDict)
+        {
+            var mergedSongs = localSongs
+                .Concat(newSongs.Select(s => _responseBuilder.ConvertSongToJson(s)))
                 .OrderBy(s => s is Dictionary<string, object> dict && dict.TryGetValue("discNumber", out var discNumber)
                     ? Convert.ToInt32(discNumber)
                     : 0)
@@ -721,21 +766,18 @@ public class SubsonicController : ControllerBase
                     : 0)
                 .ToList();
 
-            if (albumData is Dictionary<string, object> albumDict)
+            albumDict["song"] = mergedSongs;
+            albumDict["songCount"] = mergedSongs.Count;
+
+            var totalDuration = 0;
+            foreach (var song in mergedSongs)
             {
-                albumDict["song"] = mergedSongs;
-                albumDict["songCount"] = mergedSongs.Count;
-                
-                var totalDuration = 0;
-                foreach (var song in mergedSongs)
+                if (song is Dictionary<string, object> dict && dict.TryGetValue("duration", out var dur))
                 {
-                    if (song is Dictionary<string, object> dict && dict.TryGetValue("duration", out var dur))
-                    {
-                        totalDuration += Convert.ToInt32(dur);
-                    }
+                    totalDuration += Convert.ToInt32(dur);
                 }
-                albumDict["duration"] = totalDuration;
             }
+            albumDict["duration"] = totalDuration;
         }
 
         return _responseBuilder.CreateJsonResponse(new
@@ -873,10 +915,10 @@ public class SubsonicController : ControllerBase
     #region Helper Methods
 
     /// <summary>
-    /// Extracts the artist element of a Subsonic XML response, or null when the payload
-    /// is not the expected artist answer.
+    /// Extracts a named element of a Subsonic XML response, or null when the payload is
+    /// not the expected answer.
     /// </summary>
-    private XElement? ParseNavidromeArtistXml(string content)
+    private XElement? ParseNavidromeXmlElement(string content, string localName)
     {
         try
         {
@@ -886,17 +928,20 @@ public class SubsonicController : ControllerBase
                 return null;
             }
 
-            return root.Elements().FirstOrDefault(e => e.Name.LocalName == "artist");
+            return root.Elements().FirstOrDefault(e => e.Name.LocalName == localName);
         }
         catch (System.Xml.XmlException ex)
         {
-            _logger.LogDebug(ex, "Could not parse the Subsonic artist XML response");
+            _logger.LogDebug(ex, "Could not parse the Subsonic {LocalName} XML response", localName);
             return null;
         }
     }
 
-    private static IEnumerable<XElement> LocalAlbumElements(XElement? artistXml)
-        => artistXml?.Elements().Where(e => e.Name.LocalName == "album") ?? Enumerable.Empty<XElement>();
+    private static IEnumerable<XElement> ChildElements(XElement? parent, string localName)
+        => parent?.Elements().Where(e => e.Name.LocalName == localName) ?? Enumerable.Empty<XElement>();
+
+    private static int XmlAttributeInt(XElement element, string name)
+        => int.TryParse(element.Attribute(name)?.Value, out var value) ? value : 0;
 
     /// <summary>
     /// Returns the albums the library owns for an artist, matched by name. Empty when the
