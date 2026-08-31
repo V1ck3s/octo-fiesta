@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Hosting;
@@ -22,6 +23,12 @@ public class SubsonicControllerGetArtistTests
         "{\"subsonic-response\":{\"status\":\"ok\",\"artist\":{\"id\":\"local-artist-id\",\"name\":\"Genesis\",\"albumCount\":1," +
         "\"album\":[{\"id\":\"local-album-1\",\"name\":\"We Can't Dance\"}]}}}";
 
+    private const string NavidromeArtistXml =
+        "<subsonic-response status=\"ok\" version=\"1.16.1\" xmlns=\"http://subsonic.org/restapi\">" +
+        "<artist id=\"local-artist-id\" name=\"Genesis\" albumCount=\"1\" sortName=\"genesis\">" +
+        "<album id=\"local-album-1\" name=\"We Can't Dance\" songCount=\"12\" playCount=\"3\" />" +
+        "</artist></subsonic-response>";
+
     private const string EmptyNavidromeSearchJson =
         "{\"subsonic-response\":{\"status\":\"ok\",\"searchResult3\":{}}}";
 
@@ -34,7 +41,8 @@ public class SubsonicControllerGetArtistTests
         Mock<IMusicMetadataService> metadataServiceMock,
         string requestedId = "local-artist-id",
         (bool IsExternal, string? Provider, string? ExternalId) parsedId = default,
-        string? navidromeSearchJson = null)
+        string? navidromeSearchJson = null,
+        bool navidromeXml = false)
     {
         var requestParser = new SubsonicRequestParser();
         var responseBuilder = new SubsonicResponseBuilder();
@@ -54,10 +62,13 @@ public class SubsonicControllerGetArtistTests
             .ReturnsAsync((HttpRequestMessage request, CancellationToken _) =>
             {
                 var isSearch = request.RequestUri!.AbsolutePath.Contains("search3");
-                var body = isSearch ? navidromeSearchJson ?? EmptyNavidromeSearchJson : NavidromeArtistJson;
+                var isXml = navidromeXml && !isSearch;
+                var body = isSearch
+                    ? navidromeSearchJson ?? EmptyNavidromeSearchJson
+                    : isXml ? NavidromeArtistXml : NavidromeArtistJson;
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, isXml ? "application/xml" : "application/json")
                 };
             });
 
@@ -88,7 +99,9 @@ public class SubsonicControllerGetArtistTests
             new Mock<ILogger<SubsonicController>>().Object);
 
         var httpContext = new DefaultHttpContext();
-        httpContext.Request.QueryString = new QueryString($"?id={requestedId}&f=json");
+        httpContext.Request.QueryString = navidromeXml
+            ? new QueryString($"?id={requestedId}")
+            : new QueryString($"?id={requestedId}&f=json");
         controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
 
         return controller;
@@ -196,5 +209,41 @@ public class SubsonicControllerGetArtistTests
 
         var albums = GetMergedAlbums(result);
         Assert.Equal("ext-deezer-album-21", Assert.Single(albums).Id);
+    }
+
+    [Fact]
+    public async Task GetArtist_WhenClientAsksXml_AppendsExternalAlbumsToNavidromeArtist()
+    {
+        var metadataServiceMock = new Mock<IMusicMetadataService>();
+        metadataServiceMock
+            .Setup(x => x.SearchArtistsAsync("Genesis", It.IsAny<int>()))
+            .ReturnsAsync(new List<Artist>
+            {
+                new Artist { Id = "ext-deezer-artist-1", Name = "Genesis", ExternalProvider = "deezer", ExternalId = "1" }
+            });
+        metadataServiceMock
+            .Setup(x => x.GetArtistAlbumsAsync("deezer", "1"))
+            .ReturnsAsync(new List<Album>
+            {
+                new Album { Id = "ext-deezer-album-11", Title = "We Can't Dance" },
+                new Album { Id = "ext-deezer-album-12", Title = "Invisible Touch" }
+            });
+
+        var controller = CreateController(metadataServiceMock, navidromeXml: true);
+
+        var result = await controller.GetArtist();
+
+        var content = Assert.IsType<ContentResult>(result);
+        var artist = XDocument.Parse(content.Content!).Root!.Elements()
+            .Single(e => e.Name.LocalName == "artist");
+        var albums = artist.Elements().Where(e => e.Name.LocalName == "album").ToList();
+
+        Assert.Equal("2", artist.Attribute("albumCount")?.Value);
+        Assert.Equal(new[] { "We Can't Dance", "Invisible Touch" }, albums.Select(a => a.Attribute("name")?.Value));
+        Assert.Equal(new[] { "local-album-1", "ext-deezer-album-12" }, albums.Select(a => a.Attribute("id")?.Value));
+
+        // Navidrome attributes of the owned album must survive the merge
+        Assert.Equal("3", albums[0].Attribute("playCount")?.Value);
+        Assert.Equal("12", albums[0].Attribute("songCount")?.Value);
     }
 }

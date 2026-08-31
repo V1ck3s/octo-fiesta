@@ -392,12 +392,14 @@ public class SubsonicController : ControllerBase
         }
 
         var navidromeContent = Encoding.UTF8.GetString(navidromeResult.Body);
+        var isJson = format == "json" || navidromeResult.ContentType?.Contains("json") == true;
         string artistName = "";
         string localArtistId = id; // Keep the local artist ID for merged albums
         var localAlbums = new List<object>();
         object? artistData = null;
+        XElement? artistXml = null;
 
-        if (format == "json" || navidromeResult.ContentType?.Contains("json") == true)
+        if (isJson)
         {
             var jsonDoc = JsonDocument.Parse(navidromeContent);
             if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
@@ -415,8 +417,13 @@ public class SubsonicController : ControllerBase
                 }
             }
         }
+        else
+        {
+            artistXml = ParseNavidromeArtistXml(navidromeContent);
+            artistName = artistXml?.Attribute("name")?.Value ?? "";
+        }
 
-        if (string.IsNullOrEmpty(artistName) || artistData == null)
+        if (string.IsNullOrEmpty(artistName) || (isJson ? artistData == null : artistXml == null))
         {
             return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
         }
@@ -429,6 +436,10 @@ public class SubsonicController : ControllerBase
                 var normalizedName = StringNormalizer.CreateComparisonKey(nameObj?.ToString() ?? "");
                 localAlbumNames.Add(normalizedName);
             }
+        }
+        foreach (var album in LocalAlbumElements(artistXml))
+        {
+            localAlbumNames.Add(StringNormalizer.CreateComparisonKey(album.Attribute("name")?.Value));
         }
 
         var candidates = (await _metadataService.SearchArtistsAsync(artistName, 20))
@@ -469,15 +480,33 @@ public class SubsonicController : ControllerBase
             album.ArtistId = localArtistId;
         }
 
-        var mergedAlbums = localAlbums.ToList();
-        foreach (var externalAlbum in externalAlbums)
+        var newAlbums = externalAlbums
+            .Where(a => !localAlbumNames.Contains(StringNormalizer.CreateComparisonKey(a.Title)))
+            .ToList();
+
+        // XML clients get the Navidrome artist element back untouched, external albums
+        // appended, so their local albums keep every attribute the server sent.
+        if (!isJson)
         {
-            var normalizedExternalName = StringNormalizer.CreateComparisonKey(externalAlbum.Title);
-            if (!localAlbumNames.Contains(normalizedExternalName))
+            var ns = XNamespace.Get("http://subsonic.org/restapi");
+            foreach (var externalAlbum in newAlbums)
             {
-                mergedAlbums.Add(_responseBuilder.ConvertAlbumToJson(externalAlbum));
+                artistXml!.Add(_responseBuilder.ConvertAlbumToXml(externalAlbum, ns));
             }
+            artistXml!.SetAttributeValue("albumCount", LocalAlbumElements(artistXml).Count());
+
+            var doc = new XDocument(
+                new XElement(ns + "subsonic-response",
+                    new XAttribute("status", "ok"),
+                    new XAttribute("version", "1.16.1"),
+                    artistXml));
+
+            return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
         }
+
+        var mergedAlbums = localAlbums
+            .Concat(newAlbums.Select(a => _responseBuilder.ConvertAlbumToJson(a)))
+            .ToList();
 
         if (artistData is Dictionary<string, object> artistDict)
         {
@@ -842,6 +871,32 @@ public class SubsonicController : ControllerBase
     }
 
     #region Helper Methods
+
+    /// <summary>
+    /// Extracts the artist element of a Subsonic XML response, or null when the payload
+    /// is not the expected artist answer.
+    /// </summary>
+    private XElement? ParseNavidromeArtistXml(string content)
+    {
+        try
+        {
+            var root = XDocument.Parse(content).Root;
+            if (root == null || root.Attribute("status")?.Value != "ok")
+            {
+                return null;
+            }
+
+            return root.Elements().FirstOrDefault(e => e.Name.LocalName == "artist");
+        }
+        catch (System.Xml.XmlException ex)
+        {
+            _logger.LogDebug(ex, "Could not parse the Subsonic artist XML response");
+            return null;
+        }
+    }
+
+    private static IEnumerable<XElement> LocalAlbumElements(XElement? artistXml)
+        => artistXml?.Elements().Where(e => e.Name.LocalName == "album") ?? Enumerable.Empty<XElement>();
 
     /// <summary>
     /// Returns the albums the library owns for an artist, matched by name. Empty when the
