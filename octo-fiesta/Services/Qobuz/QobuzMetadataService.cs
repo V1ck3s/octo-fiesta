@@ -380,29 +380,42 @@ public class QobuzMetadataService : IMusicMetadataService
         
         try
         {
-            var appId = await _bundleService.GetAppIdAsync();
-            var url = $"{BaseUrl}playlist/get?playlist_id={externalId}&app_id={appId}&extra=tracks";
-            
-            var response = await GetWithAuthAsync(url);
-            if (!response.IsSuccessStatusCode) return new List<Song>();
-            
-            var json = await response.Content.ReadAsStringAsync();
-            var playlistElement = JsonDocument.Parse(json).RootElement;
-            
-            if (playlistElement.TryGetProperty("error", out _)) return new List<Song>();
-            
             var songs = new List<Song>();
+            var appId = await _bundleService.GetAppIdAsync();
+            var playlistName = "Unknown Playlist";
+            int trackIndex = 1;
+            int offset = 0;
+            const int limit = 500;
             
-            // Get playlist name for album field
-            var playlistName = playlistElement.TryGetProperty("name", out var nameEl)
-                ? nameEl.GetString() ?? "Unknown Playlist"
-                : "Unknown Playlist";
-            
-            if (playlistElement.TryGetProperty("tracks", out var tracks) &&
-                tracks.TryGetProperty("items", out var tracksData))
+            // Qobuz returns only 50 playlist tracks per response, so pagination is required
+            while (true)
             {
-                int trackIndex = 1;
-                foreach (var track in tracksData.EnumerateArray())
+                var url = $"{BaseUrl}playlist/get?playlist_id={externalId}&app_id={appId}&extra=tracks&limit={limit}&offset={offset}";
+                
+                var response = await GetWithAuthAsync(url);
+                if (!response.IsSuccessStatusCode) break;
+                
+                var json = await response.Content.ReadAsStringAsync();
+                var playlistElement = JsonDocument.Parse(json).RootElement;
+                
+                if (playlistElement.TryGetProperty("error", out _)) break;
+                
+                // Get playlist name for album field
+                if (offset == 0 && playlistElement.TryGetProperty("name", out var nameEl))
+                {
+                    playlistName = nameEl.GetString() ?? playlistName;
+                }
+                
+                if (!playlistElement.TryGetProperty("tracks", out var tracks) ||
+                    !tracks.TryGetProperty("items", out var tracksData))
+                {
+                    break;
+                }
+                
+                var itemsArray = tracksData.EnumerateArray().ToList();
+                if (itemsArray.Count == 0) break;
+                
+                foreach (var track in itemsArray)
                 {
                     // For playlists, use the track's own artist (not a single album artist)
                     var song = ParseQobuzTrack(track);
@@ -417,6 +430,11 @@ public class QobuzMetadataService : IMusicMetadataService
                     }
                     trackIndex++;
                 }
+                
+                // If we got less than the limit, we've reached the end
+                if (itemsArray.Count < limit) break;
+                
+                offset += limit;
             }
             
             return songs;
