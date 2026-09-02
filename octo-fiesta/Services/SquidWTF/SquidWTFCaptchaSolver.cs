@@ -93,7 +93,10 @@ public class SquidWTFCaptchaSolver
         return captchaCookie;
     }
 
-    /// <summary>ALTCHA v2 web variant: SHA-256 chained `cost` times, truncated to keyLength each iteration.</summary>
+    /// <summary>
+    /// ALTCHA v2 solver, chained SHA-256 variant: salt+nonce+counter hashed `cost` times (qobuz.squid.wtf).
+    /// The server picks a solution counter in advance; we find it by iterating from 0.
+    /// </summary>
     public static (int Counter, string DerivedKeyHex, long ElapsedMs) SolveChallenge(
         JsonElement parameters,
         CancellationToken ct)
@@ -104,16 +107,19 @@ public class SquidWTFCaptchaSolver
         var keyLength = parameters.GetProperty("keyLength").GetInt32();
         var keyPrefix = Convert.FromHexString(parameters.GetProperty("keyPrefix").GetString()!);
 
+        // password buf: nonce bytes followed by 4-byte big-endian counter
         var password = new byte[nonce.Length + 4];
         Array.Copy(nonce, password, nonce.Length);
 
+        var sw = Stopwatch.StartNew();
+
+        // Chained SHA-256 variant (qobuz.squid.wtf)
         var initial = new byte[salt.Length + password.Length];
         Array.Copy(salt, 0, initial, 0, salt.Length);
 
         var derived = new byte[keyLength];
         Span<byte> hashBuf = stackalloc byte[32];
 
-        var sw = Stopwatch.StartNew();
         for (var counter = 0; counter < MaxSolverIterations; counter++)
         {
             ct.ThrowIfCancellationRequested();
@@ -131,9 +137,7 @@ public class SquidWTFCaptchaSolver
             }
 
             if (derived.AsSpan(0, keyPrefix.Length).SequenceEqual(keyPrefix))
-            {
                 return (counter, Convert.ToHexString(derived).ToLowerInvariant(), sw.ElapsedMilliseconds);
-            }
         }
 
         throw new InvalidOperationException(

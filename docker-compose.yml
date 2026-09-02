@@ -19,8 +19,8 @@ services:
       - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
       # Admin Password to perform actions on navidrome server that require admin permissions (optional)
       - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
-      # Music service to use: Deezer, Qobuz, or SquidWTF (default: SquidWTF)
-      - Subsonic__MusicService=${MUSIC_SERVICE:-SquidWTF}
+      # Music service to use: Deezer, Qobuz, Tidal, Yandex, or SquidWTF (deprecated) (default: Deezer)
+      - Subsonic__MusicService=${MUSIC_SERVICE:-Deezer}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
       - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
       # Cache duration in hours when StorageMode=Cache (default: 1)
@@ -35,6 +35,9 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # Disable triggering a library scan after a download completes (default: false)
+      # Useful if your Subsonic server or an external automation already picks up new files
+      - Subsonic__DisableLibraryScan=${DISABLE_LIBRARY_SCAN:-false}
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
       # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
       - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
@@ -55,7 +58,25 @@ services:
       # Preferred audio quality: FLAC, FLAC_24_HIGH, FLAC_24_LOW, FLAC_16, MP3_320 (optional)
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
       
+      # ===== TIDAL SETTINGS =====
+      # Tokens come from the OAuth device flow: docker compose run --rm octo-fiesta --tidal-login
+      # Path of the token store. Keep it on a mounted volume so tokens survive a recreate.
+      - Tidal__TokenStore=${TIDAL_TOKEN_STORE:-/config/tidal-tokens.json}
+      # Preferred audio quality (optional, defaults to the best your subscription allows)
+      # HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (AAC 320kbps), LOW (AAC 96kbps)
+      - Tidal__Quality=${TIDAL_QUALITY:-}
+      # Device client octo-fiesta authenticates as (optional, defaults to a working pair).
+      # Identifies the application, not your account. Override if Tidal retires the default.
+      - Tidal__ClientId=${TIDAL_CLIENT_ID:-}
+      - Tidal__ClientSecret=${TIDAL_CLIENT_SECRET:-}
+      # Tokens obtained elsewhere (optional), taking precedence over the token store
+      - Tidal__AccessToken=${TIDAL_ACCESS_TOKEN:-}
+      - Tidal__RefreshToken=${TIDAL_REFRESH_TOKEN:-}
+      - Tidal__UserId=${TIDAL_USER_ID:-}
+      - Tidal__CountryCode=${TIDAL_COUNTRY_CODE:-}
+
       # ===== SQUIDWTF SETTINGS =====
+      # DEPRECATED: upstream squid.wtf music services are down; kept for self-hosted Tidal instances
       # Backend source: Qobuz or Tidal (default: Qobuz)
       - SquidWTF__Source=${SQUIDWTF_SOURCE:-Qobuz}
       # Preferred audio quality (optional)
@@ -95,3 +116,5 @@ services:
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
+      # Holds the Tidal token store, only needed when MUSIC_SERVICE=Tidal
+      - ${CONFIG_PATH:-./config}:/config

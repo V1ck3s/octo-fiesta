@@ -79,21 +79,17 @@ jobs:
             # Tag release: v0.4.0 -> 0.4.0
             VERSION=${GITHUB_REF#refs/tags/v}
           elif [[ "${{ github.ref }}" == refs/heads/dev ]]; then
-            # Dev branch: get version from git describe with commit info
+            # Dev branch: pre-release of the next minor after the newest tag.
+            # Release tags live on master merge commits, so they are descendants
+            # of dev and git describe can never reach them from here.
             git fetch --tags
-            DESCRIBE=$(git describe --tags 2>/dev/null || echo "v0.0.0")
-            # v0.4.0 -> 0.4.0-dev
-            # v0.4.0-5-g1a2b3c4 -> 0.4.0-dev.5+g1a2b3c4
-            if [[ "$DESCRIBE" == *-*-* ]]; then
-              # Has commits after tag: v0.4.0-5-g1a2b3c4
-              BASE=$(echo $DESCRIBE | sed 's/^v//' | cut -d'-' -f1)
-              COMMITS=$(echo $DESCRIBE | cut -d'-' -f2)
-              HASH=$(echo $DESCRIBE | cut -d'-' -f3)
-              VERSION="${BASE}-dev.${COMMITS}+${HASH}"
-            else
-              # Exactly on tag: v0.4.0
-              VERSION="${DESCRIBE#v}-dev"
-            fi
+            LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            LATEST_TAG=${LATEST_TAG:-v0.0}
+            # v0.10 -> 0.11.0-dev.37+g1a2b3c4
+            NEXT=$(echo "${LATEST_TAG#v}" | awk -F. '{printf "%d.%d.0", $1, $2 + 1}')
+            COMMITS=$(git rev-list --count "${LATEST_TAG}..HEAD" 2>/dev/null || echo 0)
+            HASH=g$(git rev-parse --short HEAD)
+            VERSION="${NEXT}-dev.${COMMITS}+${HASH}"
           elif [[ "${{ github.ref }}" == refs/heads/master ]]; then
             # Master branch: get latest tag
             git fetch --tags

@@ -15,6 +15,14 @@ public interface ILocalLibraryService
     /// Checks if an external song already exists locally
     /// </summary>
     Task<string?> GetLocalPathForExternalSongAsync(string externalProvider, string externalId);
+
+    /// <summary>
+    /// Download-path resolver: our own download mapping first, then a live Subsonic library
+    /// search (a different release, or a file moved into the library by an external tool).
+    /// Hits the network (search3), so it is deliberately separate from the mapping-only
+    /// <see cref="GetLocalPathForExternalSongAsync"/> that per-track callers use.
+    /// </summary>
+    Task<string?> GetOwnedLibraryPathAsync(string externalProvider, string externalId);
     
     /// <summary>
     /// Registers a downloaded song in the local library

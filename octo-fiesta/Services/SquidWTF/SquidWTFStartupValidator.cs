@@ -35,12 +35,23 @@ public class SquidWTFStartupValidator : BaseStartupValidator
 
         WriteStatus("SquidWTF Source", source, ConsoleColor.Cyan);
         WriteStatus("SquidWTF Quality", quality, ConsoleColor.Cyan);
+        WriteStatus("SquidWTF Provider", "DEPRECATED", ConsoleColor.Red);
+        WriteDetail("The upstream squid.wtf music services are down (qobuz.squid.wtf no longer resolves,");
+        WriteDetail("Tidal public instances only serve search results and 30s previews).");
+        WriteDetail("Switch to another provider (e.g. MUSIC_SERVICE=Deezer). SquidWTF may be removed in a future release.");
+
+        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase) ||
+            source.Equals("Deemix", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteStatus("SquidWTF Source Error", "REMOVED", ConsoleColor.Red);
+            WriteDetail($"The '{source}' backend has been removed (upstream service discontinued). Falling back to Tidal.");
+        }
         if (usedDefaultFallback && !string.IsNullOrWhiteSpace(configuredQuality))
         {
             WriteStatus("SquidWTF Quality Warning", "INCOMPATIBLE CONFIG", ConsoleColor.Yellow);
             WriteDetail($"Quality '{configuredQuality}' is not valid for source '{source}'. Falling back to default quality.");
         }
-        
+
         if (_settings.InstanceTimeoutSeconds > 0)
         {
             WriteStatus("Instance Timeout", $"{_settings.InstanceTimeoutSeconds}s", ConsoleColor.Cyan);
@@ -197,10 +208,9 @@ public class SquidWTFStartupValidator : BaseStartupValidator
 
     private static (string Label, bool UsedDefaultFallback) GetEffectiveQualityLabel(string source, string? configuredQuality)
     {
-        var sourceIsQobuz = source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
         var quality = configuredQuality?.ToUpperInvariant();
 
-        if (sourceIsQobuz)
+        if (source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
         {
             return quality switch
             {
@@ -212,6 +222,7 @@ public class SquidWTFStartupValidator : BaseStartupValidator
             };
         }
 
+        // Tidal
         return quality switch
         {
             "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => ("HI_RES_LOSSLESS", false),

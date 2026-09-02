@@ -12,7 +12,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Download service implementation using SquidWTF API
-/// Supports both Qobuz and Tidal backends with automatic instance failover for Tidal
+/// Supports Qobuz and Tidal backends
 /// No decryption needed - SquidWTF returns direct streaming URLs
 /// </summary>
 public class SquidWTFDownloadService : BaseDownloadService
@@ -24,17 +24,17 @@ public class SquidWTFDownloadService : BaseDownloadService
     
     // Static Qobuz API endpoint
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    
+
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    
+
     // Quality mappings
     // Qobuz: 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
     // Tidal: HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (320kbps AAC), LOW (96kbps AAC)
-    
+
     private bool IsQobuzSource => _squidWTFSettings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
 
     protected override string ProviderName => "squidwtf";
@@ -64,18 +64,16 @@ public class SquidWTFDownloadService : BaseDownloadService
     {
         try
         {
-            // Test connectivity to the appropriate backend
             if (IsQobuzSource)
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, $"{QobuzBaseUrl}/api/get-music?q=test&offset=0");
                 request.Headers.Add(QobuzCountryHeader, QobuzCountryValue);
-                
                 var response = await _httpClient.SendAsync(request);
                 return response.IsSuccessStatusCode;
             }
-            else
+
+            // Tidal — test with instance manager
             {
-                // Test Tidal with instance manager
                 var response = await _instanceManager.SendWithFailoverAsync(baseUrl =>
                 {
                     var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/search/?s=test");
@@ -105,24 +103,17 @@ public class SquidWTFDownloadService : BaseDownloadService
     protected override string? GetTargetQuality()
     {
         if (!string.IsNullOrEmpty(_squidWTFSettings.Quality))
-        {
             return _squidWTFSettings.Quality;
-        }
-        
-        // Default to highest quality
-        return IsQobuzSource ? "27" : "HI_RES_LOSSLESS";
+
+        if (IsQobuzSource) return "27";
+        return "HI_RES_LOSSLESS";
     }
 
     protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         if (IsQobuzSource)
-        {
             return await DownloadTrackQobuzAsync(trackId, song, cancellationToken);
-        }
-        else
-        {
-            return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
-        }
+        return await DownloadTrackTidalAsync(trackId, song, cancellationToken);
     }
 
     #endregion
@@ -281,6 +272,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         var manifestText = Encoding.UTF8.GetString(manifestBytes);
         var manifestMimeType = trackResponse.ManifestMimeType ?? "";
 
+        TidalManifest? manifest;
         if (manifestMimeType.Contains("dash+xml") || manifestMimeType.Contains("application/dash"))
         {
             try
@@ -290,26 +282,13 @@ public class SquidWTFDownloadService : BaseDownloadService
                     "Parsed DASH manifest for track {TrackId}: {SegmentCount} segments, codecs={Codecs}",
                     trackId, parsed.Urls.Count, parsed.Codecs);
 
-                // Account without HI_RES entitlement gets a ~30s preview, not the full track;
-                // fall back to LOSSLESS which it can stream in full. (see #269)
-                if (quality == "HI_RES_LOSSLESS"
-                    && IsPreviewManifest(parsed.DurationSeconds, expectedDurationSeconds))
-                {
-                    Logger.LogWarning(
-                        "HI_RES_LOSSLESS returned a ~{PreviewDuration:0}s preview for track {TrackId} " +
-                        "(expected ~{Expected}s), falling back to LOSSLESS",
-                        parsed.DurationSeconds, trackId, expectedDurationSeconds);
-                    return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
-                }
-
-                var manifest = new TidalManifest
+                manifest = new TidalManifest
                 {
                     MimeType = parsed.MimeType ?? "audio/mp4",
                     Codecs = parsed.Codecs,
                     Urls = parsed.Urls.ToList(),
                     DurationSeconds = parsed.DurationSeconds,
                 };
-                return (manifest, quality);
             }
             catch (Exception ex) when (quality == "HI_RES_LOSSLESS")
             {
@@ -319,20 +298,44 @@ public class SquidWTFDownloadService : BaseDownloadService
                 return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
             }
         }
+        else
+        {
+            manifest = JsonSerializer.Deserialize<TidalManifest>(manifestText);
+        }
 
-        var jsonManifest = JsonSerializer.Deserialize<TidalManifest>(manifestText);
-        return (jsonManifest, quality);
+        // The instance's Tidal account is not entitled to stream this track in full and only
+        // serves a ~30s clip. An account without HI_RES entitlement can still stream LOSSLESS
+        // in full (see #269); otherwise fail rather than land a 30s clip in the library.
+        if (IsPreview(trackResponse, manifest?.DurationSeconds, expectedDurationSeconds))
+        {
+            var reason = trackResponse.PreviewReason ?? $"~{manifest?.DurationSeconds:0}s of ~{expectedDurationSeconds}s";
+
+            if (quality == "HI_RES_LOSSLESS")
+            {
+                Logger.LogWarning(
+                    "HI_RES_LOSSLESS returned a preview for track {TrackId} ({Reason}), falling back to LOSSLESS",
+                    trackId, reason);
+                return await GetTidalManifestAsync(trackId, "LOSSLESS", expectedDurationSeconds, cancellationToken);
+            }
+
+            throw new InvalidOperationException(
+                $"Tidal instance only serves a preview of track {trackId} ({reason}). " +
+                "Full tracks require an instance backed by a subscribed Tidal account.");
+        }
+
+        return (manifest, quality);
     }
 
-    // Only flag a preview when a meaningfully longer track is expected, to avoid false
-    // positives on genuinely short tracks.
+    // Only flag a preview from its duration when a meaningfully longer track is expected,
+    // to avoid false positives on genuinely short tracks.
     private const int PreviewMinExpectedDurationSeconds = 45;
     private const double PreviewMaxDurationRatio = 0.5;
 
-    private static bool IsPreviewManifest(double? manifestDurationSeconds, int? expectedDurationSeconds)
-        => manifestDurationSeconds is > 0
-           && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
-           && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio;
+    private static bool IsPreview(TidalTrackResponse track, double? manifestDurationSeconds, int? expectedDurationSeconds)
+        => string.Equals(track.AssetPresentation, "PREVIEW", StringComparison.OrdinalIgnoreCase)
+           || (manifestDurationSeconds is > 0
+               && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
+               && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio);
 
     private string GetTidalQuality()
     {
@@ -417,105 +420,4 @@ public class SquidWTFDownloadService : BaseDownloadService
     }
 
     #endregion
-
-    /// <summary>
-    /// Read-only forward Stream that concatenates the bodies of multiple HTTP GETs.
-    /// Used for DASH downloads: init segment + N media segments must be reassembled in order.
-    /// </summary>
-    internal sealed class MultiSegmentHttpStream : Stream
-    {
-        private readonly HttpClient _http;
-        private readonly IReadOnlyList<string> _urls;
-        private int _index = -1;
-        private HttpResponseMessage? _currentResponse;
-        private Stream? _currentStream;
-
-        public MultiSegmentHttpStream(HttpClient http, IReadOnlyList<string> urls)
-        {
-            _http = http ?? throw new ArgumentNullException(nameof(http));
-            _urls = urls ?? throw new ArgumentNullException(nameof(urls));
-            if (_urls.Count == 0)
-            {
-                throw new ArgumentException("At least one segment URL is required", nameof(urls));
-            }
-        }
-
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        {
-            while (true)
-            {
-                if (_currentStream == null)
-                {
-                    if (!await AdvanceAsync(cancellationToken).ConfigureAwait(false)) return 0;
-                }
-
-                var read = await _currentStream!.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (read > 0) return read;
-                await DisposeCurrentAsync().ConfigureAwait(false);
-            }
-        }
-
-        public override int Read(byte[] buffer, int offset, int count)
-            => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
-
-        private async Task<bool> AdvanceAsync(CancellationToken cancellationToken)
-        {
-            _index++;
-            if (_index >= _urls.Count) return false;
-
-            using var request = new HttpRequestMessage(HttpMethod.Get, _urls[_index]);
-            request.Headers.UserAgent.ParseAdd("Mozilla/5.0");
-            request.Headers.Accept.ParseAdd("*/*");
-
-            _currentResponse = await _http
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
-            _currentResponse.EnsureSuccessStatusCode();
-            _currentStream = await _currentResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-
-        private async Task DisposeCurrentAsync()
-        {
-            if (_currentStream != null)
-            {
-                await _currentStream.DisposeAsync().ConfigureAwait(false);
-                _currentStream = null;
-            }
-            _currentResponse?.Dispose();
-            _currentResponse = null;
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _currentStream?.Dispose();
-                _currentResponse?.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
-        public override async ValueTask DisposeAsync()
-        {
-            await DisposeCurrentAsync().ConfigureAwait(false);
-            await base.DisposeAsync().ConfigureAwait(false);
-            GC.SuppressFinalize(this);
-        }
-
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => throw new NotSupportedException();
-        public override long Position
-        {
-            get => throw new NotSupportedException();
-            set => throw new NotSupportedException();
-        }
-
-        public override void Flush() { }
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    }
 }

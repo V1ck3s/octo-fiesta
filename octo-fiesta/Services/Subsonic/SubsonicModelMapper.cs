@@ -118,6 +118,9 @@ public class SubsonicModelMapper
         }
     }
 
+    private static string SongKey(string? title, string? artist)
+        => Common.StringNormalizer.CreateComparisonKey(title) + "\u0001" + Common.StringNormalizer.CreateComparisonKey(artist);
+
     private (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResultsJson(
         List<object> localSongs,
         List<object> localAlbums,
@@ -125,10 +128,23 @@ public class SubsonicModelMapper
         SearchResult externalResult,
         List<ExternalPlaylist> externalPlaylists)
     {
+        var localSongKeys = new HashSet<string>();
+        foreach (var s in localSongs)
+        {
+            if (s is Dictionary<string, object> dict)
+            {
+                var title = dict.TryGetValue("title", out var t) ? t?.ToString() : null;
+                var artist = dict.TryGetValue("artist", out var a) ? a?.ToString() : null;
+                localSongKeys.Add(SongKey(title, artist));
+            }
+        }
+
         var mergedSongs = localSongs
-            .Concat(externalResult.Songs.Select(s => _responseBuilder.ConvertSongToJson(s)))
+            .Concat(externalResult.Songs
+                .Where(s => !localSongKeys.Contains(SongKey(s.Title, s.Artist)))
+                .Select(s => _responseBuilder.ConvertSongToJson(s)))
             .ToList();
-        
+
         // Merge albums with playlists (playlists appear as albums with genre "Playlist")
         var mergedAlbums = localAlbums
             .Concat(externalResult.Albums.Select(a => _responseBuilder.ConvertAlbumToJson(a)))
@@ -210,13 +226,16 @@ public class SubsonicModelMapper
         
         // Songs
         var mergedSongs = new List<object>();
+        var localSongKeys = new HashSet<string>();
         foreach (var song in localSongs.Cast<XElement>())
         {
             song.Name = ns + "song";
+            localSongKeys.Add(SongKey(song.Attribute("title")?.Value, song.Attribute("artist")?.Value));
             mergedSongs.Add(song);
         }
         foreach (var song in externalResult.Songs)
         {
+            if (localSongKeys.Contains(SongKey(song.Title, song.Artist))) continue;
             mergedSongs.Add(_responseBuilder.ConvertSongToXml(song, ns));
         }
 

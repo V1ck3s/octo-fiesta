@@ -17,6 +17,7 @@ public class PlaylistSyncService
     private readonly IMusicMetadataService? _deezerMetadataService;
     private readonly IMusicMetadataService? _qobuzMetadataService;
     private readonly IMusicMetadataService? _squidWTFMetadataService;
+    private readonly IMusicMetadataService? _tidalMetadataService;
     private readonly IMusicMetadataService? _yandexMetadataService;
     private readonly IEnumerable<IDownloadService> _downloadServices;
     private readonly IConfiguration _configuration;
@@ -47,6 +48,7 @@ public class PlaylistSyncService
         _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"));
         _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"));
         _squidWTFMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("SquidWTF"));
+        _tidalMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Tidal"));
         _yandexMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Yandex"));
         
         _downloadServices = downloadServices;
@@ -77,6 +79,7 @@ public class PlaylistSyncService
             "deezer" when _deezerMetadataService != null => _deezerMetadataService,
             "qobuz" when _qobuzMetadataService != null => _qobuzMetadataService,
             "squidwtf" when _squidWTFMetadataService != null => _squidWTFMetadataService,
+            "tidal" when _tidalMetadataService != null => _tidalMetadataService,
             "yandex" when _yandexMetadataService != null => _yandexMetadataService,
             _ => null
         };

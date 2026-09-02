@@ -3,6 +3,9 @@ namespace octo_fiesta.Models.Settings;
 /// <summary>
 /// Configuration for the SquidWTF music provider
 /// SquidWTF is a music downloader service that supports Qobuz and Tidal backends
+/// DEPRECATED: the upstream squid.wtf music services are down. Qobuz no longer resolves
+/// and Tidal instances only serve search results and previews. The provider is kept for
+/// users with self-hosted Tidal instances and may be removed in a future release.
 /// </summary>
 public class SquidWTFSettings
 {
@@ -11,7 +14,7 @@ public class SquidWTFSettings
     /// Defaults to "Qobuz" if not specified
     /// </summary>
     public string Source { get; set; } = "Qobuz";
-    
+
     /// <summary>
     /// Preferred audio quality
     /// For Qobuz: 27 (FLAC 24-bit/192kHz), 7 (FLAC 24-bit/96kHz), 6 (FLAC 16-bit), 5 (MP3 320kbps)
@@ -19,7 +22,7 @@ public class SquidWTFSettings
     /// If not specified, highest quality will be used
     /// </summary>
     public string? Quality { get; set; }
-    
+
     /// <summary>
     /// Timeout in seconds for API instance requests before switching to next instance
     /// Only applies to Tidal source. Defaults to 5 seconds if not specified.

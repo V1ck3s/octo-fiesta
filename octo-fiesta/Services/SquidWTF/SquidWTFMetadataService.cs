@@ -10,7 +10,7 @@ namespace octo_fiesta.Services.SquidWTF;
 
 /// <summary>
 /// Metadata service implementation using SquidWTF API
-/// Supports both Qobuz and Tidal backends
+/// Supports Qobuz and Tidal backends
 /// </summary>
 public class SquidWTFMetadataService : IMusicMetadataService
 {
@@ -19,20 +19,20 @@ public class SquidWTFMetadataService : IMusicMetadataService
     private readonly SubsonicSettings _subsonicSettings;
     private readonly SquidWTFInstanceManager _instanceManager;
     private readonly ILogger<SquidWTFMetadataService> _logger;
-    
+
     // API endpoints
     private const string QobuzBaseUrl = "https://qobuz.squid.wtf";
-    
+
     // Required headers
     private const string QobuzCountryHeader = "Token-Country";
     private const string QobuzCountryValue = "US";
     private const string TidalClientHeader = "x-client";
     private const string TidalClientValue = "BiniLossless/v3.4";
-    
+
     private bool IsQobuzSource => _settings.Source.Equals("Qobuz", StringComparison.OrdinalIgnoreCase);
 
     public SquidWTFMetadataService(
-        IHttpClientFactory httpClientFactory, 
+        IHttpClientFactory httpClientFactory,
         IOptions<SquidWTFSettings> settings,
         IOptions<SubsonicSettings> subsonicSettings,
         SquidWTFInstanceManager instanceManager,
@@ -52,13 +52,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
         try
         {
             if (IsQobuzSource)
-            {
                 return await SearchSongsQobuzAsync(query, limit);
-            }
-            else
-            {
-                return await SearchSongsTidalAsync(query, limit);
-            }
+            return await SearchSongsTidalAsync(query, limit);
         }
         catch (Exception ex)
         {
@@ -72,13 +67,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
         try
         {
             if (IsQobuzSource)
-            {
                 return await SearchAlbumsQobuzAsync(query, limit);
-            }
-            else
-            {
-                return await SearchAlbumsTidalAsync(query, limit);
-            }
+            return await SearchAlbumsTidalAsync(query, limit);
         }
         catch (Exception ex)
         {
@@ -92,13 +82,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
         try
         {
             if (IsQobuzSource)
-            {
                 return await SearchArtistsQobuzAsync(query, limit);
-            }
-            else
-            {
-                return await SearchArtistsTidalAsync(query, limit);
-            }
+            return await SearchArtistsTidalAsync(query, limit);
         }
         catch (Exception ex)
         {
@@ -147,17 +132,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<Song?> GetSongAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return null;
-        
+
         try
         {
             if (IsQobuzSource)
-            {
                 return await GetSongQobuzAsync(externalId);
-            }
-            else
-            {
-                return await GetSongTidalAsync(externalId);
-            }
+            return await GetSongTidalAsync(externalId);
         }
         catch (Exception ex)
         {
@@ -169,17 +149,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<Album?> GetAlbumAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return null;
-        
+
         try
         {
             if (IsQobuzSource)
-            {
                 return await GetAlbumQobuzAsync(externalId);
-            }
-            else
-            {
-                return await GetAlbumTidalAsync(externalId);
-            }
+            return await GetAlbumTidalAsync(externalId);
         }
         catch (Exception ex)
         {
@@ -191,17 +166,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<Artist?> GetArtistAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return null;
-        
+
         try
         {
             if (IsQobuzSource)
-            {
                 return await GetArtistQobuzAsync(externalId);
-            }
-            else
-            {
-                return await GetArtistTidalAsync(externalId);
-            }
+            return await GetArtistTidalAsync(externalId);
         }
         catch (Exception ex)
         {
@@ -213,17 +183,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<List<Album>> GetArtistAlbumsAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return new List<Album>();
-        
+
         try
         {
             if (IsQobuzSource)
-            {
                 return await GetArtistAlbumsQobuzAsync(externalId);
-            }
-            else
-            {
-                return await GetArtistAlbumsTidalAsync(externalId);
-            }
+            return await GetArtistAlbumsTidalAsync(externalId);
         }
         catch (Exception ex)
         {
@@ -236,12 +201,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
     {
         try
         {
-            // Only Tidal supports playlist search
+            // Only Tidal supports playlist search via SquidWTF's original APIs
             if (!IsQobuzSource)
-            {
                 return await SearchPlaylistsTidalAsync(query, limit);
-            }
-            
+
             return new List<ExternalPlaylist>();
         }
         catch (Exception ex)
@@ -254,15 +217,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return null;
-        
+
         try
         {
-            // Only Tidal supports playlist fetching
             if (!IsQobuzSource)
-            {
                 return await GetPlaylistTidalAsync(externalId);
-            }
-            
+
             return null;
         }
         catch (Exception ex)
@@ -275,15 +235,12 @@ public class SquidWTFMetadataService : IMusicMetadataService
     public async Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId)
     {
         if (externalProvider != "squidwtf") return new List<Song>();
-        
+
         try
         {
-            // Only Tidal supports playlist tracks
             if (!IsQobuzSource)
-            {
                 return await GetPlaylistTracksTidalAsync(externalId);
-            }
-            
+
             return new List<Song>();
         }
         catch (Exception ex)
@@ -294,6 +251,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
     }
 
     #endregion
+
 
     #region Qobuz Backend Methods
 

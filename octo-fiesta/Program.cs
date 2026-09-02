@@ -3,6 +3,7 @@ using octo_fiesta.Services;
 using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
 using octo_fiesta.Services.SquidWTF;
+using octo_fiesta.Services.Tidal;
 using octo_fiesta.Services.Yandex;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Lyrics;
@@ -12,6 +13,13 @@ using octo_fiesta.Services.Common;
 using octo_fiesta.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Interactive Tidal OAuth login. Runs the device authorization flow and exits without
+// starting the server, so the tokens can be minted before the first real run.
+if (TidalLoginCommand.IsRequested(args))
+{
+    return await TidalLoginCommand.RunAsync(builder.Configuration);
+}
 
 // Add services to the container.
 
@@ -34,6 +42,8 @@ builder.Services.Configure<QobuzSettings>(
     builder.Configuration.GetSection("Qobuz"));
 builder.Services.Configure<SquidWTFSettings>(
     builder.Configuration.GetSection("SquidWTF"));
+builder.Services.Configure<TidalSettings>(
+    builder.Configuration.GetSection("Tidal"));
 builder.Services.Configure<YandexSettings>(
     builder.Configuration.GetSection("Yandex"));
 builder.Services.Configure<LyricsSettings>(
@@ -89,8 +99,8 @@ else if (musicService == MusicService.SquidWTF)
 {
     var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
     var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
-    
-    // Only enable playlists for Tidal source (Qobuz doesn't support playlists via SquidWTF)
+
+    // Only Tidal exposes playlists through its SquidWTF API.
     if (enableExternalPlaylists && isTidalSource)
     {
         builder.Services.AddSingleton<PlaylistSyncService>();
@@ -105,6 +115,20 @@ else if (musicService == MusicService.SquidWTF)
     // SquidWTF services (primary) - registered LAST to be injected by default
     builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
     builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();
+}
+else if (musicService == MusicService.Tidal)
+{
+    if (enableExternalPlaylists)
+    {
+        builder.Services.AddSingleton<PlaylistSyncService>();
+    }
+
+    // Shared OAuth state: token renewal and the account's country code.
+    builder.Services.AddSingleton<TidalTokenStore>();
+    builder.Services.AddSingleton<TidalAuthService>();
+
+    builder.Services.AddSingleton<IMusicMetadataService, TidalMetadataService>();
+    builder.Services.AddSingleton<IDownloadService, TidalDownloadService>();
 }
 else if (musicService == MusicService.Yandex)
 {
@@ -136,9 +160,12 @@ builder.Services.AddSingleton<IStartupValidator, SubsonicStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, DeezerStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, QobuzStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, SquidWTFStartupValidator>();
+builder.Services.AddSingleton<IStartupValidator, TidalStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, YandexStartupValidator>();
 
 // Configure custom HTTP clients for services
+builder.Services.AddHttpClient(TidalHttpClientConfiguration.AuthClientName, TidalHttpClientConfiguration.ConfigureApiClient);
+builder.Services.AddHttpClient(TidalHttpClientConfiguration.MediaClientName, TidalHttpClientConfiguration.ConfigureMediaClient);
 builder.Services.AddHttpClient("Yandex", YandexHttpClientConfiguration.ConfigureClient);
 
 // Register orchestrator as hosted service
@@ -203,3 +230,5 @@ Console.WriteLine();
 
 // Wait for shutdown
 app.WaitForShutdown();
+
+return 0;

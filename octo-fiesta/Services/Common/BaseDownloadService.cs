@@ -509,6 +509,23 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
 
+            // Not tracked by our own download mapping, but the recording may already exist
+            // in the Subsonic library (a different release, or moved there by an external
+            // library manager). Reuse that file instead of downloading a duplicate.
+            // Skipped in cache mode and during a quality upgrade (which re-downloads on purpose).
+            if (!isCache && ourDownloadInfo.BackupPath == null)
+            {
+                var ownedPath = await LocalLibraryService.GetOwnedLibraryPathAsync(externalProvider, externalId);
+                if (!string.IsNullOrEmpty(ownedPath) && IOFile.Exists(ownedPath))
+                {
+                    Logger.LogInformation("Song already in local library, skipping download: {Path}", ownedPath);
+                    ourDownloadInfo.Status = DownloadStatus.Completed;
+                    ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                    ourDownloadInfo.LocalPath = ownedPath;
+                    return ownedPath;
+                }
+            }
+
             Song song = await GetSongMetadataForTrackAsync(externalProvider, externalId);
             var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
             string localPath;
@@ -703,10 +720,15 @@ public abstract class BaseDownloadService : IDownloadService
 
         try
         {
-            // Download the file
+            // Download the file with progress logging and stall detection
             await using var outputFile = IOFile.Create(outputPath);
-            await result.DownloadStream.CopyToAsync(outputFile, cancellationToken);
+            await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
             await outputFile.DisposeAsync();
+
+            // Detect actual audio format from magic bytes and rename if the extension is wrong.
+            // This catches cases where the stream is raw FLAC but we assumed MP4 container.
+            outputPath = CorrectExtensionIfNeeded(outputPath);
+
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
             // Write metadata
@@ -734,6 +756,90 @@ public abstract class BaseDownloadService : IDownloadService
             TryDeleteIncompleteFile(outputPath);
             throw;
         }
+    }
+
+    // Reads the first bytes of the written file, detects the audio format, and renames
+    // the file if the extension doesn't match (e.g. raw FLAC saved as .m4a).
+    private string CorrectExtensionIfNeeded(string path)
+    {
+        try
+        {
+            Span<byte> header = stackalloc byte[12];
+            using var f = IOFile.OpenRead(path);
+            int read = f.Read(header);
+            if (read < 4) return path;
+
+            Logger.LogDebug("Format detection for {File}: first {N} bytes = {Hex}",
+                Path.GetFileName(path), read,
+                string.Join(" ", header[..read].ToArray().Select(b => b.ToString("X2"))));
+
+            // Raw FLAC: starts with fLaC (0x66 0x4C 0x61 0x43)
+            bool isFlac = header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43;
+            // ISOBMFF/MP4: bytes 4-7 are 'ftyp' (0x66 0x74 0x79 0x70)
+            bool isMp4 = read >= 8 && header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70;
+
+            var currentExt = Path.GetExtension(path).ToLowerInvariant();
+            string? correctExt = null;
+            if (isFlac && currentExt != ".flac") correctExt = ".flac";
+            else if (isMp4 && currentExt != ".m4a") correctExt = ".m4a";
+
+            if (correctExt == null) return path;
+
+            var newPath = Path.ChangeExtension(path, correctExt);
+            newPath = PathHelper.ResolveUniquePath(newPath);
+            IOFile.Move(path, newPath);
+            Logger.LogDebug("Renamed {Old} → {New} (detected format mismatch)", Path.GetFileName(path), Path.GetFileName(newPath));
+            return newPath;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Format detection failed for {Path}, keeping original extension", path);
+            return path;
+        }
+    }
+
+    // Log progress every 10 MB and cancel if no bytes flow for 90 seconds (stall detection).
+    private async Task CopyWithProgressAsync(Stream source, Stream dest, string? title, CancellationToken cancellationToken)
+    {
+        const int bufferSize = 81920; // 80 KB
+        const long logEveryBytes = 10 * 1024 * 1024; // 10 MB
+        const int stallTimeoutSeconds = 90;
+
+        var buffer = new byte[bufferSize];
+        long totalBytes = 0;
+        long lastLoggedAt = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        while (true)
+        {
+            using var stallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            stallCts.CancelAfter(TimeSpan.FromSeconds(stallTimeoutSeconds));
+
+            int read;
+            try
+            {
+                read = await source.ReadAsync(buffer, stallCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException($"Download stalled for {stallTimeoutSeconds}s on '{title}' after {totalBytes / 1024 / 1024} MB");
+            }
+
+            if (read == 0) break;
+
+            await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            totalBytes += read;
+
+            if (totalBytes - lastLoggedAt >= logEveryBytes)
+            {
+                lastLoggedAt = totalBytes;
+                Logger.LogDebug("Downloading '{Title}': {MB} MB in {Elapsed}s",
+                    title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
+            }
+        }
+
+        Logger.LogInformation("Download complete: '{Title}' — {MB} MB in {Elapsed}s",
+            title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>
@@ -811,8 +917,20 @@ public abstract class BaseDownloadService : IDownloadService
                 var existingPath = await LocalLibraryService.GetLocalPathForExternalSongAsync(ProviderName, track.ExternalId!);
                 if (existingPath != null && IOFile.Exists(existingPath))
                 {
-                    Logger.LogDebug("Track {TrackId} already downloaded, skipping", track.ExternalId);
+                    Logger.LogDebug("Track {TrackId} already in library, skipping", track.ExternalId);
                     continue;
+                }
+
+                // Try to permanentize cached track BEFORE checking for completed downloads
+                // otherwise permanentization would be skipped as we already have a completed cache download
+                if (SubsonicSettings.StorageMode == StorageMode.Cache && forcePermanent)
+                {
+                    var permanentized = await PermanentizeCachedSongAsync(ProviderName, track.ExternalId!, cancellationToken);
+                    if (permanentized)
+                    {
+                        Logger.LogInformation("Permanentized cached track '{Title}' from album '{Album}'", track.Title, album.Title);
+                        continue;
+                    }
                 }
 
                 // Check if download is already in progress or recently completed
@@ -858,6 +976,7 @@ public abstract class BaseDownloadService : IDownloadService
             Logger.LogInformation("Writing metadata to: {Path}", filePath);
 
             using var tagFile = TagLib.File.Create(filePath);
+            Logger.LogDebug("TagLib opened {File} as MIME type: {MimeType}", Path.GetFileName(filePath), tagFile.MimeType);
 
             // Basic metadata
             tagFile.Tag.Title = song.Title;

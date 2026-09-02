@@ -391,6 +391,54 @@ public class QobuzMetadataServiceTests
         Assert.Equal("Unknown Playlist", result[0].Album);
     }
     
+    [Fact]
+    public async Task GetPlaylistTracksAsync_WithMoreTracksThanPageSize_FetchesEveryPage()
+    {
+        // Arrange
+        const int pageSize = 500;
+        const int lastPageCount = 14;
+        
+        _httpMessageHandlerMock.Protected()
+            .SetupSequence<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(BuildPlaylistPage(0, pageSize))
+            .ReturnsAsync(BuildPlaylistPage(pageSize, lastPageCount));
+        
+        // Act
+        var result = await _service.GetPlaylistTracksAsync("qobuz", "1578664");
+        
+        // Assert
+        Assert.Equal(pageSize + lastPageCount, result.Count);
+        Assert.Equal(1, result[0].Track);
+        Assert.Equal(pageSize + lastPageCount, result[^1].Track);
+        Assert.Equal("My Long Playlist", result[^1].Album);
+        
+        // The second page must be requested with the offset moved forward
+        _httpMessageHandlerMock.Protected()
+            .Verify("SendAsync",
+                Times.Once(),
+                ItExpr.Is<HttpRequestMessage>(r =>
+                    r.RequestUri!.ToString().Contains($"limit={pageSize}&offset={pageSize}")),
+                ItExpr.IsAny<CancellationToken>());
+    }
+    
+    private static HttpResponseMessage BuildPlaylistPage(int startIndex, int count)
+    {
+        var items = Enumerable.Range(startIndex, count)
+            .Select(i => $@"{{ ""id"": {i}, ""title"": ""Track {i}"" }}");
+        
+        return new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent($@"{{
+                ""name"": ""My Long Playlist"",
+                ""tracks"": {{ ""items"": [{string.Join(",", items)}] }}
+            }}")
+        };
+    }
+    
     #endregion
     
     #region SearchSongsAsync Tests

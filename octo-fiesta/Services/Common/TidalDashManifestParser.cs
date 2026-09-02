@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace octo_fiesta.Services.SquidWTF;
+namespace octo_fiesta.Services.Common;
 
 /// <summary>
 /// Parses a Tidal DASH MPD manifest (XML) into a flat list of segment URLs.
