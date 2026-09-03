@@ -40,6 +40,11 @@ public interface ILocalLibraryService
     Task<string?> GetLocalIdForExternalSongAsync(string externalProvider, string externalId);
 
     /// <summary>
+    /// Gets the mapping for a song addressed by its Subsonic library ID
+    /// </summary>
+    Task<LocalSongMapping?> GetMappingForLocalIdAsync(string localSubsonicId);
+
+    /// <summary>
     /// Triggers or waits for library indexing, then resolves the local ID.
     /// </summary>
     Task<string?> WaitForLocalIdAfterScanAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);

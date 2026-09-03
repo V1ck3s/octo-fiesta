@@ -412,6 +412,12 @@ public abstract class BaseDownloadService : IDownloadService
     /// </summary>
     protected abstract string? GetTargetQuality();
 
+    public bool IsQualityUpgradeAvailable(string? downloadedQuality)
+    {
+        return SubsonicSettings.AutoUpgradeQuality
+            && QualityHelper.ShouldUpgrade(downloadedQuality, GetTargetQuality());
+    }
+
     #endregion
 
     #region Common Download Logic
@@ -459,8 +465,7 @@ public abstract class BaseDownloadService : IDownloadService
                 {
                     // Check if we should upgrade quality
                     var targetQuality = GetTargetQuality();
-                    bool shouldUpgrade = SubsonicSettings.AutoUpgradeQuality
-                        && QualityHelper.ShouldUpgrade(existingMapping.DownloadedQuality, targetQuality);
+                    bool shouldUpgrade = IsQualityUpgradeAvailable(existingMapping.DownloadedQuality);
 
                     // No upgrade needed – return already downloaded path
                     if (!shouldUpgrade)

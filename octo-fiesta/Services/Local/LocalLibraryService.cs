@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using octo_fiesta.Models.Domain;
@@ -23,6 +24,8 @@ public class LocalLibraryService : ILocalLibraryService
     private readonly SubsonicSettings _subsonicSettings;
     private readonly ILogger<LocalLibraryService> _logger;
     private Dictionary<string, LocalSongMapping>? _mappings;
+
+    private readonly ConcurrentDictionary<string, byte> _localIdsWithoutMapping = new();
     private readonly SemaphoreSlim _lock = new(1, 1);
     
     // Debounce to avoid triggering too many scans
@@ -348,6 +351,105 @@ public class LocalLibraryService : ILocalLibraryService
         _logger.LogInformation("Resolved local Subsonic ID {LocalId} for external song {Provider}:{ExternalId}",
             matchedId, externalProvider, externalId);
         return matchedId;
+    }
+
+    public async Task<LocalSongMapping?> GetMappingForLocalIdAsync(string localSubsonicId)
+    {
+        if (string.IsNullOrEmpty(localSubsonicId) || _localIdsWithoutMapping.ContainsKey(localSubsonicId))
+        {
+            return null;
+        }
+
+        var mappings = await LoadMappingsAsync();
+
+        var resolved = mappings.Values.FirstOrDefault(m =>
+            string.Equals(m.LocalSubsonicId, localSubsonicId, StringComparison.Ordinal));
+        if (resolved != null)
+        {
+            return File.Exists(resolved.LocalPath) ? resolved : null;
+        }
+
+        // A library built by earlier versions carries no LocalSubsonicId at all, so fall back
+        // to matching on tags.
+        var unresolved = mappings.Values
+            .Where(m => string.IsNullOrEmpty(m.LocalSubsonicId))
+            .ToList();
+
+        if (unresolved.Count == 0)
+        {
+            _localIdsWithoutMapping.TryAdd(localSubsonicId, 0);
+            return null;
+        }
+
+        var tags = await GetLibrarySongTagsAsync(localSubsonicId);
+        if (tags == null)
+        {
+            return null;
+        }
+
+        var titleKey = StringNormalizer.CreateComparisonKey(tags.Value.Title);
+        var artistKey = StringNormalizer.CreateComparisonKey(tags.Value.Artist);
+
+        var match = unresolved.FirstOrDefault(m =>
+            StringNormalizer.CreateComparisonKey(m.Title) == titleKey &&
+            StringNormalizer.CreateComparisonKey(m.Artist) == artistKey);
+
+        if (match == null)
+        {
+            _localIdsWithoutMapping.TryAdd(localSubsonicId, 0);
+            return null;
+        }
+
+        await _lock.WaitAsync();
+        try
+        {
+            if (mappings.TryGetValue($"{match.ExternalProvider}:{match.ExternalId}", out var mappingToUpdate))
+            {
+                mappingToUpdate.LocalSubsonicId = localSubsonicId;
+                await SaveMappingsAsync(mappings);
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+
+        _logger.LogInformation("Local song {LocalId} belongs to {Provider}:{ExternalId} downloaded in {Quality}",
+            localSubsonicId, match.ExternalProvider, match.ExternalId, match.DownloadedQuality ?? "unknown");
+
+        return File.Exists(match.LocalPath) ? match : null;
+    }
+
+    private async Task<(string Title, string Artist)?> GetLibrarySongTagsAsync(string localSubsonicId)
+    {
+        try
+        {
+            var authQuery = BuildAuthQuery(_subsonicUserCredentials);
+            var url = $"{_subsonicSettings.Url}/rest/getSong?f=json&id={Uri.EscapeDataString(localSubsonicId)}{authQuery}";
+
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (!doc.RootElement.TryGetProperty("subsonic-response", out var subsonicResponse) ||
+                !subsonicResponse.TryGetProperty("song", out var song))
+            {
+                return null;
+            }
+
+            var title = song.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null;
+            var artist = song.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null;
+
+            return string.IsNullOrEmpty(title) || string.IsNullOrEmpty(artist) ? null : (title, artist);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not read library tags for {LocalId}", localSubsonicId);
+            return null;
+        }
     }
 
     public async Task<string?> WaitForLocalIdAfterScanAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)

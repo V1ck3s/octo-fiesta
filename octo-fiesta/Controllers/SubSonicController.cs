@@ -154,6 +154,17 @@ public class SubsonicController : ControllerBase
 
         if (!isExternal)
         {
+            // A track the library already holds is played by its Subsonic id, which never
+            // reaches the download path where quality upgrades happen.
+            if (_subsonicSettings.AutoUpgradeQuality)
+            {
+                var upgraded = await TryStreamQualityUpgradeAsync(id);
+                if (upgraded != null)
+                {
+                    return upgraded;
+                }
+            }
+
             return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
@@ -184,6 +195,34 @@ public class SubsonicController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { error = $"Failed to stream: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Returns null when there is nothing to upgrade and the caller should relay as usual.
+    /// </summary>
+    private async Task<IActionResult?> TryStreamQualityUpgradeAsync(string localSongId)
+    {
+        var owned = await _localLibraryService.GetMappingForLocalIdAsync(localSongId);
+        if (owned == null || !_downloadService.IsQualityUpgradeAvailable(owned.DownloadedQuality))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                HttpContext.RequestAborted,
+                _hostApplicationLifetime.ApplicationStopping);
+
+            var (downloadStream, filePath) = await _downloadService.DownloadAndStreamAsync(
+                owned.ExternalProvider, owned.ExternalId, cancellationTokenSource.Token);
+            return File(downloadStream, GetContentType(filePath), enableRangeProcessing: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Quality upgrade failed for {SongId}, streaming the library copy", localSongId);
+            return null;
         }
     }
 
