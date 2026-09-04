@@ -158,27 +158,24 @@ public class SubsonicController : ControllerBase
             // reaches the download path where quality upgrades happen.
             if (_subsonicSettings.AutoUpgradeQuality)
             {
-                var upgraded = await TryStreamQualityUpgradeAsync(id);
-                if (upgraded != null)
-                {
-                    return upgraded;
-                }
+                await QueueQualityUpgradeAsync(id);
             }
 
             return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
-        // Serve an already-owned copy from the library instead of re-downloading.
-        // Skipped when AutoUpgradeQuality is on so the download path can still
-        // upgrade a lower-quality local copy on play.
-        if (!_subsonicSettings.AutoUpgradeQuality)
+        // Serve an already-owned copy from the library instead of re-downloading. A copy
+        // below the target quality is still served right away, the upgrade runs in background.
+        var ownedSongId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider!, externalId!);
+        if (!string.IsNullOrEmpty(ownedSongId))
         {
-            var localSongId = await _localLibraryService.GetLocalIdForExternalSongAsync(provider!, externalId!);
-            if (!string.IsNullOrEmpty(localSongId))
+            if (_subsonicSettings.AutoUpgradeQuality)
             {
-                parameters["id"] = localSongId;
-                return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
+                _downloadService.UpgradeQualityInBackground(provider!, externalId!);
             }
+
+            parameters["id"] = ownedSongId;
+            return await _proxyService.RelayStreamAsync(parameters, HttpContext.RequestAborted);
         }
 
         // Otherwise download from the provider and stream (quality upgrade logic applies)
@@ -199,31 +196,18 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Returns null when there is nothing to upgrade and the caller should relay as usual.
+    /// Queues the re-download of a library track below the target quality. Playback is served
+    /// from the copy at hand, so the client never waits for the upgrade to finish.
     /// </summary>
-    private async Task<IActionResult?> TryStreamQualityUpgradeAsync(string localSongId)
+    private async Task QueueQualityUpgradeAsync(string localSongId)
     {
         var owned = await _localLibraryService.GetMappingForLocalIdAsync(localSongId);
-        if (owned == null || !_downloadService.IsQualityUpgradeAvailable(owned.DownloadedQuality))
+        if (owned == null)
         {
-            return null;
+            return;
         }
 
-        try
-        {
-            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-                HttpContext.RequestAborted,
-                _hostApplicationLifetime.ApplicationStopping);
-
-            var (downloadStream, filePath) = await _downloadService.DownloadAndStreamAsync(
-                owned.ExternalProvider, owned.ExternalId, cancellationTokenSource.Token);
-            return File(downloadStream, GetContentType(filePath), enableRangeProcessing: true);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Quality upgrade failed for {SongId}, streaming the library copy", localSongId);
-            return null;
-        }
+        _downloadService.UpgradeQualityInBackground(owned.ExternalProvider, owned.ExternalId);
     }
 
     /// <summary>

@@ -36,6 +36,9 @@ public abstract class BaseDownloadService : IDownloadService
     // Key: "{provider}|{externalId}" -> (path or null, expiry)
     private readonly ConcurrentDictionary<string, (string? Path, DateTime Expiry)> _metadataPathCache = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _metadataPathLocks = new();
+
+    // Tracks queued for a quality upgrade, and those the provider cannot serve any higher
+    private readonly ConcurrentDictionary<string, byte> _pendingQualityUpgrades = new();
     private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MetadataCacheNegativeTtl = TimeSpan.FromMinutes(1);
     private readonly IHttpClientFactory _httpClientFactory;
@@ -172,6 +175,56 @@ public abstract class BaseDownloadService : IDownloadService
             catch (Exception ex)
             {
                 Logger.LogError(ex, "Failed to download remaining album tracks for album {AlbumId}", albumExternalId);
+            }
+        });
+    }
+
+    public void UpgradeQualityInBackground(string externalProvider, string externalId)
+    {
+        if (externalProvider != ProviderName)
+        {
+            return;
+        }
+
+        var key = $"{externalProvider}:{externalId}";
+        if (!_pendingQualityUpgrades.TryAdd(key, 0))
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            // The provider may simply not offer the target quality. In that case the key is
+            // left in place so later plays stop re-downloading the same track for nothing.
+            var upgradeUnavailable = false;
+            try
+            {
+                var mapping = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
+                if (mapping == null || !IsQualityUpgradeAvailable(mapping.DownloadedQuality))
+                {
+                    return;
+                }
+
+                await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: false);
+
+                var upgraded = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
+                upgradeUnavailable = upgraded != null && IsQualityUpgradeAvailable(upgraded.DownloadedQuality);
+                if (upgradeUnavailable)
+                {
+                    Logger.LogInformation("{Provider}:{ExternalId} is not available above {Quality}, giving up on the upgrade",
+                        externalProvider, externalId, upgraded!.DownloadedQuality ?? "unknown");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Quality upgrade failed for {Provider}:{ExternalId}", externalProvider, externalId);
+            }
+            finally
+            {
+                if (!upgradeUnavailable)
+                {
+                    _pendingQualityUpgrades.TryRemove(key, out _);
+                }
             }
         });
     }
@@ -412,7 +465,7 @@ public abstract class BaseDownloadService : IDownloadService
     /// </summary>
     protected abstract string? GetTargetQuality();
 
-    public bool IsQualityUpgradeAvailable(string? downloadedQuality)
+    private bool IsQualityUpgradeAvailable(string? downloadedQuality)
     {
         return SubsonicSettings.AutoUpgradeQuality
             && QualityHelper.ShouldUpgrade(downloadedQuality, GetTargetQuality());

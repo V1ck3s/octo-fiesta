@@ -40,10 +40,12 @@ public interface IDownloadService
     Task<(Stream Stream, string FilePath)> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Whether a track downloaded at the given quality would be re-downloaded higher,
-    /// under the current AutoUpgradeQuality setting.
+    /// Re-downloads an already owned track at the configured target quality, detached from
+    /// any request. Does nothing when the track is already at that quality or better.
     /// </summary>
-    bool IsQualityUpgradeAvailable(string? downloadedQuality);
+    /// <param name="externalProvider">The provider (deezer, qobuz, etc.)</param>
+    /// <param name="externalId">The ID on the external provider</param>
+    void UpgradeQualityInBackground(string externalProvider, string externalId);
     
     /// <summary>
     /// Downloads remaining tracks from an album in background (excluding the specified track)
