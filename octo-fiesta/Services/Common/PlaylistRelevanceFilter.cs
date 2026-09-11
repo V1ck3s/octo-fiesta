@@ -1,5 +1,4 @@
-using System.Globalization;
-using System.Text;
+﻿using System.Text;
 using octo_fiesta.Models.Subsonic;
 
 namespace octo_fiesta.Services.Common;
@@ -46,28 +45,18 @@ public static class PlaylistRelevanceFilter
             .ToList();
 
     /// <summary>
-    /// Lowercases, strips diacritics, then turns every non-alphanumeric character
-    /// into a space, so "Gainsbourg's Got Class(ique)" and "gainsbourg got class"
-    /// compare on the same footing. Diacritics are folded here rather than through
-    /// StringNormalizer.CreateComparisonKey, which does not strip them.
+    /// Turns every non-alphanumeric character of the comparison key into a space, so
+    /// "Gainsbourg's Got Class(ique)" and "gainsbourg got class" compare on the same
+    /// footing.
     /// </summary>
     private static string Flatten(string? input)
     {
-        var normalized = StringNormalizer
-            .NormalizeForComparison(input)
-            .Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(normalized.Length);
+        var key = StringNormalizer.CreateComparisonKey(input);
+        var sb = new StringBuilder(key.Length);
 
-        foreach (var c in normalized)
+        foreach (var c in key)
         {
-            // FormD split accents into combining marks of their own; dropping them
-            // is what makes "INTERPRETES" match "interprètes".
-            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
-            {
-                continue;
-            }
-
-            sb.Append(char.IsLetterOrDigit(c) ? char.ToLowerInvariant(c) : ' ');
+            sb.Append(char.IsLetterOrDigit(c) ? c : ' ');
         }
 
         return sb.ToString();
