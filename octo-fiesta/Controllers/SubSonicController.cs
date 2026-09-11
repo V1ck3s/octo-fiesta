@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
 using System.Text;
 using System.Text.Json;
@@ -702,7 +702,7 @@ public class SubsonicController : ControllerBase
                 break;
             }
 
-            if (!IsCreditedTo(song.Artist, artistName))
+            if (!IsSameArtistOrCollaboration(song.Artist, artistName))
             {
                 continue;
             }
@@ -729,12 +729,6 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
-    /// Separators that mark the end of a leading artist credit.
-    /// </summary>
-    private static readonly string[] CreditSeparators =
-        new[] { "&", ",", "/", "feat", "ft.", "with ", "and ", "x " };
-
-    /// <summary>
     /// Looks the artist up on the provider. A provider outage must not cost the
     /// user the local songs, so failures degrade to an empty list.
     /// </summary>
@@ -743,7 +737,7 @@ public class SubsonicController : ControllerBase
         try
         {
             // Ask wide: the provider ranks by relevance to the query, which mixes in
-            // namesakes, and IsCreditedTo filters those out afterwards.
+            // namesakes, and IsSameArtistOrCollaboration filters those out afterwards.
             return await _metadataService.SearchSongsAsync(artistName, Math.Max(count, 20) * 2);
         }
         catch (Exception ex)
@@ -751,36 +745,6 @@ public class SubsonicController : ControllerBase
             _logger.LogWarning(ex, "getTopSongs: provider lookup failed for {Artist}", artistName);
             return new List<Song>();
         }
-    }
-
-    /// <summary>
-    /// True when the credit is the requested artist, alone or leading a
-    /// collaboration such as "Serge Gainsbourg &amp; Jane Birkin". Searching a
-    /// provider for one artist also surfaces namesakes - "Charlotte Gainsbourg"
-    /// for "Serge Gainsbourg" - so a plain substring test would let them through.
-    /// </summary>
-    private static bool IsCreditedTo(string? candidate, string artistName)
-    {
-        var candidateKey = StringNormalizer.CreateComparisonKey(candidate);
-        var artistKey = StringNormalizer.CreateComparisonKey(artistName);
-
-        if (candidateKey.Length == 0 || artistKey.Length == 0)
-        {
-            return false;
-        }
-
-        if (candidateKey == artistKey)
-        {
-            return true;
-        }
-
-        if (!candidateKey.StartsWith(artistKey, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var remainder = candidateKey[artistKey.Length..].TrimStart();
-        return CreditSeparators.Any(separator => remainder.StartsWith(separator, StringComparison.Ordinal));
     }
 
     /// <summary>
