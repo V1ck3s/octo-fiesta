@@ -39,7 +39,7 @@ services:
       # Useful if your Subsonic server or an external automation already picks up new files
       - Subsonic__DisableLibraryScan=${DISABLE_LIBRARY_SCAN:-false}
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
-      # Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
+      # Available placeholders: {artistLetter}, {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
       - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
       
       # ===== DEEZER SETTINGS =====
