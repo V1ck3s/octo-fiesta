@@ -114,6 +114,24 @@ public class PathHelperTests : IDisposable
     }
 
     [Fact]
+    public void BuildTrackPath_CustomTemplate_WithArtistLetter()
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = "Artist",
+            Album = "Album",
+            Track = 1,
+            Genre = "Alternative"
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{artist}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}A{Sep}Artist{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Fact]
     public void BuildTrackPath_NullYear_ReplacesWithUnknown()
     {
         var song = new Song

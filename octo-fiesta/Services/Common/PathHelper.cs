@@ -79,7 +79,9 @@ public static class PathHelper
     /// </summary>
     internal static string ReplacePlaceholders(string segment, Song song, string artistForPath, string? downloadedQuality)
     {
+        var artistLetter = artistForPath[0].ToString().ToUpper();
         var result = segment
+            .Replace("{artistLetter}", artistLetter)
             .Replace("{artist}", artistForPath)
             .Replace("{album}", song.Album)
             .Replace("{title}", song.Title);
