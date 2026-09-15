@@ -1,3 +1,4 @@
+using System.Globalization;
 using octo_fiesta.Models.Domain;
 using IOFile = System.IO.File;
 
@@ -79,7 +80,12 @@ public static class PathHelper
     /// </summary>
     internal static string ReplacePlaceholders(string segment, Song song, string artistForPath, string? downloadedQuality)
     {
-        var artistLetter = artistForPath[0].ToString().ToUpper();
+        // {artistLetter} — first character of the artist, "Unknown" if empty.
+        // Replaced before {artist} so the longer token is not eaten by the shorter one.
+        var artistLetter = string.IsNullOrWhiteSpace(artistForPath)
+            ? "Unknown"
+            : new StringInfo(artistForPath.Trim()).SubstringByTextElements(0, 1).ToUpperInvariant();
+
         var result = segment
             .Replace("{artistLetter}", artistLetter)
             .Replace("{artist}", artistForPath)
