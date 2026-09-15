@@ -148,6 +148,26 @@ public class PathHelperTests : IDisposable
         Assert.Equal($"/downloads{Sep}A{Sep}artist{Sep}Album{Sep}01 - Song.flac", result);
     }
 
+    [Theory]
+    [InlineData("Étienne Daho", "E")]
+    [InlineData("Ólafur Arnalds", "O")]
+    [InlineData("Anggun", "A")]
+    public void BuildTrackPath_ArtistLetter_FoldsAccentsOntoBaseLetter(string artist, string expectedLetter)
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = artist,
+            Album = "Album",
+            Track = 1
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}{expectedLetter}{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
     [Fact]
     public void BuildTrackPath_ArtistLetter_EmptyArtist_ReplacesWithUnknown()
     {
