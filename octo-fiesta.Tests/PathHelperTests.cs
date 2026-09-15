@@ -1,4 +1,4 @@
-using octo_fiesta.Models.Domain;
+﻿using octo_fiesta.Models.Domain;
 using octo_fiesta.Services.Common;
 using Xunit;
 
@@ -111,6 +111,95 @@ public class PathHelperTests : IDisposable
             "{genre}/{artist}/{album}/{track} - {title}", null);
 
         Assert.Equal($"/downloads{Sep}Alternative{Sep}Artist{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Fact]
+    public void BuildTrackPath_CustomTemplate_WithArtistLetter()
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = "Artist",
+            Album = "Album",
+            Track = 1,
+            Genre = "Alternative"
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{artist}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}A{Sep}Artist{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Fact]
+    public void BuildTrackPath_ArtistLetter_LowercaseArtist_IsUppercased()
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = "artist",
+            Album = "Album",
+            Track = 1
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{artist}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}A{Sep}artist{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Theory]
+    [InlineData("Étienne Daho", "E")]
+    [InlineData("Ólafur Arnalds", "O")]
+    [InlineData("Anggun", "A")]
+    public void BuildTrackPath_ArtistLetter_FoldsAccentsOntoBaseLetter(string artist, string expectedLetter)
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = artist,
+            Album = "Album",
+            Track = 1
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}{expectedLetter}{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Fact]
+    public void BuildTrackPath_ArtistLetter_EmptyArtist_ReplacesWithUnknown()
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = "",
+            Album = "Album",
+            Track = 1
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artistLetter}/{artist}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}Unknown{Sep}Unknown{Sep}Album{Sep}01 - Song.flac", result);
+    }
+
+    [Fact]
+    public void BuildTrackPath_EmptyArtist_WithoutArtistLetterPlaceholder_DoesNotThrow()
+    {
+        var song = new Song
+        {
+            Title = "Song",
+            Artist = "",
+            Album = "Album",
+            Track = 1
+        };
+
+        var result = PathHelper.BuildTrackPath("/downloads", song, ".flac",
+            "{artist}/{album}/{track} - {title}", null);
+
+        Assert.Equal($"/downloads{Sep}Unknown{Sep}Album{Sep}01 - Song.flac", result);
     }
 
     [Fact]

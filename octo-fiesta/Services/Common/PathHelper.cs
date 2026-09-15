@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using octo_fiesta.Models.Domain;
 using IOFile = System.IO.File;
 
@@ -79,7 +81,11 @@ public static class PathHelper
     /// </summary>
     internal static string ReplacePlaceholders(string segment, Song song, string artistForPath, string? downloadedQuality)
     {
+        // Replaced before {artist} so the longer token is not eaten by the shorter one.
+        var artistLetter = BuildArtistLetter(artistForPath);
+
         var result = segment
+            .Replace("{artistLetter}", artistLetter)
             .Replace("{artist}", artistForPath)
             .Replace("{album}", song.Album)
             .Replace("{title}", song.Title);
@@ -113,6 +119,29 @@ public static class PathHelper
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the {artistLetter} value: the first character of the artist, uppercased, with
+    /// accents folded onto their base letter so "Étienne" and "Etienne" share a folder.
+    /// </summary>
+    /// <param name="artistForPath">Artist name used for the path.</param>
+    /// <returns>Single-letter folder name, "Unknown" when the artist is empty.</returns>
+    private static string BuildArtistLetter(string artistForPath)
+    {
+        if (string.IsNullOrWhiteSpace(artistForPath))
+        {
+            return "Unknown";
+        }
+
+        var firstElement = new StringInfo(artistForPath.Trim()).SubstringByTextElements(0, 1);
+
+        var folded = new string(firstElement
+            .Normalize(NormalizationForm.FormD)
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            .ToArray());
+
+        return folded.Length == 0 ? "Unknown" : folded.ToUpperInvariant();
     }
 
     /// <summary>
