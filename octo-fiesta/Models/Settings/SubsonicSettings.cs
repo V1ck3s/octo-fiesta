@@ -175,7 +175,7 @@ public class SubsonicSettings
     /// <summary>
     /// Template for organizing downloaded files into folders (default: {artist}/{album}/{track} - {title})
     /// Environment variable: FOLDER_TEMPLATE
-    /// Available placeholders: {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
+    /// Available placeholders: {artistLetter}, {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
     /// Slashes (/) separate folder levels; the last segment becomes the file name.
     /// </summary>
     public string FolderTemplate { get; set; } = "{artist}/{album}/{track} - {title}";
