@@ -125,20 +125,18 @@ public partial class SubsonicController : ControllerBase
             ? _metadataService.SearchPlaylistsAsync(cleanQuery, Math.Min(ac, 5))
             : Task.FromResult(new List<ExternalPlaylist>());
 
-        // Snapshot of downloaded-song mappings (cheap after first load) used during merge
-        // to drop external songs that already have a local equivalent.
-        var mappingsTask = _localLibraryService.GetMappingsSnapshotAsync(HttpContext.RequestAborted);
-
-        await Task.WhenAll(subsonicTask, externalTask, playlistTask, mappingsTask);
+        await Task.WhenAll(subsonicTask, externalTask, playlistTask);
 
         var subsonicResult = await subsonicTask;
         var externalResult = await externalTask;
         // A provider that pads playlist search rather than returning nothing puts
         // unrelated entries in the album section. Keep only what answers the query.
         var playlistResult = PlaylistRelevanceFilter.Apply(cleanQuery, await playlistTask);
-        var mappings = await mappingsTask;
 
-        return MergeSearchResults(subsonicResult, externalResult, playlistResult, mappings, format);
+        // Fork: the mappings snapshot (in-memory after first load) lets the merge drop
+        // external songs already downloaded. Kept on this one line so upstream edits
+        // to the block above merge cleanly.
+        return MergeSearchResults(subsonicResult, externalResult, playlistResult, await GetSearchMappingsAsync(), format);
     }
 
     /// <summary>

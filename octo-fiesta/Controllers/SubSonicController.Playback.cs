@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Subsonic;
 
 namespace octo_fiesta.Controllers;
@@ -79,6 +80,9 @@ public partial class SubsonicController
         parameters["mediaId"] = localId;
         return true;
     }
+
+    private Task<IReadOnlyDictionary<string, LocalSongMapping>> GetSearchMappingsAsync() =>
+        _localLibraryService.GetMappingsSnapshotAsync(HttpContext.RequestAborted);
 
     private static bool IsSubsonicDataNotFound(byte[] body, string format)
     {
