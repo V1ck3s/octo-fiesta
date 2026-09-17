@@ -10,6 +10,10 @@ namespace octo_fiesta.Services.Subsonic;
 
 public partial class SubsonicModelMapper
 {
+    /// <summary>
+    /// Fork overload: filters the external results with the fork's dedupe rules, then
+    /// delegates to the upstream merge so upstream changes to it keep applying.
+    /// </summary>
     public (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResults(
         List<object> localSongs,
         List<object> localAlbums,
@@ -19,40 +23,15 @@ public partial class SubsonicModelMapper
         IReadOnlyDictionary<string, LocalSongMapping>? mappings,
         bool isJson)
     {
-        if (isJson)
-        {
-            return MergeSearchResultsJsonWithMappings(localSongs, localAlbums, localArtists, externalResult, externalPlaylists, mappings);
-        }
-        else
-        {
-            return MergeSearchResultsXmlWithMappings(localSongs, localAlbums, localArtists, externalResult, externalPlaylists, mappings);
-        }
-    }
-
-    private (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResultsJsonWithMappings(
-        List<object> localSongs,
-        List<object> localAlbums,
-        List<object> localArtists,
-        SearchResult externalResult,
-        List<ExternalPlaylist> externalPlaylists,
-        IReadOnlyDictionary<string, LocalSongMapping>? mappings)
-    {
-        // Build local indexes from the JSON dictionaries returned by Navidrome's search3.
         var localSongIds = new HashSet<string>(StringComparer.Ordinal);
         var localSongKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var song in localSongs)
         {
-            if (song is not Dictionary<string, object> dict)
-            {
-                continue;
-            }
-            if (dict.TryGetValue("id", out var idObj) && idObj?.ToString() is { Length: > 0 } id)
+            if (LocalField(song, "id") is { Length: > 0 } id)
             {
                 localSongIds.Add(id);
             }
-            var artist = dict.TryGetValue("artist", out var a) ? a?.ToString() : null;
-            var title = dict.TryGetValue("title", out var t) ? t?.ToString() : null;
-            var key = BuildSongKey(artist, title);
+            var key = BuildSongKey(LocalField(song, "artist"), LocalField(song, "title"));
             if (key != null)
             {
                 localSongKeys.Add(key);
@@ -62,169 +41,69 @@ public partial class SubsonicModelMapper
         var localAlbumKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var album in localAlbums)
         {
-            if (album is not Dictionary<string, object> dict)
-            {
-                continue;
-            }
-            var artist = dict.TryGetValue("artist", out var a) ? a?.ToString() : null;
             // Subsonic uses "name" for album titles; some clients expose "title" too.
-            var title = dict.TryGetValue("name", out var n) ? n?.ToString()
-                       : dict.TryGetValue("title", out var t) ? t?.ToString()
-                       : null;
-            var key = BuildAlbumKey(artist, title);
+            var key = BuildAlbumKey(LocalField(album, "artist"), LocalField(album, "name") ?? LocalField(album, "title"));
             if (key != null)
             {
                 localAlbumKeys.Add(key);
             }
         }
 
-        var mergedSongs = new List<object>(localSongs);
-        foreach (var song in externalResult.Songs)
-        {
-            if (ShouldDropExternalSong(song, mappings, localSongIds, localSongKeys))
-            {
-                continue;
-            }
-            mergedSongs.Add(_responseBuilder.ConvertSongToJson(song));
-        }
-
-        var mergedAlbums = new List<object>(localAlbums);
-        foreach (var album in externalResult.Albums)
-        {
-            if (ShouldDropExternalAlbum(album, localAlbumKeys))
-            {
-                continue;
-            }
-            mergedAlbums.Add(_responseBuilder.ConvertAlbumToJson(album));
-        }
-        // Playlists surfaced as albums. Providers (notably Qobuz) sometimes return several
-        // near-duplicate yearly snapshots of the same curated list, all sharing the same
-        // (provider, name, curator) tuple. Collapse those before emitting.
-        foreach (var playlist in DeduplicateExternalPlaylists(externalPlaylists))
-        {
-            mergedAlbums.Add(ConvertPlaylistToAlbumJson(playlist));
-        }
-
-        var localArtistNames = new HashSet<string>(StringComparer.Ordinal);
+        var localArtistKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var artist in localArtists)
         {
-            if (artist is Dictionary<string, object> dict && dict.TryGetValue("name", out var nameObj))
-            {
-                localArtistNames.Add(StringNormalizer.CreateArtistComparisonKey(nameObj?.ToString()));
-            }
-        }
-
-        var mergedArtists = localArtists.ToList();
-        foreach (var externalArtist in externalResult.Artists)
-        {
-            if (!localArtistNames.Contains(StringNormalizer.CreateArtistComparisonKey(externalArtist.Name)))
-            {
-                mergedArtists.Add(_responseBuilder.ConvertArtistToJson(externalArtist));
-            }
-        }
-
-        return (mergedSongs, mergedAlbums, mergedArtists);
-    }
-
-    private (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResultsXmlWithMappings(
-        List<object> localSongs,
-        List<object> localAlbums,
-        List<object> localArtists,
-        SearchResult externalResult,
-        List<ExternalPlaylist> externalPlaylists,
-        IReadOnlyDictionary<string, LocalSongMapping>? mappings)
-    {
-        var ns = XNamespace.Get("http://subsonic.org/restapi");
-
-        var localSongIds = new HashSet<string>(StringComparer.Ordinal);
-        var localSongKeys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var song in localSongs.Cast<XElement>())
-        {
-            var id = song.Attribute("id")?.Value;
-            if (!string.IsNullOrEmpty(id))
-            {
-                localSongIds.Add(id);
-            }
-            var key = BuildSongKey(song.Attribute("artist")?.Value, song.Attribute("title")?.Value);
-            if (key != null)
-            {
-                localSongKeys.Add(key);
-            }
-        }
-
-        var localAlbumKeys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var album in localAlbums.Cast<XElement>())
-        {
-            var artist = album.Attribute("artist")?.Value;
-            // Album titles in Subsonic XML live on the "name" attribute (sometimes "title").
-            var title = album.Attribute("name")?.Value ?? album.Attribute("title")?.Value;
-            var key = BuildAlbumKey(artist, title);
-            if (key != null)
-            {
-                localAlbumKeys.Add(key);
-            }
-        }
-
-        var localArtistNamesXml = new HashSet<string>(StringComparer.Ordinal);
-        var mergedArtists = new List<object>();
-
-        foreach (var artist in localArtists.Cast<XElement>())
-        {
-            var name = artist.Attribute("name")?.Value;
+            var name = LocalField(artist, "name");
             if (!string.IsNullOrEmpty(name))
             {
-                localArtistNamesXml.Add(StringNormalizer.CreateArtistComparisonKey(name));
+                localArtistKeys.Add(StringNormalizer.CreateArtistComparisonKey(name));
             }
-            artist.Name = ns + "artist";
-            mergedArtists.Add(artist);
         }
 
+        // Artists are left out here: the fork matches them case-sensitively, which keeps
+        // artists upstream's case-insensitive check would drop, so they are appended below.
+        var filtered = new SearchResult
+        {
+            Songs = externalResult.Songs
+                .Where(s => !ShouldDropExternalSong(s, mappings, localSongIds, localSongKeys))
+                .ToList(),
+            Albums = externalResult.Albums
+                .Where(a => !ShouldDropExternalAlbum(a, localAlbumKeys))
+                .ToList(),
+        };
+
+        // Providers (notably Qobuz) sometimes return several near-duplicate yearly snapshots
+        // of the same curated list; collapse those before they are emitted as albums.
+        var merged = MergeSearchResults(
+            localSongs,
+            localAlbums,
+            localArtists,
+            filtered,
+            DeduplicateExternalPlaylists(externalPlaylists).ToList(),
+            isJson);
+
+        var ns = XNamespace.Get("http://subsonic.org/restapi");
         foreach (var artist in externalResult.Artists)
         {
-            if (!localArtistNamesXml.Contains(StringNormalizer.CreateArtistComparisonKey(artist.Name)))
+            if (!localArtistKeys.Contains(StringNormalizer.CreateArtistComparisonKey(artist.Name)))
             {
-                mergedArtists.Add(_responseBuilder.ConvertArtistToXml(artist, ns));
+                merged.MergedArtists.Add(isJson
+                    ? _responseBuilder.ConvertArtistToJson(artist)
+                    : _responseBuilder.ConvertArtistToXml(artist, ns));
             }
         }
 
-        // Albums
-        var mergedAlbums = new List<object>();
-        foreach (var album in localAlbums.Cast<XElement>())
-        {
-            album.Name = ns + "album";
-            mergedAlbums.Add(album);
-        }
-        foreach (var album in externalResult.Albums)
-        {
-            if (ShouldDropExternalAlbum(album, localAlbumKeys))
-            {
-                continue;
-            }
-            mergedAlbums.Add(_responseBuilder.ConvertAlbumToXml(album, ns));
-        }
-        foreach (var playlist in DeduplicateExternalPlaylists(externalPlaylists))
-        {
-            mergedAlbums.Add(ConvertPlaylistToAlbumXml(playlist, ns));
-        }
-
-        // Songs
-        var mergedSongs = new List<object>();
-        foreach (var song in localSongs.Cast<XElement>())
-        {
-            song.Name = ns + "song";
-            mergedSongs.Add(song);
-        }
-        foreach (var song in externalResult.Songs)
-        {
-            if (ShouldDropExternalSong(song, mappings, localSongIds, localSongKeys))
-            {
-                continue;
-            }
-            mergedSongs.Add(_responseBuilder.ConvertSongToXml(song, ns));
-        }
-
-        return (mergedSongs, mergedAlbums, mergedArtists);
+        return merged;
     }
+
+    /// <summary>
+    /// Reads a field from a local search3 entry: a JSON dictionary or an XML element.
+    /// </summary>
+    private static string? LocalField(object entry, string name) => entry switch
+    {
+        Dictionary<string, object> dict => dict.TryGetValue(name, out var value) ? value?.ToString() : null,
+        XElement element => element.Attribute(name)?.Value,
+        _ => null,
+    };
 
     /// <summary>
     /// Decides whether an external <paramref name="song"/> already has a local
