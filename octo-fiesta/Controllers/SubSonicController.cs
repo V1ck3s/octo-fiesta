@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
 using System.Text;
 using System.Text.Json;
@@ -133,7 +133,9 @@ public partial class SubsonicController : ControllerBase
 
         var subsonicResult = await subsonicTask;
         var externalResult = await externalTask;
-        var playlistResult = await playlistTask;
+        // A provider that pads playlist search rather than returning nothing puts
+        // unrelated entries in the album section. Keep only what answers the query.
+        var playlistResult = PlaylistRelevanceFilter.Apply(cleanQuery, await playlistTask);
         var mappings = await mappingsTask;
 
         return MergeSearchResults(subsonicResult, externalResult, playlistResult, mappings, format);
@@ -635,6 +637,133 @@ public partial class SubsonicController : ControllerBase
         return longer.Length > shorter.Length
             && longer.StartsWith(shorter, StringComparison.Ordinal)
             && !char.IsLetterOrDigit(longer[shorter.Length]);
+    }
+
+    /// <summary>
+    /// Merges the provider catalogue into an artist's top songs.
+    /// </summary>
+    /// <remarks>
+    /// Navidrome answers getTopSongs by intersecting the Last.fm ranking with the
+    /// local library, so a sparse library returns one or two titles even when the
+    /// provider carries the whole discography. Without this route the call fell
+    /// through to the catch-all proxy and external results never reached the client.
+    /// </remarks>
+    [HttpGet, HttpPost]
+    [Route("rest/getTopSongs")]
+    [Route("rest/getTopSongs.view")]
+    public async Task<IActionResult> GetTopSongs()
+    {
+        var parameters = await ExtractAllParameters();
+        var artistName = parameters.GetValueOrDefault("artist", "");
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (string.IsNullOrWhiteSpace(artistName))
+        {
+            return _responseBuilder.CreateError(format, 10, "Missing artist parameter");
+        }
+
+        var count = int.TryParse(parameters.GetValueOrDefault("count", "50"), out var parsedCount) && parsedCount > 0
+            ? parsedCount
+            : 50;
+
+        var navidromeTask = _proxyService.RelaySafeAsync("rest/getTopSongs", parameters);
+        var externalTask = SearchArtistCatalogSafeAsync(artistName, count);
+
+        await Task.WhenAll(navidromeTask, externalTask);
+
+        var navidromeResult = await navidromeTask;
+        var externalSongs = await externalTask;
+
+        if (!navidromeResult.Success || navidromeResult.Body == null)
+        {
+            return _responseBuilder.CreateResponse(format, "topSongs", new { });
+        }
+
+        // The merge below only builds JSON, so XML clients keep the untouched
+        // relay. Same contract as getArtist.
+        var isJson = format == "json" || navidromeResult.ContentType?.Contains("json") == true;
+        if (!isJson)
+        {
+            return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/xml");
+        }
+
+        var mergedSongs = new List<object>();
+        var seenTitles = new HashSet<string>();
+
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(Encoding.UTF8.GetString(navidromeResult.Body));
+            if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
+                response.TryGetProperty("topSongs", out var topSongs) &&
+                topSongs.TryGetProperty("song", out var songs) &&
+                songs.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var song in songs.EnumerateArray())
+                {
+                    mergedSongs.Add(_responseBuilder.ConvertSubsonicJsonElement(song, true));
+
+                    if (song.TryGetProperty("title", out var title))
+                    {
+                        seenTitles.Add(StringNormalizer.CreateComparisonKey(title.GetString()));
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
+        }
+
+        foreach (var song in externalSongs)
+        {
+            if (mergedSongs.Count >= count)
+            {
+                break;
+            }
+
+            if (!IsSameArtistOrCollaboration(song.Artist, artistName))
+            {
+                continue;
+            }
+
+            if (!seenTitles.Add(StringNormalizer.CreateComparisonKey(song.Title)))
+            {
+                continue;
+            }
+
+            mergedSongs.Add(_responseBuilder.ConvertSongToJson(song));
+        }
+
+        if (mergedSongs.Count > count)
+        {
+            mergedSongs = mergedSongs.Take(count).ToList();
+        }
+
+        return _responseBuilder.CreateJsonResponse(new
+        {
+            status = "ok",
+            version = "1.16.1",
+            topSongs = new { song = mergedSongs }
+        });
+    }
+
+    /// <summary>
+    /// Looks the artist up on the provider. A provider outage must not cost the
+    /// user the local songs, so failures degrade to an empty list.
+    /// </summary>
+    private async Task<List<Song>> SearchArtistCatalogSafeAsync(string artistName, int count)
+    {
+        try
+        {
+            // Ask wide: the provider ranks by relevance to the query, which mixes in
+            // namesakes, and IsSameArtistOrCollaboration filters those out afterwards.
+            return await _metadataService.SearchSongsAsync(artistName, Math.Max(count, 20) * 2);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "getTopSongs: provider lookup failed for {Artist}", artistName);
+            return new List<Song>();
+        }
     }
 
     /// <summary>
