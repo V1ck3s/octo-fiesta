@@ -186,47 +186,49 @@ public abstract class BaseDownloadService : IDownloadService
             return;
         }
 
-        var key = $"{externalProvider}:{externalId}";
+        _ = Task.Run(() => UpgradeQualityAsync(externalId, triggerAlbumDownload: true));
+    }
+
+    private async Task UpgradeQualityAsync(string externalId, bool triggerAlbumDownload, CancellationToken cancellationToken = default)
+    {
+        var key = $"{ProviderName}:{externalId}";
         if (!_pendingQualityUpgrades.TryAdd(key, 0))
         {
             return;
         }
 
-        _ = Task.Run(async () =>
+        // The provider may simply not offer the target quality. In that case the key is
+        // left in place so later plays stop re-downloading the same track for nothing.
+        var upgradeUnavailable = false;
+        try
         {
-            // The provider may simply not offer the target quality. In that case the key is
-            // left in place so later plays stop re-downloading the same track for nothing.
-            var upgradeUnavailable = false;
-            try
+            var mapping = await LocalLibraryService.GetMappingForExternalSongAsync(ProviderName, externalId);
+            if (mapping == null || !IsQualityUpgradeAvailable(mapping.DownloadedQuality))
             {
-                var mapping = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
-                if (mapping == null || !IsQualityUpgradeAvailable(mapping.DownloadedQuality))
-                {
-                    return;
-                }
+                return;
+            }
 
-                await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: false);
+            await DownloadSongInternalAsync(ProviderName, externalId, triggerAlbumDownload, cancellationToken: cancellationToken);
 
-                var upgraded = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
-                upgradeUnavailable = upgraded != null && IsQualityUpgradeAvailable(upgraded.DownloadedQuality);
-                if (upgradeUnavailable)
-                {
-                    Logger.LogInformation("{Provider}:{ExternalId} is not available above {Quality}, giving up on the upgrade",
-                        externalProvider, externalId, upgraded!.DownloadedQuality ?? "unknown");
-                }
-            }
-            catch (Exception ex)
+            var upgraded = await LocalLibraryService.GetMappingForExternalSongAsync(ProviderName, externalId);
+            upgradeUnavailable = upgraded != null && IsQualityUpgradeAvailable(upgraded.DownloadedQuality);
+            if (upgradeUnavailable)
             {
-                Logger.LogError(ex, "Quality upgrade failed for {Provider}:{ExternalId}", externalProvider, externalId);
+                Logger.LogInformation("{Provider}:{ExternalId} is not available above {Quality}, giving up on the upgrade",
+                    ProviderName, externalId, upgraded!.DownloadedQuality ?? "unknown");
             }
-            finally
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Quality upgrade failed for {Provider}:{ExternalId}", ProviderName, externalId);
+        }
+        finally
+        {
+            if (!upgradeUnavailable)
             {
-                if (!upgradeUnavailable)
-                {
-                    _pendingQualityUpgrades.TryRemove(key, out _);
-                }
+                _pendingQualityUpgrades.TryRemove(key, out _);
             }
-        });
+        }
     }
 
     public void DownloadFullAlbumInBackground(string externalProvider, string albumExternalId)
@@ -976,6 +978,7 @@ public abstract class BaseDownloadService : IDownloadService
                 if (existingPath != null && IOFile.Exists(existingPath))
                 {
                     Logger.LogDebug("Track {TrackId} already in library, skipping", track.ExternalId);
+                    await UpgradeQualityAsync(track.ExternalId!, triggerAlbumDownload: false, cancellationToken);
                     continue;
                 }
 
