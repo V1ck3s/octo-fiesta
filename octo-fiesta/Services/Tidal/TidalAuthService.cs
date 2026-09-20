@@ -8,20 +8,26 @@ using octo_fiesta.Models.Tidal;
 namespace octo_fiesta.Services.Tidal;
 
 /// <summary>
-/// Owns the Tidal OAuth 2.0 credentials: device authorization, token refresh and the
-/// country code every catalogue call needs. Tokens come from the token store, or from
+/// Owns the Tidal OAuth 2.0 credentials: the login, PKCE or device authorization depending
+/// on the client, the token refresh and the country code every catalogue call needs. Tokens come from the token store, or from
 /// configuration when they are injected as secrets, and every renewal is written back.
 /// </summary>
 public class TidalAuthService
 {
-    private const string Scope = "r_usr+w_usr+w_sub";
+    /// <summary>
+    /// Scope of the device authorization flow. PKCE clients are granted a narrower one,
+    /// see <see cref="TidalPkce.Scope"/>.
+    /// </summary>
+    private const string DeviceScope = "r_usr+w_usr+w_sub";
 
     /// <summary>
-    /// Built-in device client. Used when the configuration leaves the client blank, which is
+    /// Built-in client. Used when the configuration leaves the client blank, which is
     /// the normal case: it identifies the application, not the user, so it ships working.
+    /// This one is public, so it carries no secret and logs in with PKCE. It is also the
+    /// only client entitled to the LOSSLESS tier, the limited input ones cap at HIGH and
+    /// serve AAC where FLAC was asked for.
     /// </summary>
-    private const string DefaultClientId = "fX2JxdmntZWK0ixT";
-    private const string DefaultClientSecret = "1Nm5AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=";
+    private const string DefaultClientId = "49YxDN9a2aFV6RTG";
 
     public const string AuthBaseUrl = "https://auth.tidal.com/v1/oauth2";
 
@@ -43,7 +49,12 @@ public class TidalAuthService
 
     private readonly TidalTokens _tokens;
     private readonly string _clientId;
-    private readonly string _clientSecret;
+
+    /// <summary>
+    /// Null for a public client, which is the default. Only a limited input device client
+    /// has a secret, and having one is what makes the device flow usable.
+    /// </summary>
+    private readonly string? _clientSecret;
 
     public TidalAuthService(
         IHttpClientFactory httpClientFactory,
@@ -57,7 +68,7 @@ public class TidalAuthService
 
         var tidalSettings = settings.Value;
         _clientId = Coalesce(tidalSettings.ClientId, DefaultClientId)!;
-        _clientSecret = Coalesce(tidalSettings.ClientSecret, DefaultClientSecret)!;
+        _clientSecret = Coalesce(tidalSettings.ClientSecret, null);
 
         var stored = tokenStore.Load();
 
@@ -94,6 +105,12 @@ public class TidalAuthService
     /// </summary>
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(_tokens.RefreshToken) || !string.IsNullOrWhiteSpace(_tokens.AccessToken);
+
+    /// <summary>
+    /// Which login the configured client accepts. A secret means a limited input device
+    /// client and the device flow, no secret means a public client and PKCE.
+    /// </summary>
+    public bool UsesDeviceAuthorization => _clientSecret is not null;
 
     public string? UserId => _tokens.UserId;
 
@@ -225,6 +242,50 @@ public class TidalAuthService
         return JsonSerializer.Deserialize<TidalSubscriptionResponse>(json);
     }
 
+    #region PKCE authorization
+
+    /// <summary>
+    /// Address the user opens in a browser to log in. Tidal's login page sits behind a bot
+    /// check, so it can only be driven by a real browser, never from here.
+    /// </summary>
+    public string BuildAuthorizationUrl(TidalPkceChallenge challenge)
+        => TidalPkce.BuildAuthorizationUrl(_clientId, challenge);
+
+    /// <summary>
+    /// Exchanges the code carried by the redirect for tokens and stores them.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No code in the address, or Tidal refused it.</exception>
+    public async Task<TidalTokens> CompleteAuthorizationAsync(
+        string? redirectedUrl, TidalPkceChallenge challenge, CancellationToken cancellationToken = default)
+    {
+        var code = TidalPkce.ExtractAuthorizationCode(redirectedUrl)
+                   ?? throw new InvalidOperationException(
+                       $"No authorization code in what was pasted. It has to be the "
+                       + $"{TidalPkce.RedirectUri}?code=... address found in the browser network log, "
+                       + "or the value of its code parameter.");
+
+        var form = NewTokenForm();
+        form["grant_type"] = "authorization_code";
+        form["code"] = code;
+        form["redirect_uri"] = TidalPkce.RedirectUri;
+        form["code_verifier"] = challenge.CodeVerifier;
+        form["client_unique_key"] = challenge.ClientUniqueKey;
+
+        var (tokenResponse, error) = await RequestTokenAsync(form, cancellationToken);
+        if (tokenResponse is null)
+        {
+            throw new InvalidOperationException(
+                $"Tidal refused the authorization code: {error?.Error ?? "unknown error"} "
+                + $"({error?.ErrorDescription ?? "no description"}). "
+                + "A code is single use and expires quickly, so run the helper again for a fresh one.");
+        }
+
+        await ApplyTokenResponseAsync(tokenResponse, cancellationToken);
+        return _tokens;
+    }
+
+    #endregion
+
     #region Device authorization
 
     /// <summary>
@@ -236,7 +297,7 @@ public class TidalAuthService
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["client_id"] = _clientId,
-            ["scope"] = Scope
+            ["scope"] = DeviceScope
         });
 
         using var response = await _httpClient.PostAsync($"{AuthBaseUrl}/device_authorization", content, cancellationToken);
@@ -266,14 +327,11 @@ public class TidalAuthService
         {
             await Task.Delay(interval, cancellationToken);
 
-            var (tokenResponse, error) = await RequestTokenAsync(new Dictionary<string, string>
-            {
-                ["client_id"] = _clientId,
-                ["client_secret"] = _clientSecret,
-                ["device_code"] = authorization.DeviceCode ?? "",
-                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
-                ["scope"] = Scope
-            }, cancellationToken);
+            var form = NewTokenForm();
+            form["device_code"] = authorization.DeviceCode ?? "";
+            form["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code";
+
+            var (tokenResponse, error) = await RequestTokenAsync(form, cancellationToken);
 
             if (tokenResponse is not null)
             {
@@ -322,14 +380,11 @@ public class TidalAuthService
                 "No Tidal refresh token available. Run the login helper with --tidal-login.");
         }
 
-        var (tokenResponse, error) = await RequestTokenAsync(new Dictionary<string, string>
-        {
-            ["client_id"] = _clientId,
-            ["client_secret"] = _clientSecret,
-            ["refresh_token"] = _tokens.RefreshToken!,
-            ["grant_type"] = "refresh_token",
-            ["scope"] = Scope
-        }, cancellationToken);
+        var form = NewTokenForm();
+        form["refresh_token"] = _tokens.RefreshToken!;
+        form["grant_type"] = "refresh_token";
+
+        var (tokenResponse, error) = await RequestTokenAsync(form, cancellationToken);
 
         if (tokenResponse is null)
         {
@@ -341,6 +396,26 @@ public class TidalAuthService
 
         _logger.LogInformation("Renewed the Tidal access token, valid for {Seconds}s", tokenResponse.ExpiresIn);
         await ApplyTokenResponseAsync(tokenResponse, cancellationToken);
+    }
+
+    /// <summary>
+    /// Fields every grant carries. A public client has no secret to send, and the scope
+    /// follows the client rather than the grant.
+    /// </summary>
+    private Dictionary<string, string> NewTokenForm()
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["client_id"] = _clientId,
+            ["scope"] = UsesDeviceAuthorization ? DeviceScope : TidalPkce.Scope
+        };
+
+        if (_clientSecret is not null)
+        {
+            form["client_secret"] = _clientSecret;
+        }
+
+        return form;
     }
 
     /// <summary>

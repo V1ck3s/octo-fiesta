@@ -59,14 +59,16 @@ services:
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
       
       # ===== TIDAL SETTINGS =====
-      # Tokens come from the OAuth device flow: docker compose run --rm octo-fiesta --tidal-login
+      # Tokens come from the OAuth login: docker compose run --rm octo-fiesta --tidal-login
       # Path of the token store. Keep it on a mounted volume so tokens survive a recreate.
       - Tidal__TokenStore=${TIDAL_TOKEN_STORE:-/config/tidal-tokens.json}
       # Preferred audio quality (optional, defaults to the best your subscription allows)
       # HI_RES_LOSSLESS (FLAC 24-bit), LOSSLESS (FLAC 16-bit), HIGH (AAC 320kbps), LOW (AAC 96kbps)
       - Tidal__Quality=${TIDAL_QUALITY:-}
-      # Device client octo-fiesta authenticates as (optional, defaults to a working pair).
+      # Client octo-fiesta authenticates as (optional, defaults to a working one).
       # Identifies the application, not your account. Override if Tidal retires the default.
+      # A secret is only needed for a limited input device client, and setting one switches
+      # the login helper to the device authorization flow.
       - Tidal__ClientId=${TIDAL_CLIENT_ID:-}
       - Tidal__ClientSecret=${TIDAL_CLIENT_SECRET:-}
       # Tokens obtained elsewhere (optional), taking precedence over the token store
