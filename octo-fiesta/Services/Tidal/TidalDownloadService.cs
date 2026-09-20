@@ -74,7 +74,7 @@ public class TidalDownloadService : BaseDownloadService
     protected override string? ExtractExternalIdFromAlbumId(string albumId)
         => albumId.StartsWith(AlbumIdPrefix) ? albumId[AlbumIdPrefix.Length..] : null;
 
-    protected override string? GetTargetQuality() => _preferredQuality;
+    protected override string? GetTargetQuality() => TidalQuality.ToQualityLabel(_preferredQuality);
 
     protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
@@ -184,7 +184,28 @@ public class TidalDownloadService : BaseDownloadService
 
         // Tidal may quietly serve a lower tier than the one asked for, so report what it
         // actually delivered rather than what was requested.
-        return (manifest, playbackInfo.AudioQuality ?? quality);
+        var delivered = playbackInfo.AudioQuality ?? quality;
+        WarnOnLossyFallback(trackId, quality, delivered);
+
+        return (manifest, delivered);
+    }
+
+    /// <summary>
+    /// A refused tier comes back as a lower one rather than as an error, so a lossless
+    /// request answered in AAC is completely silent. Dropping from 24 bit to 16 bit is
+    /// ordinary catalogue variation and stays quiet, losing FLAC altogether does not.
+    /// </summary>
+    private void WarnOnLossyFallback(string trackId, string requested, string delivered)
+    {
+        if (!TidalQuality.IsLossless(requested) || TidalQuality.IsLossless(delivered))
+        {
+            return;
+        }
+
+        Logger.LogWarning(
+            "Tidal served {Delivered} for track {TrackId} although {Requested} was asked for. "
+            + "Either the track has no lossless stream, or the configured client is not entitled to one",
+            delivered, trackId, requested);
     }
 
     private async Task<TidalPlaybackInfo?> GetPlaybackInfoAsync(
