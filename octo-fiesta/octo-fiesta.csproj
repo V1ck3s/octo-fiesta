@@ -9,9 +9,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.4" />
-        <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.4" />
+        <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.20" />
+        <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.3" />
         <PackageReference Include="TagLibSharp" Version="2.3.0" />
     </ItemGroup>
 
