@@ -37,17 +37,19 @@ public class TidalSettings
     public string? CountryCode { get; set; }
 
     /// <summary>
-    /// Client id of the Tidal device client the provider authenticates as. This identifies
+    /// Client id of the Tidal client the provider authenticates as. This identifies
     /// the application, not your account, so every install shares it and logging in does not
-    /// change it. Tidal retires device clients over time, and a retired one still signs in
-    /// and reads the catalogue while refusing playback and token renewal. Override this pair
+    /// change it. Tidal retires clients over time, and a retired one still signs in
+    /// and reads the catalogue while refusing playback and token renewal. Override this
     /// to switch to a working client without waiting for a new release.
     /// Leave empty to use the built-in default.
     /// </summary>
     public string? ClientId { get; set; }
 
     /// <summary>
-    /// Client secret matching <see cref="ClientId"/>. Leave empty to use the built-in default.
+    /// Client secret matching <see cref="ClientId"/>. Only a limited input device client has
+    /// one, and setting it here is what selects the device authorization login. Leave empty,
+    /// as the built-in client requires, to log in with PKCE from a browser instead.
     /// </summary>
     public string? ClientSecret { get; set; }
 

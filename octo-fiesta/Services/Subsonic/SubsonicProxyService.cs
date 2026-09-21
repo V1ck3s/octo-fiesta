@@ -71,10 +71,21 @@ public class SubsonicProxyService
     };
 
     /// <summary>
+    /// Response headers that must not be copied back to the client. Hop-by-hop headers, headers
+    /// describing the upstream body that no longer match the buffered one, and CORS headers that
+    /// our own middleware already emits.
+    /// </summary>
+    private static readonly HashSet<string> ExcludedResponseHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Connection", "Keep-Alive", "Transfer-Encoding", "TE", "Trailer", "Upgrade",
+        "Proxy-Authenticate", "Date", "Server", "Vary"
+    };
+
+    /// <summary>
     /// Relays a request to the Subsonic server, preserving HTTP method, body, and headers.
     /// This provides true transparent proxying for better client compatibility.
     /// </summary>
-    public async Task<(byte[] Body, string? ContentType, int StatusCode)> RelayRequestAsync(
+    public async Task<(byte[] Body, string? ContentType, int StatusCode, Dictionary<string, string[]> Headers)> RelayRequestAsync(
         string endpoint,
         HttpRequest incomingRequest,
         CancellationToken cancellationToken = default)
@@ -126,8 +137,24 @@ public class SubsonicProxyService
         
         var body = await response.Content.ReadAsByteArrayAsync(cancellationToken);
         var contentType = response.Content.Headers.ContentType?.ToString();
-        
-        return (body, contentType, (int)response.StatusCode);
+
+        // Navidrome clients (Feishin in native mode) read pagination and session state from
+        // response headers such as X-Total-Count and X-Nd-Authorization, so they must survive
+        // the relay.
+        var headers = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in response.Headers.Concat(response.Content.Headers))
+        {
+            if (ExcludedResponseHeaders.Contains(header.Key) ||
+                header.Key.StartsWith("Content-", StringComparison.OrdinalIgnoreCase) ||
+                header.Key.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            headers[header.Key] = header.Value.ToArray();
+        }
+
+        return (body, contentType, (int)response.StatusCode, headers);
     }
 
     private static readonly string[] StreamingRequiredHeaders =

@@ -1,3 +1,4 @@
+using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Tidal;
 
 namespace octo_fiesta.Tests;
@@ -84,5 +85,37 @@ public class TidalQualityTests
         string requested, string mimeType, string codecs, string expected)
     {
         Assert.Equal(expected, TidalQuality.GetDownloadedQuality(requested, mimeType, codecs));
+    }
+
+    [Theory]
+    [InlineData("HI_RES_LOSSLESS", true)]
+    [InlineData("HI_RES", true)]
+    [InlineData("LOSSLESS", true)]
+    [InlineData("HIGH", false)]
+    [InlineData("LOW", false)]
+    public void IsLossless_SeparatesFlacTiersFromAacOnes(string quality, bool expected)
+    {
+        Assert.Equal(expected, TidalQuality.IsLossless(quality));
+    }
+
+    [Theory]
+    [InlineData("HI_RES_LOSSLESS", "FLAC_24")]
+    [InlineData("HI_RES", "FLAC_24")]
+    [InlineData("LOSSLESS", "FLAC_16")]
+    [InlineData("HIGH", "AAC_320")]
+    [InlineData("LOW", "AAC_96")]
+    public void ToQualityLabel_SpeaksTheVocabularyOfTheUpgradeCheck(string quality, string expected)
+    {
+        Assert.Equal(expected, TidalQuality.ToQualityLabel(quality));
+    }
+
+    [Theory]
+    [InlineData("HI_RES_LOSSLESS", "AAC_320")]
+    [InlineData("LOSSLESS", "AAC_320")]
+    [InlineData("HIGH", "AAC_96")]
+    public void ToQualityLabel_RanksAboveALowerTier(string target, string downloaded)
+    {
+        // A target the ranking does not know scores zero and silently disables upgrades.
+        Assert.True(QualityHelper.ShouldUpgrade(downloaded, TidalQuality.ToQualityLabel(target)));
     }
 }

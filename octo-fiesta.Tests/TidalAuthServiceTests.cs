@@ -153,7 +153,8 @@ public class TidalAuthServiceTests : IDisposable
     [Fact]
     public async Task BlankClient_FallsBackToTheBuiltInDefault()
     {
-        // The normal case: nothing configured. The token calls must still carry a client.
+        // The normal case: nothing configured. The token calls must still carry a client,
+        // and the built-in one is public, so there is no secret to send.
         var handler = new TidalStubHandler().Respond("oauth2/token", TidalTestFactory.TokenResponse);
         var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings
         {
@@ -165,8 +166,22 @@ public class TidalAuthServiceTests : IDisposable
         await auth.GetAccessTokenAsync();
 
         var body = handler.Bodies.Single();
-        Assert.Contains("client_id=fX2JxdmntZWK0ixT", body);
-        Assert.Contains("client_secret=", body);
+        Assert.Contains("client_id=49YxDN9a2aFV6RTG", body);
+        Assert.DoesNotContain("client_secret", body);
+        Assert.False(auth.UsesDeviceAuthorization);
+    }
+
+    [Fact]
+    public void ConfiguredSecret_SelectsTheDeviceFlow()
+    {
+        // Only a limited input device client has a secret, and that is what it is for.
+        var auth = TidalTestFactory.AuthService(new TidalStubHandler(), _storePath, new TidalSettings
+        {
+            ClientId = "myClientId",
+            ClientSecret = "myClientSecret"
+        });
+
+        Assert.True(auth.UsesDeviceAuthorization);
     }
 
     [Fact]
@@ -317,13 +332,87 @@ public class TidalAuthServiceTests : IDisposable
     {
         // Tidal's CDN rejects token calls authenticated with an HTTP Basic header.
         var handler = new TidalStubHandler().Respond("oauth2/token", TidalTestFactory.TokenResponse);
-        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings { RefreshToken = "refresh" });
+        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings
+        {
+            RefreshToken = "refresh",
+            ClientId = "myClientId",
+            ClientSecret = "myClientSecret"
+        });
 
         await auth.GetAccessTokenAsync();
 
         Assert.Null(handler.Requests.Single().Headers.Authorization);
-        Assert.Contains("client_secret=", handler.Bodies.Single());
+        Assert.Contains("client_secret=myClientSecret", handler.Bodies.Single());
         Assert.Contains("grant_type=refresh_token", handler.Bodies.Single());
+    }
+
+    [Fact]
+    public async Task RefreshRequest_OfAPublicClient_CarriesNoSecret()
+    {
+        // The public client renews on the client id alone, which is what makes the PKCE
+        // login durable rather than a one-off.
+        var handler = new TidalStubHandler().Respond("oauth2/token", TidalTestFactory.TokenResponse);
+        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings { RefreshToken = "refresh" });
+
+        await auth.GetAccessTokenAsync();
+
+        var body = handler.Bodies.Single();
+        Assert.DoesNotContain("client_secret", body);
+        Assert.Contains("grant_type=refresh_token", body);
+    }
+
+    #endregion
+
+    #region PKCE authorization
+
+    [Fact]
+    public async Task CompleteAuthorizationAsync_ExchangesTheCodeAndPersistsTheTokens()
+    {
+        var handler = new TidalStubHandler().Respond("oauth2/token", TidalTestFactory.TokenResponse);
+        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings());
+        var challenge = TidalPkce.CreateChallenge();
+
+        var tokens = await auth.CompleteAuthorizationAsync(
+            "https://tidal.com/login/auth?code=the-code&state=na", challenge);
+
+        var body = handler.Bodies.Single();
+        Assert.Contains("grant_type=authorization_code", body);
+        Assert.Contains("code=the-code", body);
+        Assert.Contains($"code_verifier={challenge.CodeVerifier}", body);
+        Assert.Contains($"client_unique_key={challenge.ClientUniqueKey}", body);
+        Assert.DoesNotContain("client_secret", body);
+
+        Assert.Equal("fresh-access-token", tokens.AccessToken);
+        Assert.Equal("fresh-access-token", TidalTestFactory.TokenStore(_storePath).Load()!.AccessToken);
+    }
+
+    [Fact]
+    public async Task CompleteAuthorizationAsync_WithoutACode_SaysWhatToPaste()
+    {
+        var handler = new TidalStubHandler();
+        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            auth.CompleteAuthorizationAsync("https://tidal.com/login/auth", TidalPkce.CreateChallenge()));
+
+        Assert.Contains("code=", exception.Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task CompleteAuthorizationAsync_WhenTidalRefusesTheCode_ExplainsHowToRecover()
+    {
+        var handler = new TidalStubHandler().Respond("oauth2/token",
+            """{"error":"invalid_grant","error_description":"Authorization code is invalid","status":400,"sub_status":11003}""",
+            HttpStatusCode.BadRequest);
+
+        var auth = TidalTestFactory.AuthService(handler, _storePath, new TidalSettings());
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            auth.CompleteAuthorizationAsync("https://tidal.com/login/auth?code=stale", TidalPkce.CreateChallenge()));
+
+        Assert.Contains("invalid_grant", exception.Message);
+        Assert.Contains("single use", exception.Message);
     }
 
     #endregion

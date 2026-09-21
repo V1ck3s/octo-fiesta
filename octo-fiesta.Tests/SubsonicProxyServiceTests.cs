@@ -420,4 +420,64 @@ public class SubsonicProxyServiceTests
         var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, objectResult.StatusCode);
     }
+
+    [Fact]
+    public async Task RelayRequestAsync_ForwardsNavidromeResponseHeaders()
+    {
+        // Arrange
+        var responseMessage = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent("[]"u8.ToArray())
+        };
+        responseMessage.Headers.TryAddWithoutValidation("X-Total-Count", "2076");
+        responseMessage.Headers.TryAddWithoutValidation("X-Nd-Authorization", "Bearer jwt");
+
+        _mockHttpMessageHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(responseMessage);
+
+        var request = new DefaultHttpContext().Request;
+        request.Method = "GET";
+
+        // Act
+        var result = await _service.RelayRequestAsync("api/artist", request);
+
+        // Assert
+        Assert.Equal(new[] { "2076" }, result.Headers["X-Total-Count"]);
+        Assert.Equal(new[] { "Bearer jwt" }, result.Headers["X-Nd-Authorization"]);
+    }
+
+    [Fact]
+    public async Task RelayRequestAsync_DropsBodyAndCorsResponseHeaders()
+    {
+        // Arrange
+        var responseMessage = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent("[]"u8.ToArray())
+        };
+        responseMessage.Content.Headers.ContentType =
+            new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        responseMessage.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", "http://upstream");
+        responseMessage.Headers.TryAddWithoutValidation("Transfer-Encoding", "chunked");
+
+        _mockHttpMessageHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(responseMessage);
+
+        var request = new DefaultHttpContext().Request;
+        request.Method = "GET";
+
+        // Act
+        var result = await _service.RelayRequestAsync("api/artist", request);
+
+        // Assert
+        Assert.DoesNotContain("Access-Control-Allow-Origin", result.Headers.Keys);
+        Assert.DoesNotContain("Transfer-Encoding", result.Headers.Keys);
+        Assert.DoesNotContain("Content-Length", result.Headers.Keys);
+        Assert.DoesNotContain("Content-Type", result.Headers.Keys);
+    }
 }

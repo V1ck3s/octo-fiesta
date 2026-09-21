@@ -58,6 +58,25 @@ public static class TidalQuality
     }
 
     /// <summary>
+    /// True when the tier is delivered as FLAC rather than AAC.
+    /// </summary>
+    public static bool IsLossless(string? quality)
+        => Normalize(quality) is HiResLossless or HiRes or Lossless;
+
+    /// <summary>
+    /// Tier translated to the vocabulary <see cref="QualityHelper"/> ranks. A download
+    /// stores the delivered label, so the target has to speak the same language for the
+    /// upgrade check to compare anything at all.
+    /// </summary>
+    public static string ToQualityLabel(string? quality) => Normalize(quality) switch
+    {
+        HiResLossless or HiRes => "FLAC_24",
+        Lossless => "FLAC_16",
+        Low => "AAC_96",
+        _ => "AAC_320"
+    };
+
+    /// <summary>
     /// Next tier down, or null when already at the lowest one.
     /// HI_RES is an alias of the legacy MQA tier and falls back to plain LOSSLESS.
     /// </summary>

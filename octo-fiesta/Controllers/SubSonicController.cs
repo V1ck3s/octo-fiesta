@@ -1762,7 +1762,12 @@ public partial class SubsonicController : ControllerBase
             {
                 return StatusCode(result.StatusCode);
             }
-            
+
+            foreach (var header in result.Headers)
+            {
+                Response.Headers[header.Key] = header.Value;
+            }
+
             var contentType = result.ContentType ?? "application/xml; charset=utf-8";
             return File(result.Body, contentType);
         }
