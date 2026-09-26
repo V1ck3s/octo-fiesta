@@ -1,3 +1,4 @@
+using octo_fiesta.Services.Common;
 using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
 using System.Text.Json;
@@ -228,7 +229,7 @@ public class SubsonicResponseBuilder
         var totalDuration = tracks.Sum(s => s.Duration ?? 0);
         
         // Build artist name with emoji and curator
-        var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
+        var artistName = $"🎵 {ProviderNames.Display(playlist.Provider)}";
         if (!string.IsNullOrEmpty(playlist.CuratorName))
         {
             artistName += $" {playlist.CuratorName}";
