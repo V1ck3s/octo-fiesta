@@ -6,7 +6,7 @@ using octo_fiesta.Services.Common;
 namespace octo_fiesta.Services.AppleMusic;
 
 /// <summary>
-/// Maps ALACarte's Apple Music catalog records onto octo-fiesta's domain models.
+/// Maps alacarte's Apple Music catalog records onto octo-fiesta's domain models.
 /// </summary>
 public static class AppleMusicMapper
 {
@@ -112,7 +112,7 @@ public static class AppleMusicMapper
 }
 
 /// <summary>
-/// Apple Music metadata through ALACarte's integration API.
+/// Apple Music metadata through alacarte's integration API.
 /// </summary>
 public class AppleMusicMetadataService : IMusicMetadataService
 {
@@ -125,7 +125,7 @@ public class AppleMusicMetadataService : IMusicMetadataService
 
     private static bool IsOurs(string externalProvider) => externalProvider == AppleMusicMapper.Provider;
 
-    // Songs ALACarte already has in the library come back from Navidrome as
+    // Songs alacarte already has in the library come back from Navidrome as
     // local results, so they are left out here instead of showing twice.
     private static List<Song> NewSongs(IEnumerable<AlacarteSong>? songs) =>
         songs?.Where(s => !s.InLibrary).Select(s => AppleMusicMapper.ToSong(s)).ToList() ?? new();

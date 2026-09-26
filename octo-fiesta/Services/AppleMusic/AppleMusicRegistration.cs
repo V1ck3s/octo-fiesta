@@ -6,7 +6,7 @@ namespace octo_fiesta.Services.AppleMusic;
 public static class AppleMusicRegistration
 {
     /// <summary>
-    /// Apple Music is enabled by pointing octo-fiesta at an ALACarte instance.
+    /// Apple Music is enabled by pointing octo-fiesta at an alacarte instance.
     /// </summary>
     public static bool IsConfigured(IConfiguration configuration) =>
         !string.IsNullOrWhiteSpace(configuration["AppleMusic:AlacarteUrl"]) &&

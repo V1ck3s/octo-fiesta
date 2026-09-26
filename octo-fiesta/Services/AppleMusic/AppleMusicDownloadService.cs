@@ -7,7 +7,7 @@ using octo_fiesta.Services.Local;
 namespace octo_fiesta.Services.AppleMusic;
 
 /// <summary>
-/// Downloads Apple Music songs through ALACarte. ALACarte writes the file into
+/// Downloads Apple Music songs through alacarte. alacarte writes the file into
 /// the shared library itself (its own layout, tags and FLAC conversion), so
 /// the result points at that file instead of handing over a stream to save.
 /// </summary>
@@ -45,22 +45,22 @@ public class AppleMusicDownloadService : BaseDownloadService
 
     protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Asking ALACarte for Apple Music song {TrackId} ({Artist} - {Title})", trackId, song.Artist, song.Title);
+        _logger.LogInformation("Asking alacarte for Apple Music song {TrackId} ({Artist} - {Title})", trackId, song.Artist, song.Title);
         var result = await _client.EnsureSongAsync(trackId, cancellationToken);
         var localPath = ToLibraryPath(DownloadPath, result.Path);
         if (!File.Exists(localPath))
         {
             throw new FileNotFoundException(
-                $"ALACarte reported {result.Path} but it is not visible under {DownloadPath}; both must share the same library folder",
+                $"alacarte reported {result.Path} but it is not visible under {DownloadPath}; both must share the same library folder",
                 localPath);
         }
-        _logger.LogInformation("ALACarte {Status} {Path}", result.Status, localPath);
+        _logger.LogInformation("alacarte {Status} {Path}", result.Status, localPath);
         var extension = Path.GetExtension(localPath);
         return new DownloadResult(Stream.Null, extension, QualityFromExtension(extension), LibraryPath: localPath);
     }
 
     /// <summary>
-    /// Resolves ALACarte's library-relative path under our library root,
+    /// Resolves alacarte's library-relative path under our library root,
     /// refusing anything that would point outside of it.
     /// </summary>
     public static string ToLibraryPath(string libraryRoot, string relativePath)
@@ -70,7 +70,7 @@ public class AppleMusicDownloadService : BaseDownloadService
         var rootWithSlash = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
         if (!full.StartsWith(rootWithSlash, StringComparison.Ordinal))
         {
-            throw new InvalidOperationException($"ALACarte returned a path outside the library: {relativePath}");
+            throw new InvalidOperationException($"alacarte returned a path outside the library: {relativePath}");
         }
         return full;
     }
@@ -85,6 +85,6 @@ public class AppleMusicDownloadService : BaseDownloadService
     protected override string? ExtractExternalIdFromAlbumId(string albumId) =>
         albumId.StartsWith(AppleMusicMapper.AlbumPrefix) ? albumId[AppleMusicMapper.AlbumPrefix.Length..] : null;
 
-    // ALACarte picks the quality; octo-fiesta must not try to upgrade its files
+    // alacarte picks the quality; octo-fiesta must not try to upgrade its files
     protected override string? GetTargetQuality() => null;
 }

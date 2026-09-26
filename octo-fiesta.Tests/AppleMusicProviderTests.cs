@@ -103,7 +103,7 @@ public class AppleMusicProviderTests : IDisposable
     [Fact]
     public async Task LibraryPathResult_IsUsedInPlace_WithoutCopyingOrRetagging()
     {
-        // ALACarte's own layout, deliberately different from the folder template
+        // alacarte's own layout, deliberately different from the folder template
         var alacarteFile = Path.Combine(_library, "Album Artist", "Album (2020)", "07. Title.flac");
         Directory.CreateDirectory(Path.GetDirectoryName(alacarteFile)!);
         await File.WriteAllTextAsync(alacarteFile, "alacarte-file");

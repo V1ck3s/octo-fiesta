@@ -89,7 +89,7 @@ public enum MusicService
     Tidal,
 
     /// <summary>
-    /// Apple Music through an ALACarte instance (see AppleMusicSettings)
+    /// Apple Music through an alacarte instance (see AppleMusicSettings)
     /// </summary>
     AppleMusic
 }

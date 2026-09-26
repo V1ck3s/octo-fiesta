@@ -163,7 +163,7 @@ else
     builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
 }
 
-// Apple Music through ALACarte next to the primary provider, when configured
+// Apple Music through alacarte next to the primary provider, when configured
 if (musicService != MusicService.AppleMusic && AppleMusicRegistration.IsConfigured(builder.Configuration))
 {
     AppleMusicRegistration.AddAppleMusicAlongside(builder.Services, enableExternalPlaylists);

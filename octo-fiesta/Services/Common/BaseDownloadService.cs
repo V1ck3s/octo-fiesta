@@ -461,7 +461,7 @@ public abstract class BaseDownloadService : IDownloadService
     /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
     /// <param name="LibraryPath">Set when the provider already placed the file in the library
-    /// itself (e.g. ALACarte); the stream is then ignored and the file is used where it is.</param>
+    /// itself (e.g. alacarte); the stream is then ignored and the file is used where it is.</param>
     public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? LibraryPath = null);
 
     /// <summary>

@@ -32,7 +32,7 @@ public record AlacarteSearch(
 public record AlacarteEnsureResult(string Status, string Path, string? JobId);
 
 /// <summary>
-/// Client for ALACarte's /api/integration/v1 API.
+/// Client for alacarte's /api/integration/v1 API.
 /// </summary>
 public class AlacarteClient
 {
@@ -82,7 +82,7 @@ public class AlacarteClient
     public Task<AlacartePlaylist?> GetPlaylistAsync(string id) => GetAsync<AlacartePlaylist>($"playlists/{Uri.EscapeDataString(id)}");
 
     /// <summary>
-    /// Asks ALACarte to make sure the song is in the library, downloading it if
+    /// Asks alacarte to make sure the song is in the library, downloading it if
     /// needed, and returns its library-relative path once it is there.
     /// </summary>
     public async Task<AlacarteEnsureResult> EnsureSongAsync(string id, CancellationToken cancellationToken)
@@ -94,10 +94,10 @@ public class AlacarteClient
         if (!response.IsSuccessStatusCode)
         {
             throw new InvalidOperationException(
-                $"ALACarte could not download Apple Music song {id} ({(int)response.StatusCode}): {ErrorMessage(body)}");
+                $"alacarte could not download Apple Music song {id} ({(int)response.StatusCode}): {ErrorMessage(body)}");
         }
         return JsonSerializer.Deserialize<AlacarteEnsureResult>(body, JsonOptions)
-            ?? throw new InvalidOperationException("ALACarte returned an empty ensure response");
+            ?? throw new InvalidOperationException("alacarte returned an empty ensure response");
     }
 
     private async Task<T?> GetAsync<T>(string path) where T : class
@@ -111,14 +111,14 @@ public class AlacarteClient
             var body = await response.Content.ReadAsStringAsync(timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("ALACarte {Path} failed ({Status}): {Error}", path, (int)response.StatusCode, ErrorMessage(body));
+                _logger.LogWarning("alacarte {Path} failed ({Status}): {Error}", path, (int)response.StatusCode, ErrorMessage(body));
                 return null;
             }
             return JsonSerializer.Deserialize<T>(body, JsonOptions);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger.LogWarning(ex, "ALACarte {Path} request failed", path);
+            _logger.LogWarning(ex, "alacarte {Path} request failed", path);
             return null;
         }
     }
