@@ -460,7 +460,9 @@ public abstract class BaseDownloadService : IDownloadService
     /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
     /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
+    /// <param name="LibraryPath">Set when the provider already placed the file in the library
+    /// itself (e.g. ALACarte); the stream is then ignored and the file is used where it is.</param>
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? LibraryPath = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -649,12 +651,17 @@ public abstract class BaseDownloadService : IDownloadService
             // Use the Navidrome upload API when enabled and we are not in cache mode and
             // not currently performing a same-path quality upgrade (which relies on backup/replace).
             var uploadService = NavidromeUploadService;
-            var useUploadApi = !isCache
+            var useUploadApi = downloadResult.LibraryPath == null
+                && !isCache
                 && string.IsNullOrEmpty(ourDownloadInfo.BackupPath)
                 && uploadService != null
                 && uploadService.IsConfigured;
 
-            if (useUploadApi)
+            if (downloadResult.LibraryPath != null)
+            {
+                localPath = downloadResult.LibraryPath;
+            }
+            else if (useUploadApi)
             {
                 await using (downloadResult.DownloadStream)
                 {

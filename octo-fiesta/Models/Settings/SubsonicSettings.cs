@@ -86,7 +86,12 @@ public enum MusicService
     /// <summary>
     /// Tidal music service, using your own account through Tidal's official API
     /// </summary>
-    Tidal
+    Tidal,
+
+    /// <summary>
+    /// Apple Music through an ALACarte instance (see AppleMusicSettings)
+    /// </summary>
+    AppleMusic
 }
 
 public partial class SubsonicSettings

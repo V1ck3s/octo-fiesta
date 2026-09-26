@@ -1,3 +1,4 @@
+using octo_fiesta.Services.Common;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -248,7 +249,7 @@ public partial class SubsonicModelMapper
     /// </summary>
     private Dictionary<string, object> ConvertPlaylistToAlbumJson(ExternalPlaylist playlist)
     {
-        var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
+        var artistName = $"🎵 {ProviderNames.Display(playlist.Provider)}";
         if (!string.IsNullOrEmpty(playlist.CuratorName))
         {
             artistName += $" {playlist.CuratorName}";
@@ -287,7 +288,7 @@ public partial class SubsonicModelMapper
     /// </summary>
     private XElement ConvertPlaylistToAlbumXml(ExternalPlaylist playlist, XNamespace ns)
     {
-        var artistName = $"🎵 {char.ToUpper(playlist.Provider[0])}{playlist.Provider.Substring(1)}";
+        var artistName = $"🎵 {ProviderNames.Display(playlist.Provider)}";
         if (!string.IsNullOrEmpty(playlist.CuratorName))
         {
             artistName += $" {playlist.CuratorName}";

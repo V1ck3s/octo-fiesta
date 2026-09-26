@@ -42,10 +42,22 @@ The upstream sync workflow requires a repository secret named `SYNC_TOKEN`. The 
 | [Tidal](https://tidal.com/) | Yes | FLAC 24-bit/192kHz | Yes |
 | [Yandex Music](https://music.yandex.ru) | Yes | FLAC 16-bit | Yes |
 | [SquidWTF](https://squid.wtf/) (Qobuz, Tidal) | No | Source-dependent | Tidal |
+| [Apple Music](https://music.apple.com/) via [ALACarte](https://github.com/sosjalapeno/alacarte) | An ALACarte instance | ALAC / FLAC 24-bit/192kHz | Yes |
 
 > **⚠️ SquidWTF is deprecated.** The upstream squid.wtf music services are down. The Qobuz backend no longer resolves and public Tidal instances only serve search results and 30-second previews. The Amazon Music and Deemix backends have been removed. The provider is kept for users running a self-hosted Tidal instance and may be removed in a future release. The default provider is now Deezer, and Tidal is available as a native provider that streams from your own account.
 
 See the [Supported Music Providers](https://github.com/V1ck3s/octo-fiesta/wiki/Supported-Music-Providers) wiki page for detailed information.
+
+### Apple Music through ALACarte
+
+Apple Music is served through a running [ALACarte](https://github.com/sosjalapeno/alacarte) instance, which searches the Apple Music catalogue and downloads into the same music folder octo-fiesta uses. In ALACarte, turn on **Settings → octo-fiesta Integration** and copy the two values it shows into octo-fiesta:
+
+```env
+AppleMusic__AlacarteUrl=http://alacarte-host:7373
+AppleMusic__ApiToken=<token from ALACarte's settings>
+```
+
+With these set, Apple Music is offered next to your `Subsonic__MusicService` provider: search shows both, and each song, album and playlist downloads through its own provider. Set `Subsonic__MusicService=AppleMusic` to use Apple Music on its own. ALACarte and octo-fiesta must mount the same music folder.
 
 ## Compatible Clients
 
