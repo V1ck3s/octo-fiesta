@@ -126,7 +126,7 @@ See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration
 
 ### GDStudio
 
-[GD Studio](https://music-api.gdstudio.xyz) needs no credentials. Set `MUSIC_SERVICE=GDStudio`. Tracks, albums and artists are supported (albums and artists are derived from search results and identified by name); playlists are not.
+[GD Studio/GD音乐台](https://music-api.gdstudio.xyz) needs no credentials. Set `MUSIC_SERVICE=GDStudio`. Tracks, albums and artists are supported (albums and artists are derived from search results and identified by name); playlists are not.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -209,4 +209,5 @@ GPL-3.0
 - [Qobuz](https://www.qobuz.com/) - Hi-Res music streaming service
 - [SquidWTF](https://squid.wtf/) - Third-party music API service
 - [Yandex Music](https://music.yandex.com) - Music streaming service
+- [GD Studio/GD音乐台](https://music-api.gdstudio.xyz) - Third-party music API service
 - [Subsonic API](http://www.subsonic.org/pages/api.jsp) - The API specification
