@@ -44,7 +44,7 @@ public class StartupValidationService : IHostedService
         
         // Validate music service credentials based on configured service
         var musicService = _subsonicSettings.Value.MusicService;
-        if (musicService == MusicService.Qobuz)
+        if (musicService.Equals("Qobuz", StringComparison.OrdinalIgnoreCase))
         {
             var qobuzValidator = new QobuzStartupValidator(_qobuzSettings, _httpClient);
             await qobuzValidator.ValidateAsync(cancellationToken);

@@ -7,6 +7,7 @@ using octo_fiesta.Services.SquidWTF;
 using octo_fiesta.Services.Tidal;
 using octo_fiesta.Services.Yandex;
 using octo_fiesta.Services.GDStudio;
+using octo_fiesta.Services.Composite;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Lyrics;
 using octo_fiesta.Services.Validation;
@@ -59,7 +60,6 @@ builder.Services.Configure<AppleMusicSettings>(
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();
 builder.Configuration.GetSection("Subsonic").Bind(subsonicSettings);
-var musicService = subsonicSettings.MusicService;
 var enableExternalPlaylists = subsonicSettings.EnableExternalPlaylists;
 
 // Business services
@@ -84,97 +84,126 @@ builder.Services.AddHttpClient(LrclibLyricsService.HttpClientName, client =>
         "octo-fiesta (https://github.com/V1ck3s/octo-fiesta)");
 });
 
-// Register music service based on configuration
-// IMPORTANT: Primary service MUST be registered LAST because ASP.NET Core DI
-// will use the last registered implementation when injecting IMusicMetadataService/IDownloadService
-if (musicService == MusicService.Qobuz)
-{
-    // If playlists enabled, register Deezer FIRST (secondary provider)
-    if (enableExternalPlaylists)
-    {
-        builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
-        builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-    
-    // Qobuz services (primary) - registered LAST to be injected by default
-    builder.Services.AddSingleton<QobuzBundleService>();
-    builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
-}
-else if (musicService == MusicService.SquidWTF)
-{
-    var squidWtfSource = builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz";
-    var isTidalSource = squidWtfSource.Equals("Tidal", StringComparison.OrdinalIgnoreCase);
+// Register the configured music service(s). MUSIC_SERVICE may list several separated by "|";
+// a provider without credentials is skipped with a warning (unless it is the only one requested).
+var startupWarnings = new List<string>();
+var requested = SubsonicSettings.ParseMusicServices(subsonicSettings.MusicService, out var unknownServices);
+foreach (var name in unknownServices) startupWarnings.Add($"Unknown MUSIC_SERVICE entry '{name}', skipping it");
 
-    // Only Tidal exposes playlists through its SquidWTF API.
-    if (enableExternalPlaylists && isTidalSource)
+bool Has(string? v) => !string.IsNullOrWhiteSpace(v);
+string? MissingCredentials(MusicService svc)
+{
+    var cfg = builder.Configuration;
+    switch (svc)
     {
-        builder.Services.AddSingleton<PlaylistSyncService>();
+        case MusicService.Deezer:
+            return Has(cfg["Deezer:Arl"]) ? null : "Deezer__Arl is not set";
+        case MusicService.Qobuz:
+            return Has(cfg["Qobuz:UserId"]) && Has(cfg["Qobuz:UserAuthToken"]) ? null : "Qobuz__UserId / Qobuz__UserAuthToken is not set";
+        case MusicService.Yandex:
+            return Has(cfg["Yandex:OAuthToken"]) ? null : "Yandex__OAuthToken is not set";
+        case MusicService.Tidal:
+            var store = cfg["Tidal:TokenStore"] ?? "./tidal-tokens.json";
+            return Has(cfg["Tidal:AccessToken"]) || Has(cfg["Tidal:RefreshToken"]) || File.Exists(store)
+                ? null : "no Tidal tokens configured (run the Tidal login first)";
+        case MusicService.AppleMusic:
+            return AppleMusicRegistration.IsConfigured(cfg) ? null : "AppleMusic__AlacarteUrl / AppleMusic__ApiToken is not set";
+        default:
+            return null; // SquidWTF and GDStudio need no credentials
     }
-    
-    // Instance manager for automatic API failover (required for Tidal)
-    builder.Services.AddSingleton<SquidWTFInstanceManager>();
-
-    // Captcha ALTCHA solver for SquidWTF Qobuz
-    builder.Services.AddSingleton<SquidWTFCaptchaSolver>();
-    
-    // SquidWTF services (primary) - registered LAST to be injected by default
-    builder.Services.AddSingleton<IMusicMetadataService, SquidWTFMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, SquidWTFDownloadService>();
-}
-else if (musicService == MusicService.Tidal)
-{
-    if (enableExternalPlaylists)
-    {
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-
-    // Shared OAuth state: token renewal and the account's country code.
-    builder.Services.AddSingleton<TidalTokenStore>();
-    builder.Services.AddSingleton<TidalAuthService>();
-
-    builder.Services.AddSingleton<IMusicMetadataService, TidalMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, TidalDownloadService>();
-}
-else if (musicService == MusicService.AppleMusic)
-{
-    AppleMusicRegistration.AddAppleMusicAsPrimary(builder.Services, enableExternalPlaylists);
-}
-else if (musicService == MusicService.Yandex)
-{
-    if (enableExternalPlaylists)
-    {
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-    builder.Services.AddSingleton<IMusicMetadataService, YandexMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, YandexDownloadService>();
-}
-else if (musicService == MusicService.GDStudio)
-{
-    builder.Services.AddSingleton<IMusicMetadataService, GDStudioMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, GDStudioDownloadService>();
-}
-else
-{
-    // If playlists enabled, register Qobuz FIRST (secondary provider)
-    if (enableExternalPlaylists)
-    {
-        builder.Services.AddSingleton<QobuzBundleService>();
-        builder.Services.AddSingleton<IMusicMetadataService, QobuzMetadataService>();
-        builder.Services.AddSingleton<IDownloadService, QobuzDownloadService>();
-        builder.Services.AddSingleton<PlaylistSyncService>();
-    }
-    
-    // Deezer services (primary, default) - registered LAST to be injected by default
-    builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
-    builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
 }
 
-// Apple Music through alacarte next to the primary provider, when configured
-if (musicService != MusicService.AppleMusic && AppleMusicRegistration.IsConfigured(builder.Configuration))
+var activeServices = requested;
+if (requested.Count > 1)
 {
-    AppleMusicRegistration.AddAppleMusicAlongside(builder.Services, enableExternalPlaylists);
+    activeServices = [];
+    foreach (var svc in requested)
+    {
+        var missing = MissingCredentials(svc);
+        if (missing is null) activeServices.Add(svc);
+        else startupWarnings.Add($"Skipping music service {svc}: {missing}");
+    }
+}
+// Apple Music next to the listed provider(s) whenever alacarte is configured
+if (!activeServices.Contains(MusicService.AppleMusic) && AppleMusicRegistration.IsConfigured(builder.Configuration))
+{
+    activeServices.Add(MusicService.AppleMusic);
+}
+if (activeServices.Count == 0)
+{
+    throw new InvalidOperationException(
+        "No usable MUSIC_SERVICE configured. " + string.Join("; ", startupWarnings));
+}
+
+var providers = new List<(string Key, Type Metadata, Type Download)>();
+foreach (var svc in activeServices)
+{
+    switch (svc)
+    {
+        case MusicService.Qobuz:
+            builder.Services.AddSingleton<QobuzBundleService>();
+            providers.Add(("qobuz", typeof(QobuzMetadataService), typeof(QobuzDownloadService)));
+            break;
+        case MusicService.SquidWTF:
+            builder.Services.AddSingleton<SquidWTFInstanceManager>();
+            builder.Services.AddSingleton<SquidWTFCaptchaSolver>();
+            providers.Add(("squidwtf", typeof(SquidWTFMetadataService), typeof(SquidWTFDownloadService)));
+            break;
+        case MusicService.Tidal:
+            // Shared OAuth state: token renewal and the account's country code.
+            builder.Services.AddSingleton<TidalTokenStore>();
+            builder.Services.AddSingleton<TidalAuthService>();
+            providers.Add(("tidal", typeof(TidalMetadataService), typeof(TidalDownloadService)));
+            break;
+        case MusicService.Yandex:
+            providers.Add(("yandex", typeof(YandexMetadataService), typeof(YandexDownloadService)));
+            break;
+        case MusicService.GDStudio:
+            providers.Add(("gdstudio", typeof(GDStudioMetadataService), typeof(GDStudioDownloadService)));
+            break;
+        case MusicService.AppleMusic:
+            AppleMusicRegistration.AddClient(builder.Services);
+            providers.Add((AppleMusicMapper.Provider, typeof(AppleMusicMetadataService), typeof(AppleMusicDownloadService)));
+            break;
+        default:
+            providers.Add(("deezer", typeof(DeezerMetadataService), typeof(DeezerDownloadService)));
+            break;
+    }
+}
+
+// Single-provider setups keep their historical playlist-only secondary (Deezer <-> Qobuz).
+if (enableExternalPlaylists && requested.Count == 1
+    && requested[0] is MusicService.Deezer or MusicService.Qobuz)
+{
+    var qobuzPrimary = requested[0] == MusicService.Qobuz;
+    if (!qobuzPrimary) builder.Services.AddSingleton<QobuzBundleService>();
+    builder.Services.AddSingleton<IMusicMetadataService>(sp => qobuzPrimary
+        ? sp.GetRequiredService<DeezerMetadataService>() : sp.GetRequiredService<QobuzMetadataService>());
+    builder.Services.AddSingleton<IDownloadService>(sp => qobuzPrimary
+        ? sp.GetRequiredService<DeezerDownloadService>() : sp.GetRequiredService<QobuzDownloadService>());
+    builder.Services.AddSingleton(qobuzPrimary ? typeof(DeezerMetadataService) : typeof(QobuzMetadataService));
+    builder.Services.AddSingleton(qobuzPrimary ? typeof(DeezerDownloadService) : typeof(QobuzDownloadService));
+}
+
+foreach (var p in providers)
+{
+    builder.Services.AddSingleton(p.Metadata);
+    builder.Services.AddSingleton(p.Download);
+}
+
+// The composite is registered LAST so it is what gets injected for a single
+// IMusicMetadataService / IDownloadService; playlist sync unwraps it.
+builder.Services.AddSingleton<IMusicMetadataService>(sp => new CompositeMetadataService(
+    providers.Select(p => (p.Key, (IMusicMetadataService)sp.GetRequiredService(p.Metadata))).ToList(),
+    sp.GetRequiredService<ILogger<CompositeMetadataService>>()));
+builder.Services.AddSingleton<IDownloadService>(sp => new CompositeDownloadService(
+    providers.Select(p => (p.Key, (IDownloadService)sp.GetRequiredService(p.Download))).ToList()));
+
+if (enableExternalPlaylists && activeServices.Any(s =>
+        (s != MusicService.SquidWTF && s != MusicService.GDStudio) ||
+        (builder.Configuration.GetValue<string>("SquidWTF:Source") ?? "Qobuz").Equals("Tidal", StringComparison.OrdinalIgnoreCase)))
+{
+    builder.Services.AddSingleton<PlaylistSyncService>();
 }
 
 // Startup validation - register validators
@@ -211,6 +240,8 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+foreach (var warning in startupWarnings) app.Logger.LogWarning("{Warning}", warning);
 
 // Configure the HTTP request pipeline.
 // Enable request body buffering FIRST to allow multiple reads (for proxy forwarding)

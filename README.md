@@ -108,6 +108,14 @@ See the [Installation](https://github.com/V1ck3s/octo-fiesta/wiki/Installation) 
 
 See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration) wiki page for all available settings.
 
+### Multiple providers
+
+`MUSIC_SERVICE` accepts several services separated by `|`, e.g. `MUSIC_SERVICE=Deezer|Qobuz`.
+
+- Searches go to every provider in parallel and the results are interleaved, so each provider is represented.
+- Songs, albums and artists keep the provider in their id, so streaming and downloads are routed back to the right one.
+- A provider without credentials (e.g. no `Deezer__Arl`) is skipped with a warning at startup, and a provider that fails during a search is skipped for that request. If only one service is listed it is always used; if none is usable the app refuses to start.
+
 ### Getting Credentials
 
 - [Getting Deezer Credentials (ARL Token)](https://github.com/V1ck3s/octo-fiesta/wiki/Getting-Deezer-Credentials-(ARL-Token))

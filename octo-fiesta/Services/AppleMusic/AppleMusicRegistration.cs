@@ -12,7 +12,7 @@ public static class AppleMusicRegistration
         !string.IsNullOrWhiteSpace(configuration["AppleMusic:AlacarteUrl"]) &&
         !string.IsNullOrWhiteSpace(configuration["AppleMusic:ApiToken"]);
 
-    private static void AddClient(IServiceCollection services)
+    public static void AddClient(IServiceCollection services)
     {
         services.AddHttpClient(AlacarteClient.HttpClientName, AlacarteClient.ConfigureClient);
         services.AddSingleton<AlacarteClient>();
