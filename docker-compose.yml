@@ -139,8 +139,8 @@ services:
       # Upstream source(s), comma separated, e.g. netease,joox. Any value the API accepts works.
       # Each source is queried separately (N sources = N requests per search). Default: netease
       - GDStudio__Source=${GDSTUDIO_SOURCE:-netease}
-      # Per-source timeout in seconds for search/metadata calls; a slow source is logged and skipped. Default: 15
-      - GDStudio__TimeoutSeconds=${GDSTUDIO_TIMEOUT_SECONDS:-15}
+      # Per-source timeout in seconds for search/metadata calls; a slow source is logged and skipped. Default: 5
+      - GDStudio__TimeoutSeconds=${GDSTUDIO_TIMEOUT_SECONDS:-5}
       # Audio quality (br): 128, 192, 320, 740 (16-bit lossless), 999 (24-bit lossless). Default: 999
       # If unsupported or empty, the next lower option is tried once.
       - GDStudio__Br=${GDSTUDIO_BR:-999}

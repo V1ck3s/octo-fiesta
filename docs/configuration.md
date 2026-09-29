@@ -83,7 +83,7 @@ Run the login once: `docker compose run --rm octo-fiesta --tidal-login`.
 | `.env` | App setting | Default | Description |
 |---|---|---|---|
 | `GDSTUDIO_SOURCE` | `GDStudio__Source` | `netease` | Upstream source(s), comma separated, e.g. `netease,joox`. Not validated: any value the API accepts works. |
-| `GDSTUDIO_TIMEOUT_SECONDS` | `GDStudio__TimeoutSeconds` | `15` | Per-source timeout for search/metadata calls. |
+| `GDSTUDIO_TIMEOUT_SECONDS` | `GDStudio__TimeoutSeconds` | `5` | Per-source timeout for search/metadata calls. |
 | `GDSTUDIO_BR` | `GDStudio__Br` | `999` | Quality: `128`, `192`, `320`, `740` (16-bit lossless), `999` (24-bit lossless). |
 | `GDSTUDIO_API` | `GDStudio__Api` | `https://music-api.gdstudio.xyz/api.php` | API endpoint. |
 | `GDSTUDIO_PROXY` | `GDStudio__Proxy` | empty | `http://`, `https://` or `socks5://` proxy for API and downloads. |

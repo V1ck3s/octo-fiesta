@@ -12,8 +12,8 @@ public class GDStudioSettings
     /// </summary>
     public string Source { get; set; } = "netease";
 
-    /// <summary>Per-source timeout for search/metadata calls. Default: 15</summary>
-    public int TimeoutSeconds { get; set; } = 15;
+    /// <summary>Per-source timeout for search/metadata calls. Default: 5</summary>
+    public int TimeoutSeconds { get; set; } = 5;
 
     public string[] Sources => Source.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Distinct().ToArray();
