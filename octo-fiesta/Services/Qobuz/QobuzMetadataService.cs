@@ -12,7 +12,7 @@ namespace octo_fiesta.Services.Qobuz;
 /// Metadata service implementation using the Qobuz API
 /// Uses user authentication token instead of email/password
 /// </summary>
-public class QobuzMetadataService : IMusicMetadataService
+public partial class QobuzMetadataService : IMusicMetadataService
 {
     private readonly HttpClient _httpClient;
     private readonly SubsonicSettings _settings;
@@ -298,6 +298,11 @@ public class QobuzMetadataService : IMusicMetadataService
                 
                 foreach (var album in itemsArray)
                 {
+                    if (!IsAlbumByArtist(album, externalId))
+                    {
+                        continue;
+                    }
+
                     albums.Add(ParseQobuzAlbum(album));
                 }
                 

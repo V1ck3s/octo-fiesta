@@ -1,0 +1,172 @@
+name: Sync with upstream
+
+on:
+  schedule:
+    # Run every day at 04:00 UTC
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to sync"
+        required: false
+        default: "dev"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM_REPO: V1ck3s/octo-fiesta
+      BRANCH: ${{ github.event.inputs.branch || 'dev' }}
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.BRANCH }}
+          # GITHUB_TOKEN cannot push commits that modify .github/workflows.
+          # Configure SYNC_TOKEN with contents, pull requests, and workflows write access.
+          token: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "${BRANCH}"
+
+      - name: Check if sync is needed
+        id: check
+        run: |
+          LOCAL_SHA=$(git rev-parse HEAD)
+          UPSTREAM_SHA=$(git rev-parse upstream/${BRANCH})
+          echo "local_sha=${LOCAL_SHA}" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=${UPSTREAM_SHA}" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "${UPSTREAM_SHA}" "${LOCAL_SHA}"; then
+            echo "Already up to date with upstream."
+            echo "needs_sync=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_sync=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close stale sync PRs (already in sync)
+        if: steps.check.outputs.needs_sync == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # We're already in sync with upstream, so any open "sync with upstream"
+          # conflict PR whose upstream SHA is already merged into this branch is stale
+          # (its changes landed some other way, e.g. a manual merge). Close those so
+          # they don't pile up in the queue.
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("sync/upstream-")) | "\(.number)\t\(.headRefName)"' \
+          | while IFS=$'\t' read -r NUM HEADREF; do
+              SHA="${HEADREF##*-}"
+              if git merge-base --is-ancestor "${SHA}" HEAD 2>/dev/null; then
+                echo "Closing stale sync PR #${NUM} (upstream ${SHA} already merged into ${BRANCH})."
+                gh pr comment "${NUM}" --body "Auto-closed: these upstream changes are already merged into \`${BRANCH}\`."
+                gh pr close "${NUM}"
+              else
+                echo "Keeping PR #${NUM} (upstream ${SHA} not yet merged)."
+              fi
+            done
+
+      - name: Attempt fast-forward / clean merge
+        if: steps.check.outputs.needs_sync == 'true'
+        id: merge
+        run: |
+          set +e
+          git merge --no-edit --ff "upstream/${BRANCH}"
+          FF_STATUS=$?
+          if [ $FF_STATUS -eq 0 ]; then
+            echo "result=fast_forward" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fast-forward not possible, attempt a real merge
+          git merge --abort 2>/dev/null || true
+          git merge --no-edit --no-ff "upstream/${BRANCH}"
+          MERGE_STATUS=$?
+          if [ $MERGE_STATUS -eq 0 ]; then
+            echo "result=merged" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Merge failed due to conflicts; opening a conflict PR."
+          git merge --abort 2>/dev/null || true
+          echo "result=conflict" >> "$GITHUB_OUTPUT"
+
+      - name: Push clean merge to ${{ env.BRANCH }}
+        if: steps.check.outputs.needs_sync == 'true' && (steps.merge.outputs.result == 'fast_forward' || steps.merge.outputs.result == 'merged')
+        run: |
+          git push origin "${BRANCH}"
+
+      - name: Prepare conflict PR branch
+        if: steps.merge.outputs.result == 'conflict'
+        id: conflict
+        run: |
+          PR_BRANCH="sync/upstream-${BRANCH}-${{ steps.check.outputs.upstream_sha }}"
+          PR_BRANCH="${PR_BRANCH:0:60}"
+          echo "pr_branch=${PR_BRANCH}" >> "$GITHUB_OUTPUT"
+
+          git checkout -B "${PR_BRANCH}"
+
+          # Re-run merge so conflict markers are written to the working tree.
+          set +e
+          git merge --no-ff --no-commit "upstream/${BRANCH}"
+          set -e
+
+          # Stage everything (including files with unresolved conflict markers)
+          git add -A
+
+          # Create a commit that preserves the merge parents but leaves conflict
+          # markers in place for a human to resolve in the PR.
+          TREE=$(git write-tree)
+          PARENT1=$(git rev-parse HEAD)
+          PARENT2=$(git rev-parse upstream/${BRANCH})
+          COMMIT=$(git commit-tree "${TREE}" -p "${PARENT1}" -p "${PARENT2}" -m "chore: sync with upstream ${UPSTREAM_REPO}@${BRANCH} (conflicts)")
+          git update-ref "refs/heads/${PR_BRANCH}" "${COMMIT}"
+          git reset --hard "${COMMIT}"
+
+          git push --force origin "${PR_BRANCH}"
+
+      - name: Open / update conflict PR
+        if: steps.merge.outputs.result == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_BRANCH="${{ steps.conflict.outputs.pr_branch }}"
+          TITLE="chore: sync with upstream (conflicts need resolution)"
+          BODY=$(cat <<EOF
+          Automated sync from [\`${UPSTREAM_REPO}@${BRANCH}\`](https://github.com/${UPSTREAM_REPO}/tree/${BRANCH}).
+
+          Merging upstream into \`${BRANCH}\` produced **conflicts** that need to be resolved manually.
+
+          The commit on this branch is a real merge commit (two parents) whose tree still contains conflict markers. To resolve:
+
+          1. Check out this branch locally: \`git fetch origin ${PR_BRANCH} && git checkout ${PR_BRANCH}\`
+          2. Resolve conflicts by running \`git grep -n '<<<<<<<'\` and editing each listed file.
+          3. \`git add\` the resolved files and amend: \`git commit --amend --no-edit\`
+          4. \`git push --force-with-lease\`
+          5. Merge this PR.
+
+          Upstream SHA: \`${{ steps.check.outputs.upstream_sha }}\`
+          EOF
+          )
+
+          EXISTING=$(gh pr list --head "${PR_BRANCH}" --base "${BRANCH}" --state open --json number --jq '.[0].number' || true)
+          if [ -n "${EXISTING}" ]; then
+            gh pr edit "${EXISTING}" --title "${TITLE}" --body "${BODY}"
+          else
+            gh pr create --base "${BRANCH}" --head "${PR_BRANCH}" --title "${TITLE}" --body "${BODY}"
+          fi

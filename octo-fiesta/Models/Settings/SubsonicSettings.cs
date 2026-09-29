@@ -89,12 +89,17 @@ public enum MusicService
     Tidal,
 
     /// <summary>
+    /// Apple Music through an alacarte instance (see AppleMusicSettings)
+    /// </summary>
+    AppleMusic,
+
+    /// <summary>
     /// GD Studio aggregator API (netease, joox, bilibili, ...)
     /// </summary>
     GDStudio
 }
 
-public class SubsonicSettings
+public partial class SubsonicSettings
 {
     public string? Url { get; set; }
 

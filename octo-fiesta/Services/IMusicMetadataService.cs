@@ -44,6 +44,17 @@ public interface IMusicMetadataService
     /// Gets details of an external album with its songs
     /// </summary>
     Task<Album?> GetAlbumAsync(string externalProvider, string externalId);
+
+    /// <summary>
+    /// Lightweight lookup that returns only the album cover URL (no track list).
+    /// Implementations SHOULD avoid fetching the full track payload when possible.
+    /// The default implementation falls back to <see cref="GetAlbumAsync"/>.
+    /// </summary>
+    async Task<string?> GetAlbumCoverUrlAsync(string externalProvider, string externalId)
+    {
+        var album = await GetAlbumAsync(externalProvider, externalId);
+        return album?.CoverArtUrlLarge ?? album?.CoverArtUrl;
+    }
     
     /// <summary>
     /// Gets details of an external artist

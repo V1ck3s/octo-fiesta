@@ -1,5 +1,6 @@
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
+using octo_fiesta.Services.AppleMusic;
 using octo_fiesta.Services.Deezer;
 using octo_fiesta.Services.Qobuz;
 using octo_fiesta.Services.SquidWTF;
@@ -25,6 +26,7 @@ if (TidalLoginCommand.IsRequested(args))
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddForkFeatures(builder.Configuration);
 builder.Services.AddHttpClient();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -51,6 +53,8 @@ builder.Services.Configure<GDStudioSettings>(
     builder.Configuration.GetSection("GDStudio"));
 builder.Services.Configure<LyricsSettings>(
     builder.Configuration.GetSection("Lyrics"));
+builder.Services.Configure<AppleMusicSettings>(
+    builder.Configuration.GetSection("AppleMusic"));
 
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();
@@ -133,6 +137,10 @@ else if (musicService == MusicService.Tidal)
     builder.Services.AddSingleton<IMusicMetadataService, TidalMetadataService>();
     builder.Services.AddSingleton<IDownloadService, TidalDownloadService>();
 }
+else if (musicService == MusicService.AppleMusic)
+{
+    AppleMusicRegistration.AddAppleMusicAsPrimary(builder.Services, enableExternalPlaylists);
+}
 else if (musicService == MusicService.Yandex)
 {
     if (enableExternalPlaylists)
@@ -161,6 +169,12 @@ else
     // Deezer services (primary, default) - registered LAST to be injected by default
     builder.Services.AddSingleton<IMusicMetadataService, DeezerMetadataService>();
     builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
+}
+
+// Apple Music through alacarte next to the primary provider, when configured
+if (musicService != MusicService.AppleMusic && AppleMusicRegistration.IsConfigured(builder.Configuration))
+{
+    AppleMusicRegistration.AddAppleMusicAlongside(builder.Services, enableExternalPlaylists);
 }
 
 // Startup validation - register validators

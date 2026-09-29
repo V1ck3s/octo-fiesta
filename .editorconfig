@@ -1,0 +1,34 @@
+root = true
+
+# Default: LF, UTF-8. This matches upstream (V1ck3s/octo-fiesta) for the
+# majority of files, which are committed with LF endings.
+[*]
+charset = utf-8
+end_of_line = lf
+
+# ---------------------------------------------------------------------------
+# IMPORTANT — merge compatibility with upstream
+#
+# Upstream keeps the files below as CRLF and has no .gitattributes, so its
+# CRLF bytes are committed verbatim. To keep `git merge upstream/dev` from
+# turning every upstream edit of these files into a whole-file conflict, the
+# fork must store the SAME line endings upstream uses. Do not re-save these
+# files with LF endings.
+# ---------------------------------------------------------------------------
+[octo-fiesta/Program.cs]
+end_of_line = crlf
+
+[octo-fiesta/Services/Local/LocalLibraryService.cs]
+end_of_line = crlf
+
+[.gitignore]
+end_of_line = crlf
+
+[octo-fiesta/Properties/launchSettings.json]
+end_of_line = crlf
+
+[octo-fiesta/octo-fiesta.csproj]
+end_of_line = crlf
+
+[octo-fiesta/octo-fiesta.http]
+end_of_line = crlf

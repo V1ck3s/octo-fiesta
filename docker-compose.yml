@@ -1,6 +1,6 @@
 services:
   octo-fiesta:
-    image: ghcr.io/v1ck3s/octo-fiesta
+    image: ghcr.io/filipton/octo-fiesta:dev
     container_name: octo-fiesta
     restart: unless-stopped
     ports:
@@ -41,6 +41,16 @@ services:
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
       # Available placeholders: {artistLetter}, {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
       - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
+      # ===== NAVIDROME UPLOAD API (forked Navidrome only) =====
+      # Use the custom POST /api/upload endpoint to skip the library scan
+      - Subsonic__UseNavidromeUploadApi=${USE_NAVIDROME_UPLOAD_API:-false}
+      - Subsonic__NavidromeLibraryId=${NAVIDROME_LIBRARY_ID:-1}
+      - Subsonic__NavidromeUploadFolder=${NAVIDROME_UPLOAD_FOLDER:-}
+
+      # ===== EXTERNAL COVER INDICATOR =====
+      - ExternalCover__IndicatorSize=${EXTERNAL_COVER_INDICATOR_SIZE:-1}
+      - ExternalCover__IndicatorSaturation=${EXTERNAL_COVER_INDICATOR_SATURATION:-1}
+      - ExternalCover__IndicatorColor=${EXTERNAL_COVER_INDICATOR_COLOR:-0}
       
       # ===== DEEZER SETTINGS =====
       # Deezer ARL token (required if using Deezer)
@@ -57,6 +67,10 @@ services:
       - Qobuz__UserId=${QOBUZ_USER_ID:-}
       # Preferred audio quality: FLAC, FLAC_24_HIGH, FLAC_24_LOW, FLAC_16, MP3_320 (optional)
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
+      # Qobuz App ID / App Secret (optional)
+      # When BOTH are set, bundle.js scraping is skipped and these values are used directly.
+      - Qobuz__AppId=${QOBUZ_APP_ID:-}
+      - Qobuz__AppSecret=${QOBUZ_APP_SECRET:-}
       
       # ===== TIDAL SETTINGS =====
       # Tokens come from the OAuth login: docker compose run --rm octo-fiesta --tidal-login

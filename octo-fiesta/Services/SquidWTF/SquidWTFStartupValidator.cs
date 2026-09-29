@@ -40,12 +40,6 @@ public class SquidWTFStartupValidator : BaseStartupValidator
         WriteDetail("Tidal public instances only serve search results and 30s previews).");
         WriteDetail("Switch to another provider (e.g. MUSIC_SERVICE=Deezer). SquidWTF may be removed in a future release.");
 
-        if (source.Equals("AmazonMusic", StringComparison.OrdinalIgnoreCase) ||
-            source.Equals("Deemix", StringComparison.OrdinalIgnoreCase))
-        {
-            WriteStatus("SquidWTF Source Error", "REMOVED", ConsoleColor.Red);
-            WriteDetail($"The '{source}' backend has been removed (upstream service discontinued). Falling back to Tidal.");
-        }
         if (usedDefaultFallback && !string.IsNullOrWhiteSpace(configuredQuality))
         {
             WriteStatus("SquidWTF Quality Warning", "INCOMPATIBLE CONFIG", ConsoleColor.Yellow);

@@ -9,7 +9,7 @@ namespace octo_fiesta.Services.Local;
 /// <summary>
 /// Interface for local music library management
 /// </summary>
-public interface ILocalLibraryService
+public partial interface ILocalLibraryService
 {
     /// <summary>
     /// Checks if an external song already exists locally
@@ -33,7 +33,7 @@ public interface ILocalLibraryService
     /// Gets the full mapping for an external song (includes quality info)
     /// </summary>
     Task<LocalSongMapping?> GetMappingForExternalSongAsync(string externalProvider, string externalId);
-    
+
     /// <summary>
     /// Gets the mapping between external ID and local ID
     /// </summary>
