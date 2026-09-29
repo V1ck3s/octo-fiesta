@@ -133,18 +133,34 @@ public class SubsonicSettings
     /// Several can be combined with "|" (e.g. "Deezer|Qobuz"): searches are merged and
     /// providers without valid credentials are skipped with a warning.
     /// </summary>
-    public string MusicService { get; set; } = "Deezer";
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("MusicService")]
+    public string MusicServices { get; set; } = MusicService.Deezer.ToString();
 
+    /// <summary>
+    /// The first (primary) entry of <see cref="MusicServices"/>. Read-only: it is derived, so
+    /// a multi-value config such as "Deezer|Qobuz" never has to bind to an enum.
+    /// </summary>
+    // Derived, so it must not bind to the "MusicService" config key (that key holds the raw list).
+    [Microsoft.Extensions.Configuration.ConfigurationKeyName("PrimaryMusicService")]
+    public MusicService MusicService => ParseMusicServices(MusicServices, out _).FirstOrDefault();
+
+    /// <summary>
+    /// Parses a "|"-separated list (case-insensitive) into distinct services; unrecognised
+    /// entries are reported in <paramref name="unknown"/>. Blank input means Deezer.
+    /// </summary>
     public static List<MusicService> ParseMusicServices(string? value, out List<string> unknown)
     {
         unknown = [];
         var result = new List<MusicService>();
         foreach (var part in (value ?? "").Split(['|', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (Enum.TryParse<MusicService>(part, true, out var svc) && Enum.IsDefined(svc)) { if (!result.Contains(svc)) result.Add(svc); }
+            if (Enum.TryParse<MusicService>(part, ignoreCase: true, out var svc) && Enum.IsDefined(svc))
+            {
+                if (!result.Contains(svc)) result.Add(svc);
+            }
             else unknown.Add(part);
         }
-        if (result.Count == 0 && unknown.Count == 0) result.Add(global::octo_fiesta.Models.Settings.MusicService.Deezer);
+        if (result.Count == 0 && unknown.Count == 0) result.Add(MusicService.Deezer);
         return result;
     }
     
