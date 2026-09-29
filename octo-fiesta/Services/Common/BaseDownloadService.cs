@@ -862,6 +862,9 @@ public abstract class BaseDownloadService : IDownloadService
         return song;
     }
 
+    /// <summary>Optional suffix appended to the file name when it collides with an existing file.</summary>
+    protected virtual string? FileNameConflictSuffix(Song song) => null;
+
     /// <summary>
     /// Takes DownloadResult provided by specific provider and saves it to file
     /// with respect to storage template and storage mode.
@@ -878,6 +881,13 @@ public abstract class BaseDownloadService : IDownloadService
         // Create directories
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);
+
+        // On collision a provider may name the file "<name>-<suffix>" (e.g. GDStudio source)
+        if (IOFile.Exists(outputPath) && FileNameConflictSuffix(song) is { } suffix)
+        {
+            outputPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
+                $"{Path.GetFileNameWithoutExtension(outputPath)}-{PathHelper.SanitizeFileName(suffix)}{Path.GetExtension(outputPath)}");
+        }
 
         if (IOFile.Exists(outputPath))
         {

@@ -21,7 +21,6 @@ public class GDStudioMetadataService : IMusicMetadataService
     private readonly HttpClient _http;
     private readonly ILogger<GDStudioMetadataService> _logger;
     private readonly GDStudioSettings _s;
-    private string _source => _s.Source;
 
     // ponytail: unbounded in-memory map, add eviction if search volume ever makes it matter
     private readonly ConcurrentDictionary<string, Song> _songs = new();
@@ -48,29 +47,43 @@ public class GDStudioMetadataService : IMusicMetadataService
         return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=')));
     }
 
-    private async Task<List<GDStudioTrack>> QueryAsync(string source, string name, int count)
+    // Queries every configured source in parallel (`suffix` selects e.g. "_album") and interleaves
+    // the results so each source is represented. A failing or timed-out source is logged and skipped.
+    private async Task<List<GDStudioTrack>> QueryAsync(string name, int count, string suffix = "")
     {
-        try
+        async Task<List<GDStudioTrack>> One(string source)
         {
-            var url = _s.Url($"types=search&source={Uri.EscapeDataString(source)}"
-                      + $"&name={Uri.EscapeDataString(name)}&count={count}");
-            var results = await _http.GetFromJsonAsync<List<GDStudioTrack>>(url) ?? [];
-            return results.Where(t => !string.IsNullOrEmpty(t.Id)).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "GDStudio search failed for '{Query}'", name);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(_s.TimeoutSeconds));
+            try
+            {
+                var url = _s.Url($"types=search&source={Uri.EscapeDataString(source + suffix)}"
+                          + $"&name={Uri.EscapeDataString(name)}&count={count}");
+                var results = await _http.GetFromJsonAsync<List<GDStudioTrack>>(url, cts.Token) ?? [];
+                return results.Where(t => !string.IsNullOrEmpty(t.Id))
+                    .Select(t => t with { Id = _s.TrackId(source, t.Id) }).ToList();
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogError("GDStudio source '{Source}' timed out after {Seconds}s for '{Query}'", source, _s.TimeoutSeconds, name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GDStudio source '{Source}' failed for '{Query}'", source, name);
+            }
             return [];
         }
+
+        var lists = await Task.WhenAll(_s.Sources.Select(One));
+        return lists.SelectMany(l => l.Select((t, i) => (t, i))).OrderBy(x => x.i).Select(x => x.t).ToList();
     }
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
-        => (await QueryAsync(_source, query, limit)).Select(ToSong).ToList();
+        => (await QueryAsync(query, limit)).Select(ToSong).ToList();
 
     // `<source>_album` returns the tracks of albums matching the keyword.
-    private async Task<List<Album>> AlbumsFromAsync(string source, string name, int count, Func<GDStudioTrack, bool>? filter = null)
+    private async Task<List<Album>> AlbumsFromAsync(string suffix, string name, int count, Func<GDStudioTrack, bool>? filter = null)
     {
-        var tracks = (await QueryAsync(source, name, count)).Where(t => filter?.Invoke(t) ?? true).ToList();
+        var tracks = (await QueryAsync(name, count, suffix)).Where(t => filter?.Invoke(t) ?? true).ToList();
         return tracks.GroupBy(t => t.Album).Where(g => g.Key != "").Select(g => new Album
         {
             Id = AlbumPrefix + Enc(g.Key),
@@ -84,13 +97,13 @@ public class GDStudioMetadataService : IMusicMetadataService
     }
 
     public async Task<List<Album>> SearchAlbumsAsync(string query, int limit = 20)
-        => (await AlbumsFromAsync(_source + "_album", query, 50)).Take(limit).ToList();
+        => (await AlbumsFromAsync("_album", query, 50)).Take(limit).ToList();
 
     public async Task<Album?> GetAlbumAsync(string externalProvider, string externalId)
     {
         if (externalProvider != ProviderName) return null;
         var name = Dec(externalId);
-        var tracks = (await QueryAsync(_source + "_album", name, 100)).Where(t => t.Album == name).ToList();
+        var tracks = (await QueryAsync(name, 100, "_album")).Where(t => t.Album == name).ToList();
         if (tracks.Count == 0) return null;
         var songs = tracks.Select(ToSong).ToList();
         for (var i = 0; i < songs.Count; i++) { songs[i].Track = i + 1; songs[i].TotalTracks = songs.Count; }
@@ -108,7 +121,7 @@ public class GDStudioMetadataService : IMusicMetadataService
     }
 
     public async Task<List<Artist>> SearchArtistsAsync(string query, int limit = 20)
-        => (await QueryAsync(_source, query, 50)).SelectMany(t => t.Artist).Distinct().Take(limit).Select(ToArtist).ToList();
+        => (await QueryAsync(query, 50)).SelectMany(t => t.Artist).Distinct().Take(limit).Select(ToArtist).ToList();
 
     public Task<Artist?> GetArtistAsync(string externalProvider, string externalId)
         => Task.FromResult(externalProvider == ProviderName ? ToArtist(Dec(externalId)) : null);
@@ -117,12 +130,12 @@ public class GDStudioMetadataService : IMusicMetadataService
     {
         if (externalProvider != ProviderName) return [];
         var name = Dec(externalId);
-        return await AlbumsFromAsync(_source, name, 50, t => t.Artist.Contains(name));
+        return await AlbumsFromAsync("", name, 50, t => t.Artist.Contains(name));
     }
 
     public async Task<SearchResult> SearchAllAsync(string query, int songLimit = 20, int albumLimit = 20, int artistLimit = 20)
     {
-        var songs = (await QueryAsync(_source, query, Math.Max(songLimit, artistLimit))).ToList();
+        var songs = (await QueryAsync(query, Math.Max(songLimit, artistLimit))).ToList();
         return new SearchResult
         {
             Songs = songs.Take(songLimit).Select(ToSong).ToList(),
@@ -142,7 +155,7 @@ public class GDStudioMetadataService : IMusicMetadataService
         });
         if (song.CoverArtUrlLarge is null && _pics.TryGetValue(externalId, out var pic))
         {
-            song.CoverArtUrlLarge = song.CoverArtUrl = await ResolvePicAsync(pic);
+            song.CoverArtUrlLarge = song.CoverArtUrl = await ResolvePicAsync(externalId, pic);
         }
         return song;
     }
@@ -151,14 +164,15 @@ public class GDStudioMetadataService : IMusicMetadataService
     public Task<ExternalPlaylist?> GetPlaylistAsync(string externalProvider, string externalId) => Task.FromResult<ExternalPlaylist?>(null);
     public Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId) => Task.FromResult(new List<Song>());
 
-    private async Task<string?> ResolvePicAsync(string picId)
+    private async Task<string?> ResolvePicAsync(string trackId, string picId)
     {
         if (picId.StartsWith("//")) return "https:" + picId;
         if (picId.StartsWith("http")) return picId;
         try
         {
+            var (source, _) = _s.SplitTrackId(trackId);
             var r = await _http.GetFromJsonAsync<GDStudioPic>(
-                _s.Url($"types=pic&source={Uri.EscapeDataString(_source)}&id={Uri.EscapeDataString(picId)}&size=500"));
+                _s.Url($"types=pic&source={Uri.EscapeDataString(source)}&id={Uri.EscapeDataString(picId)}&size=500"));
             return string.IsNullOrEmpty(r?.Url) ? null : r.Url;
         }
         catch { return null; }
@@ -173,8 +187,9 @@ public class GDStudioMetadataService : IMusicMetadataService
     {
         try
         {
+            var (source, id) = _s.SplitTrackId(trackId);
             var r = await _http.GetFromJsonAsync<GDStudioLyric>(
-                _s.Url($"types=lyric&source={Uri.EscapeDataString(_source)}&id={Uri.EscapeDataString(trackId)}"));
+                _s.Url($"types=lyric&source={Uri.EscapeDataString(source)}&id={Uri.EscapeDataString(id)}"));
             return string.IsNullOrWhiteSpace(r?.Lyric) ? null : r.Lyric;
         }
         catch { return null; }

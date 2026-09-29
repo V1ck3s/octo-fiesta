@@ -6,10 +6,27 @@ namespace octo_fiesta.Models.Settings;
 public class GDStudioSettings
 {
     /// <summary>
-    /// Upstream music source. Any of the "stable" sources listed on the API page
-    /// (currently netease, joox, bilibili). Default: netease
+    /// Upstream music source(s), comma separated, e.g. "netease,joox". Not validated here:
+    /// any value the API accepts works. Each source is queried on its own and results are merged.
+    /// Default: netease
     /// </summary>
     public string Source { get; set; } = "netease";
+
+    /// <summary>Per-source timeout for search/metadata calls. Default: 15</summary>
+    public int TimeoutSeconds { get; set; } = 15;
+
+    public string[] Sources => Source.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct().ToArray();
+
+    // Track ids are only unique per source, so external ids are "<source>~<id>".
+    public string TrackId(string source, string id) => $"{source}~{id}";
+
+    /// <summary>Split an external track id; ids without a source prefix belong to the first source.</summary>
+    public (string Source, string Id) SplitTrackId(string externalId)
+    {
+        var i = externalId.IndexOf('~');
+        return i > 0 ? (externalId[..i], externalId[(i + 1)..]) : (Sources.FirstOrDefault() ?? "netease", externalId);
+    }
 
     /// <summary>
     /// Optional proxy used for every call to the API and the download CDNs.

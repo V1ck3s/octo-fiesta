@@ -130,7 +130,7 @@ See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `GDStudio__Source` (`GDSTUDIO_SOURCE`) | `netease` | Upstream source. Use one of the "stable" sources listed on the API page (currently `netease`, `joox`, `bilibili`). |
+| `GDStudio__Source` (`GDSTUDIO_SOURCE`) | `netease` | Upstream source(s), comma separated, e.g. `netease,joox`. Any value the API accepts works (not validated). Each source is queried separately (N sources = N requests per search) and results are merged; a source that fails or exceeds `GDStudio__TimeoutSeconds` (default 15) is logged as an error and skipped. |
 | `GDStudio__Br` (`GDSTUDIO_BR`) | `999` | Audio quality, see below. |
 | `GDStudio__Api` (`GDSTUDIO_API`) | `https://music-api.gdstudio.xyz/api.php` | API endpoint. |
 | `GDStudio__Proxy` (`GDSTUDIO_PROXY`) | empty | Proxy for all API and download requests: `http://`, `https://` or `socks5://` URL, e.g. `socks5://127.0.0.1:1080`. |

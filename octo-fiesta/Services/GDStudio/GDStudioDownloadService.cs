@@ -11,7 +11,6 @@ namespace octo_fiesta.Services.GDStudio;
 public class GDStudioDownloadService : BaseDownloadService
 {
     private readonly HttpClient _http;
-    private readonly string _source;
 
     private readonly GDStudioSettings _settings;
 
@@ -28,7 +27,6 @@ public class GDStudioDownloadService : BaseDownloadService
     {
         _http = httpClientFactory.CreateClient(GDStudioHttpClientConfiguration.ClientName);
         _settings = settings.Value;
-        _source = _settings.Source;
     }
 
     private const string AlbumPrefix = "ext-gdstudio-album-";
@@ -38,6 +36,9 @@ public class GDStudioDownloadService : BaseDownloadService
     protected override string? ExtractExternalIdFromAlbumId(string albumId)
         => albumId.StartsWith(AlbumPrefix) ? albumId[AlbumPrefix.Length..] : null;
 
+    protected override string? FileNameConflictSuffix(Song song) =>
+        song.ExternalId is { } id ? _settings.SplitTrackId(id).Source : null;
+
     // No quality choice: we always take the best on offer, so never re-download for an upgrade.
     protected override string? GetTargetQuality() => null;
 
@@ -45,7 +46,7 @@ public class GDStudioDownloadService : BaseDownloadService
     {
         try
         {
-            using var r = await _http.GetAsync(_settings.Url($"types=search&source={Uri.EscapeDataString(_source)}&name=a&count=1"));
+            using var r = await _http.GetAsync(_settings.Url($"types=search&source={Uri.EscapeDataString(_settings.Sources[0])}&name=a&count=1"));
             return r.IsSuccessStatusCode;
         }
         catch { return false; }
@@ -54,6 +55,7 @@ public class GDStudioDownloadService : BaseDownloadService
     protected override async Task<DownloadResult> DownloadTrackAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
         // Configured br, then the next lower one once (unknown values behave like 999).
+        var (source, id) = _settings.SplitTrackId(trackId);
         var valid = GDStudioSettings.ValidBr;
         var idx = Array.IndexOf(valid, _settings.Br);
         if (idx < 0) idx = valid.Length - 1;
@@ -61,7 +63,7 @@ public class GDStudioDownloadService : BaseDownloadService
         foreach (var br in attempts)
         {
             var info = await _http.GetFromJsonAsync<UrlResponse>(
-                _settings.Url($"types=url&source={Uri.EscapeDataString(_source)}&id={Uri.EscapeDataString(trackId)}&br={br}"),
+                _settings.Url($"types=url&source={Uri.EscapeDataString(source)}&id={Uri.EscapeDataString(id)}&br={br}"),
                 cancellationToken);
             if (string.IsNullOrEmpty(info?.Url)) continue;
 
@@ -79,7 +81,7 @@ public class GDStudioDownloadService : BaseDownloadService
             var stream = await HttpResponseStream.CreateAsync(response, cancellationToken);
             return new DownloadResult(stream, ext, quality);
         }
-        throw new Exception($"GDStudio returned no downloadable url for track {trackId} (source {_source})");
+        throw new Exception($"GDStudio returned no downloadable url for track {trackId} (source {source})");
     }
 
     private record UrlResponse(

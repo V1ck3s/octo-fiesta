@@ -32,7 +32,7 @@ class GDStudioStartupValidator : BaseStartupValidator
         try
         {
             using var r = await _httpClient.GetAsync(
-                _settings.Url($"types=search&source={Uri.EscapeDataString(_settings.Source)}&name=a&count=1"), cancellationToken);
+                _settings.Url($"types=search&source={Uri.EscapeDataString(_settings.Sources[0])}&name=a&count=1"), cancellationToken);
             if (!r.IsSuccessStatusCode)
             {
                 WriteStatus("GDStudio Service Validation", "FAILED", ConsoleColor.Red);
