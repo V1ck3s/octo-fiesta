@@ -103,7 +103,20 @@ Apple Music is served by a running [alacarte](https://github.com/sosjalapeno/ala
 | `APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS` | `AppleMusic__DownloadTimeoutSeconds` | `900` | Wait for alacarte to finish one song. |
 | (plain env) | `AppleMusic__DownloadPath` | unset | Use when alacarte's folder differs from `DOWNLOAD_PATH`. It must still resolve to the exact folder alacarte writes into. |
 
-Add `AppleMusic` to `MUSIC_SERVICE` (e.g. `Deezer,AppleMusic`) or use it alone.
+Apple Music is enabled automatically once `AppleMusic__AlacarteUrl` and `AppleMusic__ApiToken` are set, next to whatever `MUSIC_SERVICE` lists (listing `AppleMusic` is equivalent). To use it alone, set `MUSIC_SERVICE=AppleMusic`.
+
+## Combining providers
+
+```env
+# .env with Docker Compose
+MUSIC_SERVICE=Deezer,GDStudio
+DEEZER_ARL=...
+GDSTUDIO_SOURCE=netease,joox
+APPLEMUSIC_ALACARTE_URL=http://alacarte-host:7373
+APPLEMUSIC_API_TOKEN=...
+```
+
+Without Compose, use the app setting name: `Subsonic__MusicService=Deezer,GDStudio`. A bare `MusicService=` or `MUSIC_SERVICE=` variable is **not** read by the app; only Compose maps `MUSIC_SERVICE` onto `Subsonic__MusicService`.
 
 ## SquidWTF (deprecated)
 

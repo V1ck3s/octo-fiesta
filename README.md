@@ -150,7 +150,7 @@ AppleMusic__AlacarteUrl=http://alacarte-host:7373   # .env: APPLEMUSIC_ALACARTE_
 AppleMusic__ApiToken=<token from alacarte's settings> # .env: APPLEMUSIC_API_TOKEN
 ```
 
-Then add `AppleMusic` to `MUSIC_SERVICE` (e.g. `MUSIC_SERVICE=Deezer,AppleMusic`): search shows both, and each song, album and playlist downloads through its own provider. Set `MUSIC_SERVICE=AppleMusic` to use Apple Music on its own. `AppleMusic__DownloadTimeoutSeconds` (`APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS`, default `900`) is how long to wait for alacarte to finish one song. alacarte and octo-fiesta must mount the same music folder.
+Apple Music is switched on automatically whenever both values are set, alongside whatever `MUSIC_SERVICE` lists (listing `AppleMusic` explicitly, e.g. `MUSIC_SERVICE=Deezer,AppleMusic`, is equivalent): search shows both, and each song, album and playlist downloads through its own provider. Set `MUSIC_SERVICE=AppleMusic` to use Apple Music on its own. `AppleMusic__DownloadTimeoutSeconds` (`APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS`, default `900`) is how long to wait for alacarte to finish one song. alacarte and octo-fiesta must mount the same music folder.
 
 If alacarte's music folder isn't the same folder as your general `DOWNLOAD_PATH` (for example, alacarte already manages its own library layout, or the two containers only share a subfolder), point Apple Music at it directly instead of moving `DOWNLOAD_PATH`:
 
