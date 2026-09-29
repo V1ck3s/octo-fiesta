@@ -220,7 +220,8 @@ builder.Services.AddHttpClient(TidalHttpClientConfiguration.AuthClientName, Tida
 builder.Services.AddHttpClient(TidalHttpClientConfiguration.MediaClientName, TidalHttpClientConfiguration.ConfigureMediaClient);
 builder.Services.AddHttpClient("Yandex", YandexHttpClientConfiguration.ConfigureClient);
 builder.Services.AddHttpClient(GDStudioHttpClientConfiguration.ClientName)
-    .ConfigurePrimaryHttpMessageHandler(GDStudioHttpClientConfiguration.CreateHandler);
+    .ConfigurePrimaryHttpMessageHandler(GDStudioHttpClientConfiguration.CreateHandler)
+    .AddOptionalHandlers(builder.Configuration["GDStudio:Plugin"]);
 
 // Register orchestrator as hosted service
 builder.Services.AddHostedService<StartupValidationOrchestrator>();
