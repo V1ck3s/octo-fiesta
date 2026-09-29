@@ -19,7 +19,7 @@ services:
       - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
       # Admin Password to perform actions on navidrome server that require admin permissions (optional)
       - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
-      # Music service to use: Deezer, Qobuz, Tidal, Yandex, or SquidWTF (deprecated) (default: Deezer)
+      # Music service to use: Deezer, Qobuz, Tidal, Yandex, GDStudio, or SquidWTF (deprecated) (default: Deezer)
       - Subsonic__MusicService=${MUSIC_SERVICE:-Deezer}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
       - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
@@ -116,6 +116,17 @@ services:
       # Default: false
       # Available: true, false
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
+
+      # ===== GDSTUDIO SETTINGS (MUSIC_SERVICE=GDStudio) =====
+      # Upstream source, one of the "stable" sources (netease, joox, bilibili). Default: netease
+      - GDStudio__Source=${GDSTUDIO_SOURCE:-netease}
+      # Audio quality (br): 128, 192, 320, 740 (16-bit lossless), 999 (24-bit lossless). Default: 999
+      # If unsupported or empty, the next lower option is tried once.
+      - GDStudio__Br=${GDSTUDIO_BR:-999}
+      # API endpoint. Default: https://music-api.gdstudio.xyz/api.php
+      - GDStudio__Api=${GDSTUDIO_API:-https://music-api.gdstudio.xyz/api.php}
+      # Proxy for all calls, e.g. http://host:port, https://host:port or socks5://host:port
+      - GDStudio__Proxy=${GDSTUDIO_PROXY:-}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
       # Holds the Tidal token store, only needed when MUSIC_SERVICE=Tidal

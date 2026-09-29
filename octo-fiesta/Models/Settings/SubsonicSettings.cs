@@ -86,7 +86,12 @@ public enum MusicService
     /// <summary>
     /// Tidal music service, using your own account through Tidal's official API
     /// </summary>
-    Tidal
+    Tidal,
+
+    /// <summary>
+    /// GD Studio aggregator API (netease, joox, bilibili, ...)
+    /// </summary>
+    GDStudio
 }
 
 public class SubsonicSettings
@@ -129,7 +134,7 @@ public class SubsonicSettings
     /// <summary>
     /// Music service to use (default: Deezer)
     /// Environment variable: MUSIC_SERVICE
-    /// Values: "Deezer", "Qobuz", "Tidal", "Yandex", "SquidWTF" (deprecated)
+    /// Values: "Deezer", "Qobuz", "Tidal", "Yandex", "GDStudio", "SquidWTF" (deprecated)
     /// </summary>
     public MusicService MusicService { get; set; } = MusicService.Deezer;
     
