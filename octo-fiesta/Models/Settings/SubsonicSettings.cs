@@ -130,7 +130,7 @@ public class SubsonicSettings
     /// Music service(s) to use (default: Deezer)
     /// Environment variable: MUSIC_SERVICE
     /// Values: "Deezer", "Qobuz", "Tidal", "Yandex", "SquidWTF" (deprecated).
-    /// Several can be combined with "|" (e.g. "Deezer|Qobuz"): searches are merged and
+    /// Several can be combined with "," (e.g. "Deezer,Qobuz"): searches are merged and
     /// providers without valid credentials are skipped with a warning.
     /// </summary>
     [Microsoft.Extensions.Configuration.ConfigurationKeyName("MusicService")]
@@ -138,14 +138,14 @@ public class SubsonicSettings
 
     /// <summary>
     /// The first (primary) entry of <see cref="MusicServices"/>. Read-only: it is derived, so
-    /// a multi-value config such as "Deezer|Qobuz" never has to bind to an enum.
+    /// a multi-value config such as "Deezer,Qobuz" never has to bind to an enum.
     /// </summary>
     // Derived, so it must not bind to the "MusicService" config key (that key holds the raw list).
     [Microsoft.Extensions.Configuration.ConfigurationKeyName("PrimaryMusicService")]
     public MusicService MusicService => ParseMusicServices(MusicServices, out _).FirstOrDefault();
 
     /// <summary>
-    /// Parses a "|"-separated list (case-insensitive) into distinct services; unrecognised
+    /// Parses a ","-separated list (also "|" or ";") (case-insensitive) into distinct services; unrecognised
     /// entries are reported in <paramref name="unknown"/>. Blank input means Deezer.
     /// </summary>
     public static List<MusicService> ParseMusicServices(string? value, out List<string> unknown)
