@@ -4,13 +4,13 @@ using System.Runtime.Loader;
 namespace octo_fiesta.Services.GDStudio;
 
 /// <summary>
-/// Optional extension point: if an assembly exists at the configured path (default /config/gdstudio-proxy.dll),
+/// Optional extension point: if an assembly exists at the configured path (default /config/gdstudio/gdstudio-proxy.dll),
 /// every public <see cref="DelegatingHandler"/> in it is added to the GDStudio HTTP client. Handlers are created
 /// through DI, so they can ask for services such as IConfiguration or ILoggerFactory.
 /// </summary>
 public static class GDStudioHandlerPlugin
 {
-    public const string DefaultPath = "/config/gdstudio-proxy.dll";
+    public const string DefaultPath = "/config/gdstudio/gdstudio-proxy.dll";
 
     public static IHttpClientBuilder AddOptionalHandlers(this IHttpClientBuilder builder, string? path)
     {
