@@ -45,13 +45,18 @@ public class PlaylistSyncService
         ILogger<PlaylistSyncService> logger)
     {
         // Get metadata services (optional - only the active provider(s) will be registered)
+        metadataServices = metadataServices
+            .SelectMany(s => s is Composite.CompositeMetadataService c ? c.Providers.Select(p => p.Service) : [s])
+            .ToList();
         _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"));
         _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"));
         _squidWTFMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("SquidWTF"));
         _tidalMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Tidal"));
         _yandexMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Yandex"));
         
-        _downloadServices = downloadServices;
+        _downloadServices = downloadServices
+            .SelectMany(s => s is Composite.CompositeDownloadService c ? c.Providers.Select(p => p.Service) : [s])
+            .ToList();
         _configuration = configuration;
         _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
