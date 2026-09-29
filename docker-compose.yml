@@ -136,8 +136,11 @@ services:
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
 
       # ===== GDSTUDIO SETTINGS (MUSIC_SERVICE=GDStudio) =====
-      # Upstream source, one of the "stable" sources (netease, joox, bilibili). Default: netease
+      # Upstream source(s), comma separated, e.g. netease,joox. Any value the API accepts works.
+      # Each source is queried separately (N sources = N requests per search). Default: netease
       - GDStudio__Source=${GDSTUDIO_SOURCE:-netease}
+      # Per-source timeout in seconds for search/metadata calls; a slow source is logged and skipped. Default: 15
+      - GDStudio__TimeoutSeconds=${GDSTUDIO_TIMEOUT_SECONDS:-15}
       # Audio quality (br): 128, 192, 320, 740 (16-bit lossless), 999 (24-bit lossless). Default: 999
       # If unsupported or empty, the next lower option is tried once.
       - GDStudio__Br=${GDSTUDIO_BR:-999}
@@ -145,6 +148,18 @@ services:
       - GDStudio__Api=${GDSTUDIO_API:-https://music-api.gdstudio.xyz/api.php}
       # Proxy for all calls, e.g. http://host:port, https://host:port or socks5://host:port
       - GDStudio__Proxy=${GDSTUDIO_PROXY:-}
+
+      # ===== APPLE MUSIC SETTINGS (through an alacarte instance) =====
+      # Base URL of the alacarte web UI, e.g. http://alacarte-host:7373 (alacarte: Settings -> octo-fiesta Integration)
+      - AppleMusic__AlacarteUrl=${APPLEMUSIC_ALACARTE_URL:-}
+      # alacarte integration API token (same settings page)
+      - AppleMusic__ApiToken=${APPLEMUSIC_API_TOKEN:-}
+      # How long to wait for alacarte to finish one song, in seconds. Default: 900
+      - AppleMusic__DownloadTimeoutSeconds=${APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS:-900}
+      # Per-provider download path (optional). Leave it out unless alacarte's folder differs from
+      # Library__DownloadPath; an empty value would override the shared path, so it is not set here.
+      # Works for any provider: <Provider>__DownloadPath (Deezer, Qobuz, Tidal, Yandex, GDStudio, SquidWTF, AppleMusic)
+      # - AppleMusic__DownloadPath=/music
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
       # Holds the Tidal token store, only needed when MUSIC_SERVICE=Tidal

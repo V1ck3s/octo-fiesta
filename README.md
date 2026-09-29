@@ -41,32 +41,13 @@ The upstream sync workflow requires a repository secret named `SYNC_TOKEN`. The 
 | [Qobuz](https://www.qobuz.com/) | Yes | FLAC 24-bit/192kHz | Yes |
 | [Tidal](https://tidal.com/) | Yes | FLAC 24-bit/192kHz | Yes |
 | [Yandex Music](https://music.yandex.ru) | Yes | FLAC 16-bit | Yes |
-| [GD Studio](https://music-api.gdstudio.xyz) | Yes | up to FLAC (source-dependent) | No |
+| [GD Studio](https://music-api.gdstudio.xyz) | No | up to FLAC 24-bit (source-dependent) | No |
 | [SquidWTF](https://squid.wtf/) (Qobuz, Tidal) | No | Source-dependent | Tidal |
 | [Apple Music](https://music.apple.com/) via [alacarte](https://github.com/sosjalapeno/alacarte) | An alacarte instance | ALAC / FLAC 24-bit/192kHz | Yes |
 
 > **⚠️ SquidWTF is deprecated.** The upstream squid.wtf music services are down. The Qobuz backend no longer resolves and public Tidal instances only serve search results and 30-second previews. The Amazon Music and Deemix backends have been removed. The provider is kept for users running a self-hosted Tidal instance and may be removed in a future release. The default provider is now Deezer, and Tidal is available as a native provider that streams from your own account.
 
-See the [Supported Music Providers](https://github.com/V1ck3s/octo-fiesta/wiki/Supported-Music-Providers) wiki page for detailed information.
-
-### Apple Music through alacarte
-
-Apple Music is served through a running [alacarte](https://github.com/sosjalapeno/alacarte) instance, which searches the Apple Music catalogue and downloads into the same music folder octo-fiesta uses. In alacarte, turn on **Settings → octo-fiesta Integration** and copy the two values it shows into octo-fiesta:
-
-```env
-AppleMusic__AlacarteUrl=http://alacarte-host:7373
-AppleMusic__ApiToken=<token from alacarte's settings>
-```
-
-With these set, Apple Music is offered next to your `Subsonic__MusicService` provider: search shows both, and each song, album and playlist downloads through its own provider. Set `Subsonic__MusicService=AppleMusic` to use Apple Music on its own. alacarte and octo-fiesta must mount the same music folder.
-
-If alacarte's music folder isn't the same folder as your general `DOWNLOAD_PATH` (for example, alacarte already manages its own library layout, or the two containers only share a subfolder), point Apple Music at it directly instead of moving `DOWNLOAD_PATH`:
-
-```env
-AppleMusic__DownloadPath=/music
-```
-
-This — and the equivalent `<PROVIDER>__DownloadPath` for any other provider (`Deezer__DownloadPath`, `Qobuz__DownloadPath`, `Tidal__DownloadPath`, `Yandex__DownloadPath`, `SquidWTF__DownloadPath`) — overrides `Library__DownloadPath` for that provider only; every other provider keeps using the shared path. `AppleMusic__DownloadPath` must still resolve, inside the container, to the exact same folder alacarte itself writes into (i.e. both containers mount it the same way) — this setting only lets that folder differ from the one everything else downloads into, it doesn't remove the requirement that octo-fiesta and alacarte agree on it.
+Several providers can be enabled at once, see [Multiple providers](#multiple-providers). Details per provider: [docs/supported-music-providers.md](docs/supported-music-providers.md).
 
 ## Compatible Clients
 
@@ -106,7 +87,19 @@ See the [Installation](https://github.com/V1ck3s/octo-fiesta/wiki/Installation) 
 
 ## Configuration
 
-See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration) wiki page for all available settings.
+Settings are environment variables. With Docker Compose, put them in `.env` (see [`.env.example`](.env.example)); `docker-compose.yml` maps each one to the app setting it feeds (`DEEZER_ARL` becomes `Deezer__Arl`, and so on). Every setting can also be passed directly in the `Section__Key` form. The full reference is in [docs/configuration.md](docs/configuration.md).
+
+Key general settings:
+
+| `.env` variable | Default | Description |
+|---|---|---|
+| `MUSIC_SERVICE` | `Deezer` | One or more providers, comma separated. |
+| `DOWNLOAD_PATH` | `./downloads` | Host folder for downloads (`STORAGE_MODE=Permanent`). |
+| `STORAGE_MODE` | `Permanent` | `Permanent` or `Cache`. |
+| `DOWNLOAD_MODE` | `Track` | `Track` or `Album`. |
+| `AUTO_UPGRADE_QUALITY` | `false` | Re-download a track when the provider offers better quality. |
+| `ALLOW_BITRATE_UPGRADE` | `false` | If a download would land on an existing file name: `false` skips it, `true` downloads only when the bitrate is higher, then replaces the file. |
+| `FOLDER_TEMPLATE` | `{artist}/{album}/{track} - {title}` | Layout of downloaded files. |
 
 ### Multiple providers
 
@@ -131,6 +124,7 @@ See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration
 | Variable | Default | Description |
 |---|---|---|
 | `GDStudio__Source` (`GDSTUDIO_SOURCE`) | `netease` | Upstream source(s), comma separated, e.g. `netease,joox`. Any value the API accepts works (not validated). Each source is queried separately (N sources = N requests per search) and results are merged; a source that fails or exceeds `GDStudio__TimeoutSeconds` (default 15) is logged as an error and skipped. |
+| `GDStudio__TimeoutSeconds` (`GDSTUDIO_TIMEOUT_SECONDS`) | `15` | Per-source timeout for search/metadata calls. |
 | `GDStudio__Br` (`GDSTUDIO_BR`) | `999` | Audio quality, see below. |
 | `GDStudio__Api` (`GDSTUDIO_API`) | `https://music-api.gdstudio.xyz/api.php` | API endpoint. |
 | `GDStudio__Proxy` (`GDSTUDIO_PROXY`) | empty | Proxy for all API and download requests: `http://`, `https://` or `socks5://` URL, e.g. `socks5://127.0.0.1:1080`. |
@@ -146,6 +140,25 @@ Available `br` values:
 | `999` | 24-bit lossless |
 
 If the requested `br` is not supported or the API returns an empty response, the next lower value is tried once (e.g. `999` falls back to `740` only, then the download fails). `128` has no fallback. The API is rate limited to about 50 requests per 5 minutes.
+
+### Apple Music (alacarte)
+
+Apple Music is served through a running [alacarte](https://github.com/sosjalapeno/alacarte) instance, which searches the Apple Music catalogue and downloads into the same music folder octo-fiesta uses. In alacarte, turn on **Settings → octo-fiesta Integration** and copy the two values it shows into octo-fiesta:
+
+```env
+AppleMusic__AlacarteUrl=http://alacarte-host:7373   # .env: APPLEMUSIC_ALACARTE_URL
+AppleMusic__ApiToken=<token from alacarte's settings> # .env: APPLEMUSIC_API_TOKEN
+```
+
+Then add `AppleMusic` to `MUSIC_SERVICE` (e.g. `MUSIC_SERVICE=Deezer,AppleMusic`): search shows both, and each song, album and playlist downloads through its own provider. Set `MUSIC_SERVICE=AppleMusic` to use Apple Music on its own. `AppleMusic__DownloadTimeoutSeconds` (`APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS`, default `900`) is how long to wait for alacarte to finish one song. alacarte and octo-fiesta must mount the same music folder.
+
+If alacarte's music folder isn't the same folder as your general `DOWNLOAD_PATH` (for example, alacarte already manages its own library layout, or the two containers only share a subfolder), point Apple Music at it directly instead of moving `DOWNLOAD_PATH`:
+
+```env
+AppleMusic__DownloadPath=/music
+```
+
+This — and the equivalent `<PROVIDER>__DownloadPath` for any other provider (`Deezer__DownloadPath`, `Qobuz__DownloadPath`, `Tidal__DownloadPath`, `Yandex__DownloadPath`, `SquidWTF__DownloadPath`) — overrides `Library__DownloadPath` for that provider only; every other provider keeps using the shared path. `AppleMusic__DownloadPath` must still resolve, inside the container, to the exact same folder alacarte itself writes into (i.e. both containers mount it the same way) — this setting only lets that folder differ from the one everything else downloads into, it doesn't remove the requirement that octo-fiesta and alacarte agree on it.
 
 ## Architecture
 
@@ -177,9 +190,9 @@ If the requested `br` is not supported or the API returns an empty response, the
 Full documentation is available in the [Wiki](https://github.com/V1ck3s/octo-fiesta/wiki):
 
 - [Installation](https://github.com/V1ck3s/octo-fiesta/wiki/Installation)
-- [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration)
+- [Configuration](docs/configuration.md)
 - [Compatible Clients](https://github.com/V1ck3s/octo-fiesta/wiki/Compatible-Clients)
-- [Supported Music Providers](https://github.com/V1ck3s/octo-fiesta/wiki/Supported-Music-Providers)
+- [Supported Music Providers](docs/supported-music-providers.md)
 - [Playlists](https://github.com/V1ck3s/octo-fiesta/wiki/Playlists)
 - [API Endpoints](https://github.com/V1ck3s/octo-fiesta/wiki/API-Endpoints)
 - [Development & Contributing](https://github.com/V1ck3s/octo-fiesta/wiki/Development-and-Contributing)
