@@ -124,10 +124,10 @@ if (requested.Count > 1)
         else startupWarnings.Add($"Skipping music service {svc}: {missing}");
     }
 }
-// Apple Music next to the listed provider(s) whenever alacarte is configured
-if (!activeServices.Contains(MusicService.AppleMusic) && AppleMusicRegistration.IsConfigured(builder.Configuration))
+// Apple Music is opt-in like every other provider: it must be listed in MUSIC_SERVICE
+if (!requested.Contains(MusicService.AppleMusic) && AppleMusicRegistration.IsConfigured(builder.Configuration))
 {
-    activeServices.Add(MusicService.AppleMusic);
+    startupWarnings.Add("AppleMusic__AlacarteUrl / AppleMusic__ApiToken are set but AppleMusic is not in MUSIC_SERVICE, ignoring it");
 }
 if (activeServices.Count == 0)
 {

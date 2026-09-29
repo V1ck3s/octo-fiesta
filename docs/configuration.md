@@ -103,13 +103,13 @@ Apple Music is served by a running [alacarte](https://github.com/sosjalapeno/ala
 | `APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS` | `AppleMusic__DownloadTimeoutSeconds` | `900` | Wait for alacarte to finish one song. |
 | (plain env) | `AppleMusic__DownloadPath` | unset | Use when alacarte's folder differs from `DOWNLOAD_PATH`. It must still resolve to the exact folder alacarte writes into. |
 
-Apple Music is enabled automatically once `AppleMusic__AlacarteUrl` and `AppleMusic__ApiToken` are set, next to whatever `MUSIC_SERVICE` lists (listing `AppleMusic` is equivalent). To use it alone, set `MUSIC_SERVICE=AppleMusic`.
+Apple Music is used only when `AppleMusic` is in `MUSIC_SERVICE` (e.g. `Deezer,AppleMusic`, or `AppleMusic` alone). If the two alacarte values are set but it is not listed, a startup warning is logged and it is ignored. If it is listed but the values are missing, it is skipped with a warning.
 
 ## Combining providers
 
 ```env
 # .env with Docker Compose
-MUSIC_SERVICE=Deezer,GDStudio
+MUSIC_SERVICE=Deezer,GDStudio,AppleMusic
 DEEZER_ARL=...
 GDSTUDIO_SOURCE=netease,joox
 APPLEMUSIC_ALACARTE_URL=http://alacarte-host:7373

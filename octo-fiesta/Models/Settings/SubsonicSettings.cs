@@ -147,14 +147,6 @@ public partial class SubsonicSettings
     public string MusicServices { get; set; } = MusicService.Deezer.ToString();
 
     /// <summary>
-    /// The first (primary) entry of <see cref="MusicServices"/>. Read-only: it is derived, so
-    /// a multi-value config such as "Deezer,Qobuz" never has to bind to an enum.
-    /// </summary>
-    // Derived, so it must not bind to the "MusicService" config key (that key holds the raw list).
-    [Microsoft.Extensions.Configuration.ConfigurationKeyName("PrimaryMusicService")]
-    public MusicService MusicService => ParseMusicServices(MusicServices, out _).FirstOrDefault();
-
-    /// <summary>
     /// Parses a ","-separated list (also "|" or ";") (case-insensitive) into distinct services; unrecognised
     /// entries are reported in <paramref name="unknown"/>. Blank input means Deezer.
     /// </summary>
