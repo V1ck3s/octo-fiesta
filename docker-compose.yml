@@ -37,6 +37,8 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # On a file name collision: false = skip download, true = replace only if the new bitrate is higher (default: false)
+      - Subsonic__AllowBitrateUpgrade=${ALLOW_BITRATE_UPGRADE:-false}
       # Disable triggering a library scan after a download completes (default: false)
       # Useful if your Subsonic server or an external automation already picks up new files
       - Subsonic__DisableLibraryScan=${DISABLE_LIBRARY_SCAN:-false}

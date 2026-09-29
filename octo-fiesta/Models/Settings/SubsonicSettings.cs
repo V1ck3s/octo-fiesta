@@ -212,6 +212,15 @@ public partial class SubsonicSettings
     /// the track will be re-downloaded in FLAC
     /// </summary>
     public bool AutoUpgradeQuality { get; set; } = false;
+
+    /// <summary>
+    /// What to do when a download would land on a file name that already exists (default: false)
+    /// Environment variable: ALLOW_BITRATE_UPGRADE
+    /// false: skip the download and keep the existing file.
+    /// true: download only if the new track has a higher bitrate than the existing file,
+    /// and replace the file once the download completes.
+    /// </summary>
+    public bool AllowBitrateUpgrade { get; set; } = false;
     
     /// <summary>
     /// Template for organizing downloaded files into folders (default: {artist}/{album}/{track} - {title})

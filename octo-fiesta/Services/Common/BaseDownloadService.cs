@@ -879,8 +879,16 @@ public abstract class BaseDownloadService : IDownloadService
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);
 
-        // Same file name already on disk: download beside it and keep only the higher bitrate.
+        // Same file name already on disk: keep it unless bitrate upgrades are allowed and the
+        // incoming track is better (decided before reading the stream); a better one is written
+        // beside the old file and swapped in on completion.
         var collided = IOFile.Exists(outputPath);
+        if (collided && !(SubsonicSettings.AllowBitrateUpgrade && IsBitrateUpgrade(outputPath, result.DownloadedQuality)))
+        {
+            Logger.LogInformation("File already exists, skipping download: {Path}", outputPath);
+            await result.DownloadStream.DisposeAsync();
+            return outputPath;
+        }
         var writePath = collided
             ? Path.Combine(albumFolder, Path.GetFileNameWithoutExtension(outputPath) + ".new" + Path.GetExtension(outputPath))
             : outputPath;
@@ -899,19 +907,9 @@ public abstract class BaseDownloadService : IDownloadService
 
             if (collided)
             {
-                var name = Path.GetFileNameWithoutExtension(writePath);
-                outputPath = Path.Combine(albumFolder, name[..^".new".Length] + Path.GetExtension(writePath));
-                if (IOFile.Exists(outputPath))
-                {
-                    var (oldRate, newRate) = (GetBitrate(outputPath), GetBitrate(writePath));
-                    if (newRate <= oldRate)
-                    {
-                        Logger.LogInformation("Keeping existing {Path} ({Old} kbps), discarding new download ({New} kbps)", outputPath, oldRate, newRate);
-                        TryDeleteIncompleteFile(writePath);
-                        return outputPath;
-                    }
-                    Logger.LogInformation("Replacing {Path} ({Old} kbps) with higher bitrate download ({New} kbps)", outputPath, oldRate, newRate);
-                }
+                outputPath = Path.Combine(albumFolder,
+                    Path.GetFileNameWithoutExtension(writePath)[..^".new".Length] + Path.GetExtension(writePath));
+                Logger.LogInformation("Replacing {Path} with higher bitrate download", outputPath);
                 IOFile.Move(writePath, outputPath, overwrite: true);
             }
 
@@ -944,10 +942,18 @@ public abstract class BaseDownloadService : IDownloadService
         }
     }
 
-    private static int GetBitrate(string path)
+    // ponytail: any existing .flac counts as top quality (16 vs 24-bit not compared)
+    private static bool IsBitrateUpgrade(string existingPath, string? newQuality)
     {
-        try { return TagLib.File.Create(path).Properties.AudioBitrate; }
-        catch { return 0; }
+        if (string.IsNullOrEmpty(newQuality) || existingPath.EndsWith(".flac", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (newQuality.StartsWith("FLAC", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // Lossy quality strings end in the bitrate, e.g. MP3_320
+        if (!int.TryParse(newQuality[(newQuality.LastIndexOf('_') + 1)..], out var newKbps))
+            return false;
+        try { return newKbps > TagLib.File.Create(existingPath).Properties.AudioBitrate; }
+        catch { return false; }
     }
 
     // Reads the first bytes of the written file, detects the audio format, and renames
