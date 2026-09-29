@@ -59,6 +59,14 @@ AppleMusic__ApiToken=<token from alacarte's settings>
 
 With these set, Apple Music is offered next to your `Subsonic__MusicService` provider: search shows both, and each song, album and playlist downloads through its own provider. Set `Subsonic__MusicService=AppleMusic` to use Apple Music on its own. alacarte and octo-fiesta must mount the same music folder.
 
+If alacarte's music folder isn't the same folder as your general `DOWNLOAD_PATH` (for example, alacarte already manages its own library layout, or the two containers only share a subfolder), point Apple Music at it directly instead of moving `DOWNLOAD_PATH`:
+
+```env
+AppleMusic__DownloadPath=/music
+```
+
+This — and the equivalent `<PROVIDER>__DownloadPath` for any other provider (`Deezer__DownloadPath`, `Qobuz__DownloadPath`, `Tidal__DownloadPath`, `Yandex__DownloadPath`, `SquidWTF__DownloadPath`) — overrides `Library__DownloadPath` for that provider only; every other provider keeps using the shared path. `AppleMusic__DownloadPath` must still resolve, inside the container, to the exact same folder alacarte itself writes into (i.e. both containers mount it the same way) — this setting only lets that folder differ from the one everything else downloads into, it doesn't remove the requirement that octo-fiesta and alacarte agree on it.
+
 ## Compatible Clients
 
 | Platform | Clients |

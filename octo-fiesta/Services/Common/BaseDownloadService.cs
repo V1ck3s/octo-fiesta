@@ -110,7 +110,13 @@ public abstract class BaseDownloadService : IDownloadService
         _serviceProvider = serviceProvider;
         Logger = logger;
 
-        DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
+        // Optional per-provider override (e.g. AppleMusic__DownloadPath), checked before the
+        // shared Library:DownloadPath - lets a provider like Apple Music (via alacarte) resolve
+        // downloads under its own tool's library folder instead. IConfiguration keys are
+        // case-insensitive, so ProviderName's lowercase form ("applemusic") matches the
+        // PascalCase env var section ("AppleMusic") without any extra mapping.
+        var providerDownloadPath = configuration[$"{ProviderName}:DownloadPath"];
+        DownloadPath = providerDownloadPath ?? configuration["Library:DownloadPath"] ?? "./downloads";
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(DownloadPath))
