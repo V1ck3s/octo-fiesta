@@ -862,9 +862,6 @@ public abstract class BaseDownloadService : IDownloadService
         return song;
     }
 
-    /// <summary>Optional suffix appended to the file name when it collides with an existing file.</summary>
-    protected virtual string? FileNameConflictSuffix(Song song) => null;
-
     /// <summary>
     /// Takes DownloadResult provided by specific provider and saves it to file
     /// with respect to storage template and storage mode.
@@ -882,30 +879,41 @@ public abstract class BaseDownloadService : IDownloadService
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);
 
-        // On collision a provider may name the file "<name>-<suffix>" (e.g. GDStudio source)
-        if (IOFile.Exists(outputPath) && FileNameConflictSuffix(song) is { } suffix)
-        {
-            outputPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
-                $"{Path.GetFileNameWithoutExtension(outputPath)}-{PathHelper.SanitizeFileName(suffix)}{Path.GetExtension(outputPath)}");
-        }
-
-        if (IOFile.Exists(outputPath))
-        {
-            throw new InvalidOperationException(
-                $"Refusing to overwrite '{outputPath}' — file already exists and the pre-download check did not catch it. " +
-                "This indicates a bug in the pre-download existence probe.");
-        }
+        // Same file name already on disk: download beside it and keep only the higher bitrate.
+        var collided = IOFile.Exists(outputPath);
+        var writePath = collided
+            ? Path.Combine(albumFolder, Path.GetFileNameWithoutExtension(outputPath) + ".new" + Path.GetExtension(outputPath))
+            : outputPath;
 
         try
         {
             // Download the file with progress logging and stall detection
-            await using var outputFile = IOFile.Create(outputPath);
+            await using var outputFile = IOFile.Create(writePath);
             await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
             await outputFile.DisposeAsync();
 
             // Detect actual audio format from magic bytes and rename if the extension is wrong.
             // This catches cases where the stream is raw FLAC but we assumed MP4 container.
-            outputPath = CorrectExtensionIfNeeded(outputPath);
+            writePath = CorrectExtensionIfNeeded(writePath);
+            outputPath = writePath;
+
+            if (collided)
+            {
+                var name = Path.GetFileNameWithoutExtension(writePath);
+                outputPath = Path.Combine(albumFolder, name[..^".new".Length] + Path.GetExtension(writePath));
+                if (IOFile.Exists(outputPath))
+                {
+                    var (oldRate, newRate) = (GetBitrate(outputPath), GetBitrate(writePath));
+                    if (newRate <= oldRate)
+                    {
+                        Logger.LogInformation("Keeping existing {Path} ({Old} kbps), discarding new download ({New} kbps)", outputPath, oldRate, newRate);
+                        TryDeleteIncompleteFile(writePath);
+                        return outputPath;
+                    }
+                    Logger.LogInformation("Replacing {Path} ({Old} kbps) with higher bitrate download ({New} kbps)", outputPath, oldRate, newRate);
+                }
+                IOFile.Move(writePath, outputPath, overwrite: true);
+            }
 
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
@@ -931,9 +939,15 @@ public abstract class BaseDownloadService : IDownloadService
         }
         catch
         {
-            TryDeleteIncompleteFile(outputPath);
+            TryDeleteIncompleteFile(writePath);
             throw;
         }
+    }
+
+    private static int GetBitrate(string path)
+    {
+        try { return TagLib.File.Create(path).Properties.AudioBitrate; }
+        catch { return 0; }
     }
 
     // Reads the first bytes of the written file, detects the audio format, and renames

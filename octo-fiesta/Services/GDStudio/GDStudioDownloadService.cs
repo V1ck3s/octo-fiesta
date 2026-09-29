@@ -36,9 +36,6 @@ public class GDStudioDownloadService : BaseDownloadService
     protected override string? ExtractExternalIdFromAlbumId(string albumId)
         => albumId.StartsWith(AlbumPrefix) ? albumId[AlbumPrefix.Length..] : null;
 
-    protected override string? FileNameConflictSuffix(Song song) =>
-        song.ExternalId is { } id ? _settings.SplitTrackId(id).Source : null;
-
     // No quality choice: we always take the best on offer, so never re-download for an upgrade.
     protected override string? GetTargetQuality() => null;
 
