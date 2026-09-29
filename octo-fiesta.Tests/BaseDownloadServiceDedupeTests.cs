@@ -238,7 +238,7 @@ public class BaseDownloadServiceDedupeTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveDownloadStream_WhenTargetCreatedBetweenProbeAndWrite_Throws()
+    public async Task SaveDownloadStream_WhenTargetExists_KeepsExistingFile()
     {
         var localLibMock = new Mock<ILocalLibraryService>();
         localLibMock
@@ -266,8 +266,10 @@ public class BaseDownloadServiceDedupeTests : IDisposable
         var service = BuildService(localLibMock, metaMock);
         service.CreateFileBeforeWrite = true;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.DownloadSongAsync("fake", "3"));
+        // AllowBitrateUpgrade is off: the existing file wins and is not overwritten.
+        var path = await service.DownloadSongAsync("fake", "3");
+
+        Assert.Equal("race-written", File.ReadAllText(path));
     }
 
     private sealed class FakeDedupeDownloadService : BaseDownloadService
