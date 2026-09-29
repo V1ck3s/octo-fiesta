@@ -87,7 +87,7 @@ builder.Services.AddHttpClient(LrclibLyricsService.HttpClientName, client =>
 // Register the configured music service(s). MUSIC_SERVICE may list several separated by "|";
 // a provider without credentials is skipped with a warning (unless it is the only one requested).
 var startupWarnings = new List<string>();
-var requested = SubsonicSettings.ParseMusicServices(subsonicSettings.MusicService, out var unknownServices);
+var requested = SubsonicSettings.ParseMusicServices(subsonicSettings.MusicServices, out var unknownServices);
 foreach (var name in unknownServices) startupWarnings.Add($"Unknown MUSIC_SERVICE entry '{name}', skipping it");
 
 bool Has(string? v) => !string.IsNullOrWhiteSpace(v);

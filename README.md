@@ -110,7 +110,7 @@ See the [Configuration](https://github.com/V1ck3s/octo-fiesta/wiki/Configuration
 
 ### Multiple providers
 
-`MUSIC_SERVICE` accepts several services separated by `|`, e.g. `MUSIC_SERVICE=Deezer|Qobuz`.
+`MUSIC_SERVICE` accepts several services separated by `,` (`|` and `;` also work), e.g. `MUSIC_SERVICE=Deezer,Qobuz`.
 
 - Searches go to every provider in parallel and the results are interleaved, so each provider is represented.
 - Songs, albums and artists keep the provider in their id, so streaming and downloads are routed back to the right one.
