@@ -34,13 +34,14 @@ public class QobuzStartupValidator : BaseStartupValidator
 
         if (string.IsNullOrWhiteSpace(userId))
         {
-            WriteStatus("Qobuz UserId", "NOT CONFIGURED", ConsoleColor.Red);
-            WriteDetail("Set the Qobuz__UserId environment variable");
-            return ValidationResult.NotConfigured("Qobuz UserId not configured");
+            WriteStatus("Qobuz UserId", "not set (optional)", ConsoleColor.DarkGray);
         }
 
         WriteStatus("Qobuz UserAuthToken", MaskSecret(userAuthToken), ConsoleColor.Cyan);
-        WriteStatus("Qobuz UserId", userId, ConsoleColor.Cyan);
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            WriteStatus("Qobuz UserId", userId, ConsoleColor.Cyan);
+        }
         WriteStatus("Qobuz Quality", quality ?? "auto (highest available)", ConsoleColor.Cyan);
 
         // Validate token by calling Qobuz API
@@ -49,29 +50,18 @@ public class QobuzStartupValidator : BaseStartupValidator
         return ValidationResult.Success("Qobuz validation completed");
     }
 
-    private async Task ValidateQobuzTokenAsync(string userAuthToken, string userId, CancellationToken cancellationToken)
+    private async Task ValidateQobuzTokenAsync(string userAuthToken, string? userId, CancellationToken cancellationToken)
     {
         const string fieldName = "Qobuz credentials";
         
         try
         {
-            // First, get the app ID from bundle service (simple check)
-            var bundleUrl = "https://play.qobuz.com/login";
-            var bundleResponse = await _httpClient.GetAsync(bundleUrl, cancellationToken);
-            
-            if (!bundleResponse.IsSuccessStatusCode)
-            {
-                WriteStatus(fieldName, "UNABLE TO VERIFY", ConsoleColor.Yellow);
-                WriteDetail("Could not fetch Qobuz app configuration");
-                return;
-            }
-
             // Try to validate with a simple API call
-            // We'll use the user favorites endpoint which requires authentication.
-            // Honour a configured App ID so tokens issued by a non-web-player app validate.
+            // Probe user/get, which needs no user_id (the token identifies the user), so UserId
+            // stays optional. Honour a configured App ID so tokens issued by a non-web-player app validate.
             var appId = _qobuzSettings.Value.AppId;
             if (string.IsNullOrWhiteSpace(appId)) appId = "798273057"; // Fallback app ID
-            var apiUrl = $"https://www.qobuz.com/api.json/0.2/favorite/getUserFavorites?user_id={userId}&app_id={appId}";
+            var apiUrl = $"https://www.qobuz.com/api.json/0.2/user/get?app_id={appId}";
             
             using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
             request.Headers.Add("X-App-Id", appId);
@@ -102,7 +92,10 @@ public class QobuzStartupValidator : BaseStartupValidator
             if (!string.IsNullOrEmpty(json) && !json.Contains("\"error\""))
             {
                 WriteStatus(fieldName, "VALID", ConsoleColor.Green);
-                WriteDetail($"User ID: {userId}");
+                if (!string.IsNullOrWhiteSpace(userId))
+                {
+                    WriteDetail($"User ID: {userId}");
+                }
             }
             else
             {

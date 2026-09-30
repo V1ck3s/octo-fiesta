@@ -1,0 +1,35 @@
+a[href*="/albums/ext-"],
+a[href*="/songs/ext-"],
+a[href*="/artists/ext-"],
+a[href*="/album-artists/ext-"],
+a[href*="/albums/ext-"] *,
+a[href*="/songs/ext-"] *,
+a[href*="/artists/ext-"] *,
+a[href*="/album-artists/ext-"] * {
+    color: var(--theme-colors-foreground-muted) !important;
+    font-weight: 400 !important;
+}
+
+[class*="row"]:has(> a[href*="/albums/ext-"]),
+[class*="row"]:has(> a[href*="/songs/ext-"]),
+[class*="row"]:has(> a[href*="/artists/ext-"]),
+[class*="row"]:has(> a[href*="/album-artists/ext-"]),
+[class*="row"]:has(> a[href*="/albums/ext-"]) *,
+[class*="row"]:has(> a[href*="/songs/ext-"]) *,
+[class*="row"]:has(> a[href*="/artists/ext-"]) *,
+[class*="row"]:has(> a[href*="/album-artists/ext-"]) * {
+    color: var(--theme-colors-foreground-muted) !important;
+    font-weight: 400 !important;
+}
+
+[cmdk-item][data-value*="-ext-"],
+[cmdk-item][data-value*="-ext-"] * {
+    color: var(--theme-colors-foreground-muted) !important;
+    font-weight: 400 !important;
+}
+
+[row-id^="ext-"],
+[row-id^="ext-"] * {
+    color: var(--theme-colors-foreground-muted) !important;
+    font-weight: 400 !important;
+}

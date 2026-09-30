@@ -7,7 +7,7 @@ namespace octo_fiesta.Services.Common;
 /// Helper class for normalizing strings for comparison purposes.
 /// Handles different quote characters (straight vs curly quotes) and other variants.
 /// </summary>
-public static class StringNormalizer
+public static partial class StringNormalizer
 {
     // Mapping of various quote and apostrophe characters to their canonical forms
     private static readonly Dictionary<char, char> CharNormalizations = new()

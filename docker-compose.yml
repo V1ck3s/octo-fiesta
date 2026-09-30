@@ -1,6 +1,6 @@
 services:
   octo-fiesta:
-    image: ghcr.io/v1ck3s/octo-fiesta
+    image: ghcr.io/filipton/octo-fiesta:dev
     container_name: octo-fiesta
     restart: unless-stopped
     ports:
@@ -19,7 +19,9 @@ services:
       - Subsonic__AdminUsername=${SUBSONIC_ADMIN_USERNAME:-}
       # Admin Password to perform actions on navidrome server that require admin permissions (optional)
       - Subsonic__AdminPassword=${SUBSONIC_ADMIN_PASSWORD:-}
-      # Music service to use: Deezer, Qobuz, Tidal, Yandex, or SquidWTF (deprecated) (default: Deezer)
+      # Music service to use: Deezer, Qobuz, Tidal, Yandex, GDStudio, AppleMusic, or SquidWTF (deprecated) (default: Deezer)
+      # Several can be combined with "," (e.g. Deezer,Qobuz): searches are merged, and services
+      # without credentials are skipped with a warning.
       - Subsonic__MusicService=${MUSIC_SERVICE:-Deezer}
       # Storage mode: Permanent (saved to library), Cache (temporary, auto-cleanup)
       - Subsonic__StorageMode=${STORAGE_MODE:-Permanent}
@@ -35,12 +37,24 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
+      # On a file name collision: false = skip download, true = replace only if the new bitrate is higher (default: false)
+      - Subsonic__AllowBitrateUpgrade=${ALLOW_BITRATE_UPGRADE:-false}
       # Disable triggering a library scan after a download completes (default: false)
       # Useful if your Subsonic server or an external automation already picks up new files
       - Subsonic__DisableLibraryScan=${DISABLE_LIBRARY_SCAN:-false}
       # Folder template for organizing downloaded files (default: {artist}/{album}/{track} - {title})
       # Available placeholders: {artistLetter}, {artist}, {album}, {title}, {track}, {disc}, {year}, {genre}, {quality}
       - Subsonic__FolderTemplate=${FOLDER_TEMPLATE}
+      # ===== NAVIDROME UPLOAD API (forked Navidrome only) =====
+      # Use the custom POST /api/upload endpoint to skip the library scan
+      - Subsonic__UseNavidromeUploadApi=${USE_NAVIDROME_UPLOAD_API:-false}
+      - Subsonic__NavidromeLibraryId=${NAVIDROME_LIBRARY_ID:-1}
+      - Subsonic__NavidromeUploadFolder=${NAVIDROME_UPLOAD_FOLDER:-}
+
+      # ===== EXTERNAL COVER INDICATOR =====
+      - ExternalCover__IndicatorSize=${EXTERNAL_COVER_INDICATOR_SIZE:-1}
+      - ExternalCover__IndicatorSaturation=${EXTERNAL_COVER_INDICATOR_SATURATION:-1}
+      - ExternalCover__IndicatorColor=${EXTERNAL_COVER_INDICATOR_COLOR:-0}
       
       # ===== DEEZER SETTINGS =====
       # Deezer ARL token (required if using Deezer)
@@ -57,6 +71,10 @@ services:
       - Qobuz__UserId=${QOBUZ_USER_ID:-}
       # Preferred audio quality: FLAC, FLAC_24_HIGH, FLAC_24_LOW, FLAC_16, MP3_320 (optional)
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
+      # Qobuz App ID / App Secret (optional)
+      # When BOTH are set, bundle.js scraping is skipped and these values are used directly.
+      - Qobuz__AppId=${QOBUZ_APP_ID:-}
+      - Qobuz__AppSecret=${QOBUZ_APP_SECRET:-}
       
       # ===== TIDAL SETTINGS =====
       # Tokens come from the OAuth login: docker compose run --rm octo-fiesta --tidal-login
@@ -116,6 +134,32 @@ services:
       # Default: false
       # Available: true, false
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
+
+      # ===== GDSTUDIO SETTINGS (MUSIC_SERVICE=GDStudio) =====
+      # Upstream source(s), comma separated, e.g. netease,joox. Any value the API accepts works.
+      # Each source is queried separately (N sources = N requests per search). Default: netease
+      - GDStudio__Source=${GDSTUDIO_SOURCE:-netease}
+      # Per-source timeout in seconds for search/metadata calls; a slow source is logged and skipped. Default: 5
+      - GDStudio__TimeoutSeconds=${GDSTUDIO_TIMEOUT_SECONDS:-5}
+      # Audio quality (br): 128, 192, 320, 740 (16-bit lossless), 999 (24-bit lossless). Default: 999
+      # If unsupported or empty, the next lower option is tried once.
+      - GDStudio__Br=${GDSTUDIO_BR:-999}
+      # API endpoint. Default: https://music-api.gdstudio.xyz/api.php
+      - GDStudio__Api=${GDSTUDIO_API:-https://music-api.gdstudio.xyz/api.php}
+      # Proxy for all calls, e.g. http://host:port, https://host:port or socks5://host:port
+      - GDStudio__Proxy=${GDSTUDIO_PROXY:-}
+
+      # ===== APPLE MUSIC SETTINGS (through an alacarte instance) =====
+      # Base URL of the alacarte web UI, e.g. http://alacarte-host:7373 (alacarte: Settings -> octo-fiesta Integration)
+      - AppleMusic__AlacarteUrl=${APPLEMUSIC_ALACARTE_URL:-}
+      # alacarte integration API token (same settings page)
+      - AppleMusic__ApiToken=${APPLEMUSIC_API_TOKEN:-}
+      # How long to wait for alacarte to finish one song, in seconds. Default: 900
+      - AppleMusic__DownloadTimeoutSeconds=${APPLEMUSIC_DOWNLOAD_TIMEOUT_SECONDS:-900}
+      # Per-provider download path (optional). Leave it out unless alacarte's folder differs from
+      # Library__DownloadPath; an empty value would override the shared path, so it is not set here.
+      # Works for any provider: <Provider>__DownloadPath (Deezer, Qobuz, Tidal, Yandex, GDStudio, SquidWTF, AppleMusic)
+      # - AppleMusic__DownloadPath=/music
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
       # Holds the Tidal token store, only needed when MUSIC_SERVICE=Tidal

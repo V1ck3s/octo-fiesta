@@ -15,7 +15,7 @@ namespace octo_fiesta.Services.Local;
 /// Local library service implementation
 /// Uses a simple JSON file to store mappings (can be replaced with a database)
 /// </summary>
-public class LocalLibraryService : ILocalLibraryService
+public partial class LocalLibraryService : ILocalLibraryService
 {
     private readonly string _mappingFilePath;
     private readonly string _downloadDirectory;
@@ -177,12 +177,12 @@ public class LocalLibraryService : ILocalLibraryService
                 return matches;
             }
 
-            var titleKey = StringNormalizer.CreateComparisonKey(title);
+            var titleKey = StringNormalizer.CreateSongTitleDedupeKey(title);
             var artistKey = StringNormalizer.CreateComparisonKey(artist);
 
             foreach (var songElement in EnumerateSongs(songNode))
             {
-                var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
+                var candidateTitleKey = StringNormalizer.CreateSongTitleDedupeKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
                 var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
 
                 var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
@@ -256,38 +256,6 @@ public class LocalLibraryService : ILocalLibraryService
         return null;
     }
 
-    public async Task RegisterDownloadedSongAsync(Song song, string localPath, string? downloadedQuality = null)
-    {
-        if (song.ExternalProvider == null || song.ExternalId == null) return;
-        
-        // Load mappings first (this acquires the lock internally if needed)
-        var mappings = await LoadMappingsAsync();
-        
-        await _lock.WaitAsync();
-        try
-        {
-            var key = $"{song.ExternalProvider}:{song.ExternalId}";
-            
-            mappings[key] = new LocalSongMapping
-            {
-                ExternalProvider = song.ExternalProvider,
-                ExternalId = song.ExternalId,
-                LocalPath = localPath,
-                Title = song.Title,
-                Artist = song.Artist,
-                Album = song.Album,
-                DownloadedAt = DateTime.UtcNow,
-                DownloadedQuality = downloadedQuality
-            };
-            
-            await SaveMappingsAsync(mappings);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-    
     public async Task<LocalSongMapping?> GetMappingForExternalSongAsync(string externalProvider, string externalId)
     {
         var mappings = await LoadMappingsAsync();

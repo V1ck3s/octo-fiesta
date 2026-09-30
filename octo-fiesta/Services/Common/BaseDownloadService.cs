@@ -8,7 +8,9 @@ using octo_fiesta.Services.Lyrics;
 using octo_fiesta.Services.Subsonic;
 using TagLib;
 using IOFile = System.IO.File;
+using IODirectory = System.IO.Directory;
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 
 namespace octo_fiesta.Services.Common;
 
@@ -63,6 +65,22 @@ public abstract class BaseDownloadService : IDownloadService
     }
 
     /// <summary>
+    /// Lazy-loaded Navidrome upload service. Returns null when not registered.
+    /// </summary>
+    private INavidromeUploadService? _navidromeUploadService;
+    protected INavidromeUploadService? NavidromeUploadService
+    {
+        get
+        {
+            if (_navidromeUploadService == null)
+            {
+                _navidromeUploadService = _serviceProvider.GetService<INavidromeUploadService>();
+            }
+            return _navidromeUploadService;
+        }
+    }
+
+    /// <summary>
     /// Lazy-loaded lyrics service (optional). Used to drop a .lrc sidecar next to
     /// permanently downloaded tracks so the backing server serves synced lyrics.
     /// </summary>
@@ -92,7 +110,13 @@ public abstract class BaseDownloadService : IDownloadService
         _serviceProvider = serviceProvider;
         Logger = logger;
 
-        DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
+        // Optional per-provider override (e.g. AppleMusic__DownloadPath), checked before the
+        // shared Library:DownloadPath - lets a provider like Apple Music (via alacarte) resolve
+        // downloads under its own tool's library folder instead. IConfiguration keys are
+        // case-insensitive, so ProviderName's lowercase form ("applemusic") matches the
+        // PascalCase env var section ("AppleMusic") without any extra mapping.
+        var providerDownloadPath = configuration[$"{ProviderName}:DownloadPath"];
+        DownloadPath = providerDownloadPath ?? configuration["Library:DownloadPath"] ?? "./downloads";
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(DownloadPath))
@@ -442,7 +466,9 @@ public abstract class BaseDownloadService : IDownloadService
     /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
     /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
+    /// <param name="LibraryPath">Set when the provider already placed the file in the library
+    /// itself (e.g. alacarte); the stream is then ignored and the file is used where it is.</param>
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null, string? LibraryPath = null);
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -516,6 +542,43 @@ public abstract class BaseDownloadService : IDownloadService
             if (!isCache)
             {
                 var existingMapping = await LocalLibraryService.GetMappingForExternalSongAsync(externalProvider, externalId);
+                if (existingMapping == null)
+                {
+                    // No mapping — the file may have been imported by another tool (e.g. alacarte).
+                    // Build the expected path and probe for it before hitting the network.
+                    var probeSong = await GetSongMetadataForTrackAsync(externalProvider, externalId);
+                    var existingPath = ProbeForExistingFile(
+                        PathHelper.BuildTrackPath(DownloadPath, probeSong, ".flac", SubsonicSettings.FolderTemplate, null));
+                    string? existingSubsonicId = null;
+                    if (existingPath == null)
+                    {
+                        // Fallback: ask Navidrome — catches files with metadata-only matches.
+                        // Navidrome reports paths relative to its library root and synthesizes the
+                        // file name from tags (e.g. "01-01 - Title.mp3"), so it can't be trusted
+                        // verbatim. Resolve to a real local file before registering — otherwise the
+                        // mapping's File.Exists check always fails, so it never resolves and gets
+                        // re-probed (and re-logged) on every play, and streaming fails.
+                        var naviMatch = await LocalLibraryService.FindLocalSongByMetadataAsync(probeSong);
+                        if (naviMatch != null)
+                        {
+                            var resolvedPath = ResolveNavidromeMatchFile(naviMatch.LocalPath, probeSong);
+                            if (resolvedPath != null)
+                            {
+                                existingPath = resolvedPath;
+                                existingSubsonicId = naviMatch.LocalSubsonicId;
+                            }
+                        }
+                    }
+                    if (existingPath != null)
+                    {
+                        Logger.LogInformation("Found existing local file without mapping, registering: {Path}", existingPath);
+                        await LocalLibraryService.RegisterDownloadedSongAsync(probeSong, existingPath, downloadedQuality: null, localSubsonicId: existingSubsonicId);
+                        ourDownloadInfo.Status = DownloadStatus.Completed;
+                        ourDownloadInfo.CompletedAt = DateTime.UtcNow;
+                        ourDownloadInfo.LocalPath = existingPath;
+                        return existingPath;
+                    }
+                }
                 if (existingMapping != null && IOFile.Exists(existingMapping.LocalPath))
                 {
                     // Check if we should upgrade quality
@@ -589,10 +652,46 @@ public abstract class BaseDownloadService : IDownloadService
             Song song = await GetSongMetadataForTrackAsync(externalProvider, externalId);
             var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
             string localPath;
-            await using (downloadResult.DownloadStream)
+            string? navidromeUploadId = null;
+
+            // Use the Navidrome upload API when enabled and we are not in cache mode and
+            // not currently performing a same-path quality upgrade (which relies on backup/replace).
+            var uploadService = NavidromeUploadService;
+            var useUploadApi = downloadResult.LibraryPath == null
+                && !isCache
+                && string.IsNullOrEmpty(ourDownloadInfo.BackupPath)
+                && uploadService != null
+                && uploadService.IsConfigured;
+
+            if (downloadResult.LibraryPath != null)
             {
-                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, isCache, cancellationToken);
+                localPath = downloadResult.LibraryPath;
             }
+            else if (useUploadApi)
+            {
+                await using (downloadResult.DownloadStream)
+                {
+                    var uploaded = await UploadDownloadStreamToNavidromeAsync(
+                        downloadResult, song, uploadService!, cancellationToken);
+
+                    if (uploaded == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Navidrome upload failed; aborting download to avoid silent fallback");
+                    }
+
+                    localPath = uploaded.Value.LocalPath;
+                    navidromeUploadId = uploaded.Value.NavidromeId;
+                }
+            }
+            else
+            {
+                await using (downloadResult.DownloadStream)
+                {
+                    localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, isCache, cancellationToken);
+                }
+            }
+
             song.LocalPath = localPath;
 
             ourDownloadInfo.Status = DownloadStatus.Completed;
@@ -624,20 +723,25 @@ public abstract class BaseDownloadService : IDownloadService
             // Only register and scan if NOT in cache mode
             if (!isCache)
             {
-                await LocalLibraryService.RegisterDownloadedSongAsync(song, localPath, downloadResult.DownloadedQuality);
+                await LocalLibraryService.RegisterDownloadedSongAsync(
+                    song, localPath, downloadResult.DownloadedQuality, navidromeUploadId);
 
-                // Trigger a Subsonic library rescan (with debounce)
-                _ = Task.Run(async () =>
+                // The upload API ingests the track immediately, so no scan is needed in that path.
+                if (navidromeUploadId == null)
                 {
-                    try
+                    // Trigger a Subsonic library rescan (with debounce)
+                    _ = Task.Run(async () =>
                     {
-                        await LocalLibraryService.TriggerLibraryScanAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogWarning(ex, "Failed to trigger library scan after download");
-                    }
-                });
+                        try
+                        {
+                            await LocalLibraryService.TriggerLibraryScanAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogWarning(ex, "Failed to trigger library scan after download");
+                        }
+                    });
+                }
 
                 // If download mode is Album and triggering is enabled, start background download of remaining tracks
                 if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
@@ -775,19 +879,39 @@ public abstract class BaseDownloadService : IDownloadService
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);
 
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
+        // Same file name already on disk: keep it unless bitrate upgrades are allowed and the
+        // incoming track is better (decided before reading the stream); a better one is written
+        // beside the old file and swapped in on completion.
+        var collided = IOFile.Exists(outputPath);
+        if (collided && !(SubsonicSettings.AllowBitrateUpgrade && IsBitrateUpgrade(outputPath, result.DownloadedQuality)))
+        {
+            Logger.LogInformation("File already exists, skipping download: {Path}", outputPath);
+            await result.DownloadStream.DisposeAsync();
+            return outputPath;
+        }
+        var writePath = collided
+            ? Path.Combine(albumFolder, Path.GetFileNameWithoutExtension(outputPath) + ".new" + Path.GetExtension(outputPath))
+            : outputPath;
 
         try
         {
             // Download the file with progress logging and stall detection
-            await using var outputFile = IOFile.Create(outputPath);
+            await using var outputFile = IOFile.Create(writePath);
             await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
             await outputFile.DisposeAsync();
 
             // Detect actual audio format from magic bytes and rename if the extension is wrong.
             // This catches cases where the stream is raw FLAC but we assumed MP4 container.
-            outputPath = CorrectExtensionIfNeeded(outputPath);
+            writePath = CorrectExtensionIfNeeded(writePath);
+            outputPath = writePath;
+
+            if (collided)
+            {
+                outputPath = Path.Combine(albumFolder,
+                    Path.GetFileNameWithoutExtension(writePath)[..^".new".Length] + Path.GetExtension(writePath));
+                Logger.LogInformation("Replacing {Path} with higher bitrate download", outputPath);
+                IOFile.Move(writePath, outputPath, overwrite: true);
+            }
 
             Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
@@ -813,9 +937,23 @@ public abstract class BaseDownloadService : IDownloadService
         }
         catch
         {
-            TryDeleteIncompleteFile(outputPath);
+            TryDeleteIncompleteFile(writePath);
             throw;
         }
+    }
+
+    // ponytail: any existing .flac counts as top quality (16 vs 24-bit not compared)
+    private static bool IsBitrateUpgrade(string existingPath, string? newQuality)
+    {
+        if (string.IsNullOrEmpty(newQuality) || existingPath.EndsWith(".flac", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (newQuality.StartsWith("FLAC", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // Lossy quality strings end in the bitrate, e.g. MP3_320
+        if (!int.TryParse(newQuality[(newQuality.LastIndexOf('_') + 1)..], out var newKbps))
+            return false;
+        try { return newKbps > TagLib.File.Create(existingPath).Properties.AudioBitrate; }
+        catch { return false; }
     }
 
     // Reads the first bytes of the written file, detects the audio format, and renames
@@ -900,6 +1038,108 @@ public abstract class BaseDownloadService : IDownloadService
 
         Logger.LogInformation("Download complete: '{Title}' — {MB} MB in {Elapsed}s",
             title, totalBytes / 1024 / 1024, (int)sw.Elapsed.TotalSeconds);
+    }
+
+    /// <summary>
+    /// Saves the freshly downloaded stream to a temp file (with metadata) and uploads it to
+    /// Navidrome via the custom <c>POST /api/upload</c> endpoint. The temp file is deleted on
+    /// completion (success or failure) - Navidrome stores its own copy in the library.
+    /// </summary>
+    /// <returns>
+    /// A tuple of (LocalPath, NavidromeId) when the upload succeeds. LocalPath is computed by
+    /// joining <see cref="DownloadPath"/> with the relative path returned by Navidrome (assumes
+    /// the configured DownloadPath maps to the Navidrome library root - typical docker-compose
+    /// setup). Returns <c>null</c> when the upload fails so the caller can decide what to do.
+    /// </returns>
+    protected async Task<(string LocalPath, string NavidromeId)?> UploadDownloadStreamToNavidromeAsync(
+        DownloadResult result,
+        Song song,
+        INavidromeUploadService uploadService,
+        CancellationToken cancellationToken)
+    {
+        // Stage the file in a scratch dir outside the library so Navidrome only ever sees the
+        // copy it ingests via the upload API.
+        var stagingRoot = Path.Combine(Path.GetTempPath(), "octo-fiesta-upload");
+        EnsureDirectoryExists(stagingRoot);
+
+        var stagingPath = PathHelper.BuildTrackPath(
+            stagingRoot, song, result.Extension, SubsonicSettings.FolderTemplate, result.DownloadedQuality);
+        EnsureDirectoryExists(Path.GetDirectoryName(stagingPath)!);
+        stagingPath = PathHelper.ResolveUniquePath(stagingPath);
+
+        try
+        {
+            await using (var outputFile = IOFile.Create(stagingPath))
+            {
+                await result.DownloadStream.CopyToAsync(outputFile, cancellationToken);
+            }
+
+            await WriteMetadataAsync(stagingPath, song, cancellationToken);
+
+            // Compute the destination folder for the upload using the same artist/album layout
+            // as the local download path, optionally prefixed by NavidromeUploadFolder.
+            var fileName = Path.GetFileName(stagingPath);
+            var stagingDir = Path.GetDirectoryName(stagingPath)!;
+            var relativeDir = Path.GetRelativePath(stagingRoot, stagingDir).Replace('\\', '/');
+
+            var prefix = SubsonicSettings.NavidromeUploadFolder?.Trim().Trim('/');
+            string folder;
+            if (string.IsNullOrEmpty(prefix))
+            {
+                folder = relativeDir == "." ? string.Empty : relativeDir;
+            }
+            else
+            {
+                folder = relativeDir == "." ? prefix : $"{prefix}/{relativeDir}";
+            }
+
+            var uploadResult = await uploadService.UploadFileAsync(stagingPath, folder, fileName, cancellationToken);
+            if (uploadResult == null)
+            {
+                return null;
+            }
+
+            // Best-effort local path: assumes DownloadPath is mounted at the Navidrome library root.
+            // If it isn't, the file simply won't exist locally - the Navidrome ID is what matters.
+            var localPath = Path.Combine(
+                DownloadPath,
+                uploadResult.Path.Replace('/', Path.DirectorySeparatorChar));
+
+            if (!IOFile.Exists(localPath))
+            {
+                Logger.LogDebug(
+                    "Uploaded track is not visible at expected local path {LocalPath} (DownloadPath may not be mounted as the Navidrome library root)",
+                    localPath);
+            }
+
+            return (localPath, uploadResult.Id);
+        }
+        finally
+        {
+            try
+            {
+                if (IOFile.Exists(stagingPath))
+                {
+                    IOFile.Delete(stagingPath);
+                }
+
+                // Clean up empty parent directories under the staging root to avoid clutter.
+                var dir = Path.GetDirectoryName(stagingPath);
+                while (!string.IsNullOrEmpty(dir)
+                    && dir.StartsWith(stagingRoot, StringComparison.Ordinal)
+                    && dir.Length > stagingRoot.Length
+                    && IODirectory.Exists(dir)
+                    && !IODirectory.EnumerateFileSystemEntries(dir).Any())
+                {
+                    IODirectory.Delete(dir);
+                    dir = Path.GetDirectoryName(dir);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Failed to clean up staging file {Path}", stagingPath);
+            }
+        }
     }
 
     /// <summary>
@@ -990,6 +1230,18 @@ public abstract class BaseDownloadService : IDownloadService
                     if (permanentized)
                     {
                         Logger.LogInformation("Permanentized cached track '{Title}' from album '{Album}'", track.Title, album.Title);
+                        continue;
+                    }
+                }
+
+                if (existingPath == null)
+                {
+                    var probedPath = ProbeForExistingFile(
+                        PathHelper.BuildTrackPath(DownloadPath, track, ".flac", SubsonicSettings.FolderTemplate, null));
+                    if (probedPath != null)
+                    {
+                        Logger.LogDebug("Track {TrackId} found on disk without mapping, skipping re-download", track.ExternalId);
+                        await LocalLibraryService.RegisterDownloadedSongAsync(track, probedPath, downloadedQuality: null);
                         continue;
                     }
                 }
@@ -1181,6 +1433,131 @@ public abstract class BaseDownloadService : IDownloadService
     #endregion
 
     #region Utility Methods
+
+    private static readonly string[] AudioExtensions = [".flac", ".mp3", ".m4a"];
+
+    // Matches a leading track / disc-track numbering prefix such as "01 - ", "01-01 - ",
+    // "1.01 - " or "01_01 - " so the remaining title can be compared against the song title.
+    private static readonly Regex TrackNumberPrefixRegex = new(
+        @"^\s*\d{1,3}([\-_.]\d{1,3})?\s*[-_.]\s*",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(250));
+
+    /// <summary>
+    /// Locates the real local file for a Navidrome metadata match. Navidrome returns paths relative
+    /// to its library root (assumed mounted at <see cref="DownloadPath"/>) and synthesizes the file
+    /// name from tags, so the disc/track prefix often differs from the actual file on disk
+    /// (e.g. reported "01-01 - Title.mp3" vs real "01 - Title.mp3"). The directory portion is
+    /// reliable, so when the exact file is missing we scan it for an audio file whose title matches.
+    /// Returns the real path, or null when none exists (caller then downloads a fresh copy).
+    /// </summary>
+    private string? ResolveNavidromeMatchFile(string? navidromePath, Song song)
+    {
+        if (string.IsNullOrWhiteSpace(navidromePath))
+        {
+            return null;
+        }
+
+        var resolved = Path.IsPathRooted(navidromePath)
+            ? navidromePath
+            : Path.Combine(DownloadPath, navidromePath.Replace('/', Path.DirectorySeparatorChar));
+
+        if (IOFile.Exists(resolved))
+        {
+            return resolved;
+        }
+
+        var dir = Path.GetDirectoryName(resolved);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+        {
+            return null;
+        }
+
+        var titleKey = StringNormalizer.CreateSongTitleDedupeKey(song.Title);
+        if (string.IsNullOrEmpty(titleKey))
+        {
+            return null;
+        }
+
+        // Audio files in this album folder whose title matches (after stripping the track/disc prefix).
+        var matches = Directory.EnumerateFiles(dir)
+            .Where(f => AudioExtensions.Contains(Path.GetExtension(f).ToLowerInvariant()))
+            .Where(f => StringNormalizer.CreateSongTitleDedupeKey(
+                TrackNumberPrefixRegex.Replace(Path.GetFileNameWithoutExtension(f), string.Empty)) == titleKey)
+            .ToList();
+
+        if (matches.Count == 1)
+        {
+            Logger.LogDebug("Navidrome reported '{Reported}' but matched real file '{Actual}' by title",
+                navidromePath, matches[0]);
+            return matches[0];
+        }
+
+        if (matches.Count > 1)
+        {
+            // Multiple tracks in the same album folder share this title (e.g. a reprise or a deluxe
+            // edition duplicate). Disambiguate by the track number Navidrome encoded in the reported
+            // file name; if that doesn't pin a single file, skip reuse and download to avoid serving
+            // the wrong track.
+            var reportedTrack = ExtractTrackNumber(Path.GetFileNameWithoutExtension(resolved));
+            if (reportedTrack != null)
+            {
+                var byTrack = matches
+                    .Where(f => ExtractTrackNumber(Path.GetFileNameWithoutExtension(f)) == reportedTrack)
+                    .ToList();
+                if (byTrack.Count == 1)
+                {
+                    return byTrack[0];
+                }
+            }
+
+            Logger.LogWarning(
+                "Multiple local files in '{Dir}' match title '{Title}'; skipping reuse to avoid a wrong match",
+                dir, song.Title);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts the track number from a leading "NN - " or "DD-NN - " file-name prefix.
+    /// Returns the last number in the prefix (the track within its disc), or null when absent.
+    /// </summary>
+    private static int? ExtractTrackNumber(string stem)
+    {
+        var prefix = TrackNumberPrefixRegex.Match(stem);
+        if (!prefix.Success)
+        {
+            return null;
+        }
+
+        var numbers = Regex.Matches(prefix.Value, @"\d{1,3}");
+        if (numbers.Count == 0)
+        {
+            return null;
+        }
+
+        return int.Parse(numbers[^1].Value);
+    }
+
+    private static string? ProbeForExistingFile(string basePath)
+    {
+        var dir = Path.GetDirectoryName(basePath);
+        var stemWithoutExt = Path.GetFileNameWithoutExtension(basePath);
+        if (dir == null || !Directory.Exists(dir))
+        {
+            return null;
+        }
+        foreach (var ext in AudioExtensions)
+        {
+            var candidate = Path.Combine(dir, stemWithoutExt + ext);
+            if (IOFile.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        return null;
+    }
 
     /// <summary>
     /// Ensures a directory exists, creating it and all parent directories if necessary

@@ -61,9 +61,9 @@ public class QobuzDownloadService : BaseDownloadService
 
     public override async Task<bool> IsAvailableAsync()
     {
-        if (string.IsNullOrEmpty(_userAuthToken) || string.IsNullOrEmpty(_userId))
+        if (string.IsNullOrEmpty(_userAuthToken))
         {
-            Logger.LogWarning("Qobuz user auth token or user ID not configured");
+            Logger.LogWarning("Qobuz user auth token not configured (Qobuz__UserAuthToken)");
             return false;
         }
 

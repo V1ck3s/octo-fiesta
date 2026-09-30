@@ -19,7 +19,7 @@ namespace octo_fiesta.Controllers;
 
 [ApiController]
 [Route("")]
-public class SubsonicController : ControllerBase
+public partial class SubsonicController : ControllerBase
 {
     private readonly SubsonicSettings _subsonicSettings;
     private readonly IMusicMetadataService _metadataService;
@@ -133,7 +133,10 @@ public class SubsonicController : ControllerBase
         // unrelated entries in the album section. Keep only what answers the query.
         var playlistResult = PlaylistRelevanceFilter.Apply(cleanQuery, await playlistTask);
 
-        return MergeSearchResults(subsonicResult, externalResult, playlistResult, format);
+        // Fork: the mappings snapshot (in-memory after first load) lets the merge drop
+        // external songs already downloaded. Kept on this one line so upstream edits
+        // to the block above merge cleanly.
+        return MergeSearchResults(subsonicResult, externalResult, playlistResult, await GetSearchMappingsAsync(), format);
     }
 
     /// <summary>
@@ -183,6 +186,12 @@ public class SubsonicController : ControllerBase
         // Otherwise download from the provider and stream (quality upgrade logic applies)
         try
         {
+            var externalCoverArtService = GetExternalCoverArtService();
+            if (externalCoverArtService != null)
+            {
+                await externalCoverArtService.MarkAlbumDownloadStartedAsync(provider!, externalId!);
+            }
+
             // Allow cancellation from both client disconnect and application shutdown
             using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
                 HttpContext.RequestAborted,
@@ -326,11 +335,17 @@ public class SubsonicController : ControllerBase
         var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
 
         // Local track, or lyrics feature disabled: let the real Subsonic server answer.
+        // Feishin (and similar) crash on Subsonic "data not found"; return an empty lyrics list.
         if (!isExternal || _lyricsService is not { Enabled: true })
         {
             try
             {
                 var result = await _proxyService.RelayAsync("rest/getLyricsBySongId", parameters);
+                if (IsSubsonicDataNotFound(result.Body, format))
+                {
+                    return _responseBuilder.CreateLyricsBySongIdResponse(format, null);
+                }
+
                 var contentType = result.ContentType ?? $"application/{format}";
                 return File(result.Body, contentType);
             }
@@ -921,16 +936,21 @@ public class SubsonicController : ControllerBase
         {
             if (song is Dictionary<string, object> dict && dict.TryGetValue("title", out var titleObj))
             {
-                localSongTitles.Add(StringNormalizer.CreateComparisonKey(titleObj?.ToString() ?? ""));
+                var title = titleObj?.ToString() ?? "";
+                localSongTitles.Add(StringNormalizer.CreateComparisonKey(title));
+                localSongTitles.Add(StringNormalizer.CreateSongTitleDedupeKey(title));
             }
         }
         foreach (var song in ChildElements(albumXml, "song"))
         {
-            localSongTitles.Add(StringNormalizer.CreateComparisonKey(song.Attribute("title")?.Value));
+            var title = song.Attribute("title")?.Value;
+            localSongTitles.Add(StringNormalizer.CreateComparisonKey(title));
+            localSongTitles.Add(StringNormalizer.CreateSongTitleDedupeKey(title));
         }
 
         var newSongs = externalAlbum?.Songs
-            .Where(s => !localSongTitles.Contains(StringNormalizer.CreateComparisonKey(s.Title)))
+            .Where(s => !localSongTitles.Contains(StringNormalizer.CreateComparisonKey(s.Title))
+                && !localSongTitles.Contains(StringNormalizer.CreateSongTitleDedupeKey(s.Title)))
             .ToList() ?? new List<Song>();
 
         // XML clients get the Navidrome album element back untouched, missing tracks
@@ -1021,111 +1041,52 @@ public class SubsonicController : ControllerBase
             return NotFound();
         }
 
-        // Check if this is a playlist cover art request
-        if (PlaylistIdHelper.IsExternalPlaylist(id))
+        // Local (Subsonic) covers: relay through to upstream Subsonic (Navidrome).
+        var isPlaylist = PlaylistIdHelper.IsExternalPlaylist(id);
+        (bool isExternal, string? provider, string? type, string? externalId) parsedExternalId = default;
+        if (!isPlaylist)
         {
-            try
+            parsedExternalId = _localLibraryService.ParseExternalId(id);
+            if (!parsedExternalId.isExternal)
             {
-                var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
-                var playlist = await _metadataService.GetPlaylistAsync(provider, externalId);
-                
-                if (playlist == null || string.IsNullOrEmpty(playlist.CoverUrl))
+                try
+                {
+                    var result = await _proxyService.RelayAsync("rest/getCoverArt", parameters);
+                    return File(result.Body, result.ContentType ?? "image/jpeg");
+                }
+                catch
                 {
                     return NotFound();
                 }
-                
-                // Download and return the cover image
-                var imageResponse = await new HttpClient().GetAsync(playlist.CoverUrl);
-                if (!imageResponse.IsSuccessStatusCode)
-                {
-                    return NotFound();
-                }
-                
-                var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
-                var contentType = imageResponse.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
-                return File(imageBytes, contentType);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting playlist cover art for {Id}", id);
-                return NotFound();
             }
         }
 
-        var (isExternal, coverProvider, type, coverExternalId) = _localLibraryService.ParseExternalId(id);
-
-        if (!isExternal)
+        // Honour Subsonic `size` parameter so e.g. album-list thumbnails fetch a much
+        // smaller image from the upstream CDN. Qobuz CDN URLs are size-rewritable
+        // (`{id}_600.jpg` -> `{id}_150.jpg`) without needing an extra API call.
+        int? requestedSize = null;
+        if (parameters.TryGetValue("size", out var sizeStr) && int.TryParse(sizeStr, out var s) && s > 0)
         {
-            try
-            {
-                var result = await _proxyService.RelayAsync("rest/getCoverArt", parameters);
-                var contentType = result.ContentType ?? "image/jpeg";
-                return File(result.Body, contentType);
-            }
-            catch
-            {
-                return NotFound();
-            }
+            requestedSize = s;
         }
 
-        string? coverUrl = null;
-
-        // Use type to determine which API to call first
-        switch (type)
+        var externalCoverArtService = GetExternalCoverArtService();
+        if (externalCoverArtService == null)
         {
-            case "artist":
-                var artist = await _metadataService.GetArtistAsync(coverProvider!, coverExternalId!);
-                if (artist?.ImageUrl != null)
-                {
-                    coverUrl = artist.ImageUrl;
-                }
-                break;
-                
-            case "album":
-                var album = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
-                if (album?.CoverArtUrl != null)
-                {
-                    coverUrl = album.CoverArtUrlLarge ?? album.CoverArtUrl;
-                }
-                break;
-                
-            case "song":
-            default:
-                if (coverUrl == null)
-                {
-                    var song = await _metadataService.GetSongAsync(coverProvider!, coverExternalId!);
-                    if (song?.CoverArtUrl != null)
-                    {
-                        coverUrl = song.CoverArtUrlLarge ?? song.CoverArtUrl;
-                    }
-                    else
-                    {
-                        var albumFallback = await _metadataService.GetAlbumAsync(coverProvider!, coverExternalId!);
-                        if (albumFallback?.CoverArtUrl != null)
-                        {
-                            coverUrl = albumFallback.CoverArtUrlLarge ?? albumFallback.CoverArtUrl;
-                        }
-                    }
-                }
-                break;
+            return NotFound();
         }
-        
-        if (coverUrl != null)
+
+        var payload = await externalCoverArtService.ResolveAsync(
+            id,
+            parsedExternalId,
+            requestedSize,
+            HttpContext.RequestAborted);
+        if (payload == null)
         {
-            using var httpClient = new HttpClient();
-            using var req = new HttpRequestMessage(HttpMethod.Get, coverUrl);
-
-            var response = await httpClient.SendAsync(req);
-            if (response.IsSuccessStatusCode)
-            {
-                var imageBytes = await response.Content.ReadAsByteArrayAsync();
-                var contentType = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
-                return File(imageBytes, contentType);
-            }
-            _logger.LogWarning("Cover art fetch failed for {Url}: HTTP {Status}", coverUrl, (int)response.StatusCode);
+            return NotFound();
         }
 
-        return NotFound();
+        return File(payload.Bytes, payload.ContentType);
     }
 
     #region Helper Methods
@@ -1325,6 +1286,7 @@ public class SubsonicController : ControllerBase
         (byte[]? Body, string? ContentType, bool Success) subsonicResult,
         SearchResult externalResult,
         List<ExternalPlaylist> playlistResult,
+        IReadOnlyDictionary<string, LocalSongMapping> mappings,
         string format)
     {
         var (localSongs, localAlbums, localArtists) = subsonicResult.Success && subsonicResult.Body != null
@@ -1338,6 +1300,7 @@ public class SubsonicController : ControllerBase
             localArtists, 
             externalResult,
             playlistResult,
+            mappings,
             isJson);
 
         if (isJson)

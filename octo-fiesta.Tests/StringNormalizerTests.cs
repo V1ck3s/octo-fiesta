@@ -193,4 +193,3 @@ public class StringNormalizerTests
         Assert.Equal("creme brulee resume naive", result);
     }
 }
-

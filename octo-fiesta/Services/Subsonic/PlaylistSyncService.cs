@@ -18,6 +18,7 @@ public class PlaylistSyncService
     private readonly IMusicMetadataService? _qobuzMetadataService;
     private readonly IMusicMetadataService? _squidWTFMetadataService;
     private readonly IMusicMetadataService? _tidalMetadataService;
+    private readonly IMusicMetadataService? _appleMusicMetadataService;
     private readonly IMusicMetadataService? _yandexMetadataService;
     private readonly IEnumerable<IDownloadService> _downloadServices;
     private readonly IConfiguration _configuration;
@@ -45,13 +46,19 @@ public class PlaylistSyncService
         ILogger<PlaylistSyncService> logger)
     {
         // Get metadata services (optional - only the active provider(s) will be registered)
+        metadataServices = metadataServices
+            .SelectMany(s => s is Composite.CompositeMetadataService c ? c.Providers.Select(p => p.Service) : [s])
+            .ToList();
         _deezerMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Deezer"));
         _qobuzMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Qobuz"));
         _squidWTFMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("SquidWTF"));
         _tidalMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Tidal"));
+        _appleMusicMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("AppleMusic"));
         _yandexMetadataService = metadataServices.FirstOrDefault(s => s.GetType().Name.Contains("Yandex"));
         
-        _downloadServices = downloadServices;
+        _downloadServices = downloadServices
+            .SelectMany(s => s is Composite.CompositeDownloadService c ? c.Providers.Select(p => p.Service) : [s])
+            .ToList();
         _configuration = configuration;
         _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
@@ -80,6 +87,7 @@ public class PlaylistSyncService
             "qobuz" when _qobuzMetadataService != null => _qobuzMetadataService,
             "squidwtf" when _squidWTFMetadataService != null => _squidWTFMetadataService,
             "tidal" when _tidalMetadataService != null => _tidalMetadataService,
+            "applemusic" when _appleMusicMetadataService != null => _appleMusicMetadataService,
             "yandex" when _yandexMetadataService != null => _yandexMetadataService,
             _ => null
         };

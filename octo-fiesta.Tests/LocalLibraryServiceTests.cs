@@ -14,7 +14,7 @@ using System.Net;
 
 namespace octo_fiesta.Tests;
 
-public class LocalLibraryServiceTests : IDisposable
+public partial class LocalLibraryServiceTests : IDisposable
 {
     private readonly LocalLibraryService _service;
     private readonly string _testDownloadPath;
