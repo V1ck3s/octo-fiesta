@@ -1029,6 +1029,95 @@ public class LocalLibraryServiceTests : IDisposable
             });
     }
 
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WhenDebounced_RunsTrailingScan()
+    {
+        var service = BuildService(adminUsername: "admin", adminPassword: "secret");
+        service.ScanDebounceInterval = TimeSpan.FromMilliseconds(200);
+
+        var scanCount = 0;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+
+                if (url.Contains("startScan"))
+                {
+                    Interlocked.Increment(ref scanCount);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":false}}}")
+                };
+            });
+
+        await service.TriggerLibraryScanAsync();
+        await service.TriggerLibraryScanAsync();
+
+        Assert.Equal(1, Volatile.Read(ref scanCount));
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(2, Volatile.Read(ref scanCount));
+    }
+
+    [Fact]
+    public async Task TriggerLibraryScanAsync_WhenServerIsAlreadyScanning_WaitsForItToFinish()
+    {
+        var service = BuildService(adminUsername: "admin", adminPassword: "secret");
+
+        var statusCalls = 0;
+        var statusCallsWhenScanned = 0;
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                var url = req.RequestUri?.ToString() ?? "";
+                if (url.Contains("getUser"))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"user\":{\"adminRole\":true}}}")
+                    };
+                }
+
+                if (url.Contains("getScanStatus"))
+                {
+                    var scanning = Interlocked.Increment(ref statusCalls) <= 2 ? "true" : "false";
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\",\"scanStatus\":{\"scanning\":" + scanning + "}}}")
+                    };
+                }
+
+                if (url.Contains("startScan"))
+                {
+                    statusCallsWhenScanned = Volatile.Read(ref statusCalls);
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await service.TriggerLibraryScanAsync();
+
+        Assert.True(result);
+        Assert.Equal(3, statusCallsWhenScanned);
+    }
+
     private LocalLibraryService BuildService(
         string? adminUsername = null,
         string? adminPassword = null,

@@ -30,7 +30,10 @@ public class LocalLibraryService : ILocalLibraryService
     
     // Debounce to avoid triggering too many scans
     private DateTime _lastScanTrigger = DateTime.MinValue;
-    private readonly TimeSpan _scanDebounceInterval = TimeSpan.FromSeconds(30);
+    internal TimeSpan ScanDebounceInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    private readonly object _trailingScanGate = new();
+    private bool _trailingScanPending;
     
     // Primary subsonic auth parameters/credentials from config for server-to-server calls
     private SubsonicCredentials? _subsonicAdminCredentials;
@@ -461,7 +464,7 @@ public class LocalLibraryService : ILocalLibraryService
         }
 
         var now = DateTime.UtcNow;
-        var debounceRemaining = _scanDebounceInterval - (now - _lastScanTrigger);
+        var debounceRemaining = ScanDebounceInterval - (now - _lastScanTrigger);
 
         var scanTriggered = await TriggerLibraryScanAsync();
         if (!scanTriggered)
@@ -848,16 +851,25 @@ public class LocalLibraryService : ILocalLibraryService
         }
         
         // Debounce: avoid triggering too many successive scans
-        var now = DateTime.UtcNow;
-        if (now - _lastScanTrigger < _scanDebounceInterval)
+        var debounceRemaining = ScanDebounceInterval - (DateTime.UtcNow - _lastScanTrigger);
+        if (debounceRemaining > TimeSpan.Zero)
         {
-            _logger.LogDebug("Scan debounced - last scan was {Elapsed}s ago", 
-                (now - _lastScanTrigger).TotalSeconds);
+            _logger.LogDebug("Scan debounced - trailing scan in {Delay}s",
+                Math.Ceiling(debounceRemaining.TotalSeconds));
+            ScheduleTrailingScan(debounceRemaining);
             return true;
         }
-        
-        _lastScanTrigger = now;
-        
+
+        // A startScan issued while a scan is already running is ignored by the server
+        var runningScan = await GetScanStatusAsync();
+        if (runningScan?.Scanning == true)
+        {
+            _logger.LogDebug("A library scan is already running, waiting for it to finish before scanning again");
+            await WaitForScanToFinishAsync(CancellationToken.None);
+        }
+
+        _lastScanTrigger = DateTime.UtcNow;
+
         try
         {
             var authQuery = BuildAuthQuery(requestCredentials);
@@ -884,6 +896,42 @@ public class LocalLibraryService : ILocalLibraryService
             _logger.LogError(ex, "Error triggering Subsonic library scan");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Arms a single scan for when the debounce window expires, so the last change of a
+    /// batch is scanned instead of being dropped with the request that was debounced.
+    /// </summary>
+    private void ScheduleTrailingScan(TimeSpan delay)
+    {
+        lock (_trailingScanGate)
+        {
+            if (_trailingScanPending)
+            {
+                return;
+            }
+
+            _trailingScanPending = true;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delay);
+
+                lock (_trailingScanGate)
+                {
+                    _trailingScanPending = false;
+                }
+
+                await TriggerLibraryScanAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to run trailing library scan");
+            }
+        });
     }
 
     public async Task<ScanStatus?> GetScanStatusAsync()
