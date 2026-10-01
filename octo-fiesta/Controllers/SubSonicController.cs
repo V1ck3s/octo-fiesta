@@ -183,12 +183,12 @@ public class SubsonicController : ControllerBase
         // Otherwise download from the provider and stream (quality upgrade logic applies)
         try
         {
-            // Allow cancellation from both client disconnect and application shutdown
-            using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-                HttpContext.RequestAborted,
-                _hostApplicationLifetime.ApplicationStopping);
-
-            var (downloadStream, filePath) = await _downloadService.DownloadAndStreamAsync(provider!, externalId!, cancellationTokenSource.Token);
+            // The download is deliberately not tied to RequestAborted. Nothing is sent to the
+            // client until the file is complete, so a client that gives up waiting would kill
+            // the download, drop the partial file, and restart from zero on every retry. Only
+            // application shutdown cancels it.
+            var (downloadStream, filePath) = await _downloadService.DownloadAndStreamAsync(
+                provider!, externalId!, _hostApplicationLifetime.ApplicationStopping);
             return File(downloadStream, GetContentType(filePath), enableRangeProcessing: true);
         }
         catch (Exception ex)

@@ -72,7 +72,7 @@ public class SubsonicControllerStreamTests
     }
 
     [Fact]
-    public async Task Stream_WithExternalSong_UsesLinkedCancelableTokenForDownload()
+    public async Task Stream_WhenClientDisconnects_KeepsDownloadRunning()
     {
         var localLibraryServiceMock = new Mock<ILocalLibraryService>();
         localLibraryServiceMock
@@ -90,15 +90,21 @@ public class SubsonicControllerStreamTests
         var hostLifetimeMock = new Mock<IHostApplicationLifetime>();
         hostLifetimeMock.SetupGet(x => x.ApplicationStopping).Returns(appStoppingCts.Token);
 
+        // A client that gives up waiting must not destroy the download in progress,
+        // otherwise every retry restarts from zero and the track never lands.
+        var clientGoneCts = new CancellationTokenSource();
+        clientGoneCts.Cancel();
+
         var controller = CreateController(
             localLibraryServiceMock,
             downloadServiceMock,
             hostLifetimeMock.Object,
-            CancellationToken.None);
+            clientGoneCts.Token);
 
         var result = await controller.Stream();
 
         Assert.IsType<FileStreamResult>(result);
+        Assert.False(capturedToken.IsCancellationRequested);
         Assert.True(capturedToken.CanBeCanceled);
     }
 
