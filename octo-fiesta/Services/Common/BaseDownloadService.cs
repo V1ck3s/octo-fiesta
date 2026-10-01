@@ -92,7 +92,11 @@ public abstract class BaseDownloadService : IDownloadService
         _serviceProvider = serviceProvider;
         Logger = logger;
 
-        DownloadPath = configuration["Library:DownloadPath"] ?? "./downloads";
+        // Optional per-provider override (e.g. Deezer__DownloadPath), checked before the shared
+        // Library:DownloadPath. IConfiguration keys are case-insensitive, so ProviderName's
+        // lowercase form ("deezer") matches the PascalCase env var section ("Deezer").
+        var providerDownloadPath = configuration[$"{ProviderName}:DownloadPath"];
+        DownloadPath = providerDownloadPath ?? configuration["Library:DownloadPath"] ?? "./downloads";
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(DownloadPath))
