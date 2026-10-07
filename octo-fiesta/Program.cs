@@ -49,6 +49,8 @@ builder.Services.Configure<YandexSettings>(
 builder.Services.Configure<LyricsSettings>(
     builder.Configuration.GetSection("Lyrics"));
 
+DownloadPathResolver.EnsureRootsExist(builder.Configuration);
+
 // Get the configured music service from bound settings (to respect default values)
 var subsonicSettings = new SubsonicSettings();
 builder.Configuration.GetSection("Subsonic").Bind(subsonicSettings);

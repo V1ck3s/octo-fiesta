@@ -56,7 +56,7 @@ public class PlaylistSyncService
         _subsonicSettings = subsonicSettings.Value;
         _logger = logger;
         
-        _musicDirectory = configuration["Library:DownloadPath"] ?? "./downloads";
+        _musicDirectory = DownloadPathResolver.GetSharedPath(configuration);
         _playlistDirectory = Path.Combine(_musicDirectory, _subsonicSettings.PlaylistsDirectory ?? "playlists");
         
         // Ensure playlists directory exists
@@ -224,7 +224,7 @@ public class PlaylistSyncService
     }
     
     /// <summary>
-    /// Creates an M3U playlist file with relative paths to downloaded tracks
+    /// Creates an M3U playlist file pointing at the downloaded tracks
     /// </summary>
     private async Task CreateM3UPlaylistAsync(string playlistName, List<(Song Song, string LocalPath)> tracks)
     {
@@ -239,16 +239,12 @@ public class PlaylistSyncService
             
             foreach (var (song, localPath) in tracks)
             {
-                // Calculate relative path from playlist directory to track
-                var relativePath = Path.GetRelativePath(_playlistDirectory, localPath);
-                
-                // Convert backslashes to forward slashes for M3U compatibility
-                relativePath = relativePath.Replace('\\', '/');
+                var entryPath = DownloadPathResolver.BuildPlaylistEntryPath(_playlistDirectory, _musicDirectory, localPath);
                 
                 // Add EXTINF line with duration and artist - title
                 var duration = song.Duration ?? 0;
                 m3uContent.AppendLine($"#EXTINF:{duration},{song.Artist} - {song.Title}");
-                m3uContent.AppendLine(relativePath);
+                m3uContent.AppendLine(entryPath);
             }
             
             await IOFile.WriteAllTextAsync(playlistPath, m3uContent.ToString());
@@ -350,12 +346,11 @@ public class PlaylistSyncService
                 // If track is downloaded, add it to M3U
                 if (!string.IsNullOrEmpty(trackLocalPath) && IOFile.Exists(trackLocalPath))
                 {
-                    var relativePath = Path.GetRelativePath(_playlistDirectory, trackLocalPath);
-                    relativePath = relativePath.Replace('\\', '/');
+                    var entryPath = DownloadPathResolver.BuildPlaylistEntryPath(_playlistDirectory, _musicDirectory, trackLocalPath);
                     
                     var duration = playlistTrack.Duration ?? 0;
                     m3uContent.AppendLine($"#EXTINF:{duration},{playlistTrack.Artist} - {playlistTrack.Title}");
-                    m3uContent.AppendLine(relativePath);
+                    m3uContent.AppendLine(entryPath);
                     addedCount++;
                 }
             }

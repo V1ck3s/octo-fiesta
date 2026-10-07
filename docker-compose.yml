@@ -49,6 +49,9 @@ services:
       - Deezer__ArlFallback=${DEEZER_ARL_FALLBACK:-}
       # Preferred audio quality: FLAC, MP3_320, MP3_128 (optional, defaults to highest available)
       - Deezer__Quality=${DEEZER_QUALITY:-}
+      # Download path inside the container for this provider only (optional).
+      # Needs a matching volume below. Same pattern for the other providers.
+      - Deezer__DownloadPath=${DEEZER_DOWNLOAD_PATH:-}
       
       # ===== QOBUZ SETTINGS =====
       # Qobuz user authentication token (required if using Qobuz)
@@ -57,6 +60,7 @@ services:
       - Qobuz__UserId=${QOBUZ_USER_ID:-}
       # Preferred audio quality: FLAC, FLAC_24_HIGH, FLAC_24_LOW, FLAC_16, MP3_320 (optional)
       - Qobuz__Quality=${QOBUZ_QUALITY:-}
+      - Qobuz__DownloadPath=${QOBUZ_DOWNLOAD_PATH:-}
       
       # ===== TIDAL SETTINGS =====
       # Tokens come from the OAuth login: docker compose run --rm octo-fiesta --tidal-login
@@ -76,6 +80,7 @@ services:
       - Tidal__RefreshToken=${TIDAL_REFRESH_TOKEN:-}
       - Tidal__UserId=${TIDAL_USER_ID:-}
       - Tidal__CountryCode=${TIDAL_COUNTRY_CODE:-}
+      - Tidal__DownloadPath=${TIDAL_DOWNLOAD_PATH:-}
 
       # ===== SQUIDWTF SETTINGS =====
       # DEPRECATED: upstream squid.wtf music services are down; kept for self-hosted Tidal instances
@@ -96,6 +101,7 @@ services:
       # Override URL of the remote instances.json (ignored if SQUIDWTF_INSTANCE is set).
       # Defaults to https://tidal-uptime.geeked.wtf/ if empty.
       - SquidWTF__InstancesUrl=${SQUIDWTF_INSTANCES_URL:-}
+      - SquidWTF__DownloadPath=${SQUIDWTF_DOWNLOAD_PATH:-}
 
       # ===== YANDEX MUSIC SETTINGS =====
       # OAuth token for API access.
@@ -116,7 +122,11 @@ services:
       # Default: false
       # Available: true, false
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
+      - Yandex__DownloadPath=${YANDEX_DOWNLOAD_PATH:-}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
+      # Host folder backing a per-provider download path, one per provider you redirect.
+      # The container side must match the value of that provider's DownloadPath variable.
+      # - ./downloads-deezer:/music/deezer
       # Holds the Tidal token store, only needed when MUSIC_SERVICE=Tidal
       - ${CONFIG_PATH:-./config}:/config

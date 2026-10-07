@@ -19,6 +19,7 @@ public class LocalLibraryService : ILocalLibraryService
 {
     private readonly string _mappingFilePath;
     private readonly string _downloadDirectory;
+    private readonly IReadOnlyList<string> _libraryRoots;
     private readonly HttpClient _httpClient;
     private readonly IMusicMetadataService _metadataService;
     private readonly SubsonicSettings _subsonicSettings;
@@ -51,7 +52,9 @@ public class LocalLibraryService : ILocalLibraryService
         IOptions<SubsonicSettings> subsonicSettings,
         ILogger<LocalLibraryService> logger)
     {
-        _downloadDirectory = configuration["Library:DownloadPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "downloads");
+        // Shared path, so a per-provider override does not split the mapping registry in two.
+        _downloadDirectory = DownloadPathResolver.GetSharedPath(configuration);
+        _libraryRoots = DownloadPathResolver.GetAllRoots(configuration);
         _mappingFilePath = Path.Combine(_downloadDirectory, ".mappings.json");
         _httpClient = httpClientFactory.CreateClient();
         _metadataService = metadataService;
@@ -204,7 +207,8 @@ public class LocalLibraryService : ILocalLibraryService
 
     /// <summary>
     /// Translates a Subsonic search hit's (tag-derived) path into the real on-disk path inside
-    /// our download directory, or null if the file isn't there (e.g. a stale "ghost" entry).
+    /// one of our download directories, or null if the file isn't there (e.g. a stale "ghost"
+    /// entry).
     /// Navidrome's reported path can diverge from the file Octo actually wrote: tags may contain
     /// characters Octo sanitizes on disk (e.g. ':' -> '_'), and the name can carry a synthetic
     /// disc prefix ("01-05 - X") the real file lacks ("05 - X"). Rebuild segment by segment with
@@ -229,24 +233,27 @@ public class LocalLibraryService : ILocalLibraryService
             return null;
         }
 
-        var directory = _downloadDirectory;
-        for (var p = 0; p < parts.Length - 1; p++)
-        {
-            directory = Path.Combine(directory, PathHelper.SanitizeFolderName(parts[p]));
-        }
-
         var rawName = parts[^1];
         var extension = Path.GetExtension(rawName);
         var stem = Path.GetFileNameWithoutExtension(rawName);
         var discStripped = System.Text.RegularExpressions.Regex.Replace(stem, @"^\d+-", "");
         var candidateStems = stem == discStripped ? new[] { stem } : new[] { stem, discStripped };
 
-        foreach (var candidateStem in candidateStems)
+        foreach (var root in _libraryRoots)
         {
-            var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
-            if (File.Exists(candidatePath))
+            var directory = root;
+            for (var p = 0; p < parts.Length - 1; p++)
             {
-                return candidatePath;
+                directory = Path.Combine(directory, PathHelper.SanitizeFolderName(parts[p]));
+            }
+
+            foreach (var candidateStem in candidateStems)
+            {
+                var candidatePath = Path.Combine(directory, PathHelper.SanitizeFileName(candidateStem) + extension);
+                if (File.Exists(candidatePath))
+                {
+                    return candidatePath;
+                }
             }
         }
 

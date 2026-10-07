@@ -26,7 +26,10 @@ public abstract class BaseDownloadService : IDownloadService
     protected readonly ILogger Logger;
     private readonly IServiceProvider _serviceProvider;
 
-    protected readonly string DownloadPath;
+    // A property, not a constructor field, so ProviderName is never read while a derived
+    // instance is still being built.
+    protected string DownloadPath => DownloadPathResolver.GetProviderPath(Configuration, ProviderName);
+
     protected readonly string CachePath;
 
     protected readonly Dictionary<string, DownloadInfo> ActiveDownloads = new();
@@ -92,17 +95,7 @@ public abstract class BaseDownloadService : IDownloadService
         _serviceProvider = serviceProvider;
         Logger = logger;
 
-        // Optional per-provider override (e.g. Deezer__DownloadPath), checked before the shared
-        // Library:DownloadPath. IConfiguration keys are case-insensitive, so ProviderName's
-        // lowercase form ("deezer") matches the PascalCase env var section ("Deezer").
-        var providerDownloadPath = configuration[$"{ProviderName}:DownloadPath"];
-        DownloadPath = providerDownloadPath ?? configuration["Library:DownloadPath"] ?? "./downloads";
         CachePath = PathHelper.GetCachePath();
-
-        if (!Directory.Exists(DownloadPath))
-        {
-            Directory.CreateDirectory(DownloadPath);
-        }
 
         if (!Directory.Exists(CachePath))
         {
