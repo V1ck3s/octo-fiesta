@@ -70,28 +70,4 @@ public static class DownloadPathResolver
             }
         }
     }
-
-    /// <summary>
-    /// Relative while the track stays under the library the playlist lives in, absolute once a
-    /// provider override puts it elsewhere, because a relative path climbing out of the library
-    /// root does not resolve on the music server.
-    /// </summary>
-    public static string BuildPlaylistEntryPath(string playlistDirectory, string libraryRoot, string trackPath)
-    {
-        var entry = IsUnder(libraryRoot, trackPath)
-            ? Path.GetRelativePath(playlistDirectory, trackPath)
-            : Path.GetFullPath(trackPath);
-
-        return entry.Replace('\\', '/');
-    }
-
-    private static bool IsUnder(string root, string path)
-    {
-        var relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path));
-
-        return !Path.IsPathRooted(relative)
-            && relative != ".."
-            && !relative.StartsWith(".." + Path.DirectorySeparatorChar)
-            && !relative.StartsWith(".." + Path.AltDirectorySeparatorChar);
-    }
 }
