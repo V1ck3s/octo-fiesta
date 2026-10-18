@@ -683,7 +683,7 @@ public class SubsonicResponseBuilder
         if (song != null)
         {
             var (suffix, _, br) = GetSuffixContentTypeAndBitrate(song);
-            container = suffix == "Remote" ? "mp3" : suffix;
+            container = suffix;
             bitRate = br > 0 ? br : 128;
         }
 
@@ -734,7 +734,7 @@ public class SubsonicResponseBuilder
         }
 
         // Default for external providers (Deezer, Qobuz, SquidWTF) without cached file
-        return ("Remote", "audio/mpeg", 0);
+        return ("mp3", "audio/mpeg", 128);
     }
 
     private object ConvertJsonValue(JsonElement value)
