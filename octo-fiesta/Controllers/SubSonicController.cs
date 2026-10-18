@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Xml.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
@@ -1649,6 +1650,34 @@ public class SubsonicController : ControllerBase
             }
             
             var contentType = result.ContentType ?? "application/xml; charset=utf-8";
+            // Navidrome supports playbackReport, but external IDs have no Navidrome record
+            // until a download is indexed. Do not advertise an extension the proxy cannot
+            // honor for every song; clients still use the standard scrobble endpoint.
+            if (endpoint.Equals("rest/getOpenSubsonicExtensions", StringComparison.OrdinalIgnoreCase) ||
+                endpoint.Equals("rest/getOpenSubsonicExtensions.view", StringComparison.OrdinalIgnoreCase))
+            {
+                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+                {
+                    var response = JsonNode.Parse(result.Body)!;
+                    if (response["subsonic-response"]?["openSubsonicExtensions"] is JsonArray extensions)
+                    {
+                        for (var i = extensions.Count - 1; i >= 0; i--)
+                        {
+                            if (extensions[i]?["name"]?.GetValue<string>() == "playbackReport")
+                            {
+                                extensions.RemoveAt(i);
+                            }
+                        }
+                    }
+                    return File(Encoding.UTF8.GetBytes(response.ToJsonString()), contentType);
+                }
+
+                var xml = XDocument.Parse(Encoding.UTF8.GetString(result.Body));
+                xml.Root?.Elements().Where(e => e.Name.LocalName == "openSubsonicExtensions" &&
+                    (string?)e.Attribute("name") == "playbackReport").Remove();
+                return File(Encoding.UTF8.GetBytes(xml.ToString(SaveOptions.DisableFormatting)), contentType);
+            }
+
             return File(result.Body, contentType);
         }
         catch (HttpRequestException ex)
