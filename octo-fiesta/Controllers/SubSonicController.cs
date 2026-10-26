@@ -1656,9 +1656,24 @@ public class SubsonicController : ControllerBase
             if (endpoint.Equals("rest/getOpenSubsonicExtensions", StringComparison.OrdinalIgnoreCase) ||
                 endpoint.Equals("rest/getOpenSubsonicExtensions.view", StringComparison.OrdinalIgnoreCase))
             {
-                if (contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+                var isJsonp = contentType.Contains("javascript", StringComparison.OrdinalIgnoreCase) ||
+                    contentType.Contains("jsonp", StringComparison.OrdinalIgnoreCase);
+                if (isJsonp || contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
                 {
-                    var response = JsonNode.Parse(result.Body)!;
+                    var body = Encoding.UTF8.GetString(result.Body);
+                    var jsonStart = 0;
+                    var jsonEnd = body.Length;
+                    if (isJsonp)
+                    {
+                        jsonStart = body.IndexOf('(') + 1;
+                        jsonEnd = body.LastIndexOf(')');
+                        if (jsonStart == 0 || jsonEnd <= jsonStart)
+                        {
+                            return File(result.Body, contentType);
+                        }
+                    }
+
+                    var response = JsonNode.Parse(body[jsonStart..jsonEnd])!;
                     if (response["subsonic-response"]?["openSubsonicExtensions"] is JsonArray extensions)
                     {
                         for (var i = extensions.Count - 1; i >= 0; i--)
@@ -1669,7 +1684,8 @@ public class SubsonicController : ControllerBase
                             }
                         }
                     }
-                    return File(Encoding.UTF8.GetBytes(response.ToJsonString()), contentType);
+                    var filteredBody = body[..jsonStart] + response.ToJsonString() + body[jsonEnd..];
+                    return File(Encoding.UTF8.GetBytes(filteredBody), contentType);
                 }
 
                 var xml = XDocument.Parse(Encoding.UTF8.GetString(result.Body));
