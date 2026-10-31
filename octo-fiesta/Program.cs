@@ -138,6 +138,9 @@ else if (musicService == MusicService.Yandex)
     {
         builder.Services.AddSingleton<PlaylistSyncService>();
     }
+    // My Wave: a station playlist; YandexMetadataService serves its tracks
+    builder.Services.AddSingleton<YandexWaveService>();
+    builder.Services.AddSingleton<IStationService>(sp => sp.GetRequiredService<YandexWaveService>());
     builder.Services.AddSingleton<IMusicMetadataService, YandexMetadataService>();
     builder.Services.AddSingleton<IDownloadService, YandexDownloadService>();
 }

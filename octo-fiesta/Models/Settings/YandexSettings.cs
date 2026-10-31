@@ -33,4 +33,10 @@ public class YandexSettings
     /// Available: en/uz/uk/us/ru/kk/hy
     /// </summary>
     public string Language { get; set; } = "ru";
+
+    /// <summary>
+    /// Number of tracks one opening of the My Wave playlist returns (1-200).
+    /// Default: 20
+    /// </summary>
+    public int WaveTracks { get; set; } = 20;
 }

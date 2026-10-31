@@ -873,4 +873,70 @@ public class YandexMetadataServiceTests
     }
     
     #endregion
+
+    #region GetPersonalPlaylistsAsync Tests
+
+    [Fact]
+    public async Task GetPersonalPlaylistsAsync_ListsReadyFeedPlaylistsAndCachesThem()
+    {
+        // Arrange
+        var requests = 0;
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback(() => requests++)
+            .ReturnsAsync(() => new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.OK,
+                Content = new StringContent("""
+                {
+                    "result": {
+                        "generatedPlaylists": [
+                            { "type": "playlistOfTheDay", "ready": true,
+                              "data": { "playlistUuid": "daily-uuid", "title": "Плейлист дня", "trackCount": 60,
+                                        "owner": { "login": "yamusic-daily", "name": "Yandex Music" },
+                                        "cover": { "uri": "avatars.example.org/daily/%%" } } },
+                            { "type": "recentTracks", "ready": false,
+                              "data": { "playlistUuid": "premiere-uuid", "title": "Премьера" } },
+                            { "type": "neverHeard", "ready": true,
+                              "data": { "playlistUuid": "dejavu-uuid", "title": "Дежавю", "trackCount": 30 } }
+                        ]
+                    }
+                }
+                """)
+            });
+
+        // Act
+        var first = await _service.GetPersonalPlaylistsAsync();
+        var second = await _service.GetPersonalPlaylistsAsync();
+
+        // Assert
+        Assert.Equal(["pl-yandex-daily-uuid", "pl-yandex-dejavu-uuid"], first.Select(p => p.Id).ToArray());
+        Assert.Equal("Плейлист дня", first[0].Name);
+        Assert.Equal(60, first[0].TrackCount);
+        Assert.Same(first, second);
+        Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task GetPersonalPlaylistsAsync_WhenHttpFails_ReturnsEmptyList()
+    {
+        // Arrange
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage { StatusCode = HttpStatusCode.InternalServerError });
+
+        // Act
+        var result = await _service.GetPersonalPlaylistsAsync();
+
+        // Assert
+        Assert.Empty(result);
+    }
+
+    #endregion
 }

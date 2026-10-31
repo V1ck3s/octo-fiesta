@@ -305,6 +305,96 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
+    /// Creates a getPlaylist response for an external playlist.
+    /// </summary>
+    public IActionResult CreatePlaylistResponse(string format, ExternalPlaylist playlist, List<Song> tracks)
+    {
+        var totalDuration = tracks.Sum(s => s.Duration ?? 0);
+        var created = (playlist.CreatedDate ?? System.DateTime.UtcNow).ToUniversalTime().ToString("o");
+        var owner = playlist.CuratorName ?? playlist.Provider;
+
+        if (format == "json")
+        {
+            return CreateJsonResponse(new
+            {
+                status = "ok",
+                version = SubsonicVersion,
+                playlist = new
+                {
+                    id = playlist.Id,
+                    name = playlist.Name,
+                    comment = playlist.Description ?? "",
+                    owner,
+                    @public = false,
+                    songCount = tracks.Count,
+                    duration = totalDuration,
+                    created,
+                    changed = System.DateTime.UtcNow.ToString("o"),
+                    coverArt = playlist.Id,
+                    entry = tracks.Select(s => ConvertSongToJson(s)).ToList()
+                }
+            });
+        }
+
+        var ns = XNamespace.Get(SubsonicNamespace);
+        var playlistElement = CreatePlaylistSummaryXml(playlist, ns, tracks.Count, totalDuration);
+        foreach (var song in tracks)
+        {
+            var entry = ConvertSongToXml(song, ns, playlist.Id);
+            entry.Name = ns + "entry";
+            playlistElement.Add(entry);
+        }
+
+        var doc = new XDocument(
+            new XElement(ns + "subsonic-response",
+                new XAttribute("status", "ok"),
+                new XAttribute("version", SubsonicVersion),
+                playlistElement
+            )
+        );
+        return new ContentResult { Content = doc.ToString(), ContentType = "application/xml; charset=utf-8" };
+    }
+
+    /// <summary>
+    /// A getPlaylists entry for an external playlist (JSON form).
+    /// </summary>
+    public Dictionary<string, object> ConvertPlaylistSummaryToJson(ExternalPlaylist playlist)
+    {
+        return new Dictionary<string, object>
+        {
+            ["id"] = playlist.Id,
+            ["name"] = playlist.Name,
+            ["comment"] = playlist.Description ?? "",
+            ["owner"] = playlist.CuratorName ?? playlist.Provider,
+            ["public"] = false,
+            ["songCount"] = playlist.TrackCount,
+            ["duration"] = playlist.Duration,
+            ["created"] = (playlist.CreatedDate ?? System.DateTime.UtcNow).ToUniversalTime().ToString("o"),
+            ["changed"] = System.DateTime.UtcNow.ToString("o"),
+            ["coverArt"] = playlist.Id
+        };
+    }
+
+    /// <summary>
+    /// A getPlaylists entry for an external playlist (XML form).
+    /// </summary>
+    public XElement CreatePlaylistSummaryXml(ExternalPlaylist playlist, XNamespace ns, int? songCount = null, int? duration = null)
+    {
+        return new XElement(ns + "playlist",
+            new XAttribute("id", playlist.Id),
+            new XAttribute("name", playlist.Name),
+            new XAttribute("comment", playlist.Description ?? ""),
+            new XAttribute("owner", playlist.CuratorName ?? playlist.Provider),
+            new XAttribute("public", "false"),
+            new XAttribute("songCount", songCount ?? playlist.TrackCount),
+            new XAttribute("duration", duration ?? playlist.Duration),
+            new XAttribute("created", (playlist.CreatedDate ?? System.DateTime.UtcNow).ToUniversalTime().ToString("o")),
+            new XAttribute("changed", System.DateTime.UtcNow.ToString("o")),
+            new XAttribute("coverArt", playlist.Id)
+        );
+    }
+
+    /// <summary>
     /// Creates a Subsonic response containing an artist with albums.
     /// </summary>
     public IActionResult CreateArtistResponse(string format, Artist artist, List<Album> albums)

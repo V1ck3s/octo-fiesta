@@ -361,6 +361,81 @@ public record YandexPlaylistTracks
     public string? Title { get; init; }
 }
 
+/// <summary>
+/// Response of /rotor/session/new and /rotor/session/{id}/tracks: one batch of a radio session.
+/// </summary>
+public record YandexRotorSession
+{
+    [JsonPropertyName("radioSessionId")]
+    public string? RadioSessionId { get; init; }
+
+    [JsonPropertyName("batchId")]
+    public string? BatchId { get; init; }
+
+    [JsonPropertyName("sequence")]
+    public List<YandexRotorSequenceItem> Sequence { get; init; } = new();
+
+    [JsonPropertyName("terminated")]
+    public bool? Terminated { get; init; }
+
+    [JsonPropertyName("unknownSession")]
+    public bool? UnknownSession { get; init; }
+}
+
+/// <summary>
+/// One entry of /rotor/station/{id}/info.
+/// </summary>
+public record YandexRotorStationInfo
+{
+    [JsonPropertyName("station")]
+    public YandexRotorStation? Station { get; init; }
+}
+
+public record YandexRotorStation
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+
+    /// <summary>
+    /// Station artwork, an avatars URI without scheme and with "%%" for the size.
+    /// </summary>
+    [JsonPropertyName("fullImageUrl")]
+    public string? FullImageUrl { get; init; }
+}
+
+/// <summary>
+/// Response of /feed; only the personal playlists Yandex generates for the user are read.
+/// </summary>
+public record YandexFeed
+{
+    [JsonPropertyName("generatedPlaylists")]
+    public List<YandexGeneratedPlaylist> GeneratedPlaylists { get; init; } = new();
+}
+
+public record YandexGeneratedPlaylist
+{
+    /// <summary>
+    /// playlistOfTheDay, recentTracks (Premiere), neverHeard (Deja vu), missedLikes (Stash), ...
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("ready")]
+    public bool Ready { get; init; }
+
+    [JsonPropertyName("data")]
+    public YandexPlaylist? Data { get; init; }
+}
+
+public record YandexRotorSequenceItem
+{
+    [JsonPropertyName("type")]
+    public string? Type { get; init; }
+
+    [JsonPropertyName("track")]
+    public YandexTrack? Track { get; init; }
+}
+
 public record YandexPlaylistTrackWrapper
 {
     [JsonPropertyName("track")]
