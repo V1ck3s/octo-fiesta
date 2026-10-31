@@ -873,4 +873,123 @@ public class YandexMetadataServiceTests
     }
     
     #endregion
+
+    #region GetSimilarSongsAsync Tests
+
+    private static string SimilarTrackJson(string id, string title, long albumId, bool available = true) => $$"""
+        {
+            "id": "{{id}}",
+            "title": "{{title}}",
+            "durationMs": 200000,
+            "available": {{(available ? "true" : "false")}},
+            "artists": [ { "id": 1, "name": "Kino" } ],
+            "albums": [ { "id": {{albumId}}, "title": "Gruppa krovi", "year": 1988, "trackPosition": { "volume": 1, "index": 1 } } ]
+        }
+        """;
+
+    [Fact]
+    public async Task GetSimilarSongsAsync_ReturnsAvailableSimilarTracks()
+    {
+        // Arrange
+        HttpRequestMessage? captured = null;
+        var mockResponse = new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent($$"""
+            {
+                "result": {
+                    "track": {{SimilarTrackJson("1", "Seed", 10)}},
+                    "similarTracks": [
+                        {{SimilarTrackJson("2", "Zvezda po imeni Solntse", 20)}},
+                        {{SimilarTrackJson("3", "Unavailable", 30, available: false)}},
+                        {{SimilarTrackJson("4", "Peremen", 40)}}
+                    ]
+                }
+            }
+            """)
+        };
+
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(mockResponse);
+
+        // Act
+        var result = await _service.GetSimilarSongsAsync("yandex", "1:10");
+
+        // Assert
+        Assert.Equal("/tracks/1/similar", captured?.RequestUri?.AbsolutePath);
+        Assert.Equal(["Zvezda po imeni Solntse", "Peremen"], result.Select(s => s.Title).ToArray());
+        Assert.Equal("2:20", result[0].ExternalId);
+        Assert.All(result, s => Assert.Equal("yandex", s.ExternalProvider));
+    }
+
+    [Fact]
+    public async Task GetSimilarSongsAsync_RespectsLimit()
+    {
+        // Arrange
+        var mockResponse = new HttpResponseMessage
+        {
+            StatusCode = HttpStatusCode.OK,
+            Content = new StringContent($$"""
+            {
+                "result": {
+                    "similarTracks": [
+                        {{SimilarTrackJson("2", "A", 20)}},
+                        {{SimilarTrackJson("3", "B", 30)}},
+                        {{SimilarTrackJson("4", "C", 40)}}
+                    ]
+                }
+            }
+            """)
+        };
+
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(mockResponse);
+
+        // Act
+        var result = await _service.GetSimilarSongsAsync("yandex", "1", limit: 2);
+
+        // Assert
+        Assert.Equal(["A", "B"], result.Select(s => s.Title).ToArray());
+    }
+
+    [Fact]
+    public async Task GetSimilarSongsAsync_WithWrongProvider_ReturnsEmptyWithoutRequest()
+    {
+        // Act
+        var result = await _service.GetSimilarSongsAsync("deezer", "1");
+
+        // Assert
+        Assert.Empty(result);
+        _httpMessageHandlerMock.Protected().Verify(
+            "SendAsync", Times.Never(), ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetSimilarSongsAsync_WhenHttpFails_ReturnsEmptyList()
+    {
+        // Arrange
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage { StatusCode = HttpStatusCode.InternalServerError });
+
+        // Act
+        var result = await _service.GetSimilarSongsAsync("yandex", "1");
+
+        // Assert
+        Assert.Empty(result);
+    }
+
+    #endregion
 }
