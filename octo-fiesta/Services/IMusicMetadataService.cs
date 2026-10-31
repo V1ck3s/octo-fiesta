@@ -78,4 +78,11 @@ public interface IMusicMetadataService
     /// <param name="externalId">Playlist ID from the provider</param>
     /// <returns>List of songs in the playlist</returns>
     Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId);
+
+    /// <summary>
+    /// Gets the playlists the provider generates for the user (daily mix, new releases, ...),
+    /// listed by getPlaylists next to the library playlists. Providers without them return an empty list.
+    /// </summary>
+    Task<List<ExternalPlaylist>> GetPersonalPlaylistsAsync()
+        => Task.FromResult(new List<ExternalPlaylist>());
 }

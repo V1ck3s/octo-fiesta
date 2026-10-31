@@ -19,6 +19,10 @@ public class YandexMetadataService : IMusicMetadataService
     private readonly HttpClient _httpClient;
     private readonly ILogger<YandexMetadataService> _logger;
     private readonly bool _includeUnavailable;
+    private readonly YandexWaveService? _waveService;
+    private static readonly TimeSpan PersonalPlaylistsTtl = TimeSpan.FromHours(1);
+    private List<ExternalPlaylist>? _personalPlaylists;
+    private DateTime _personalPlaylistsLoadedAt;
     private const string BaseUrl = "https://api.music.yandex.net";
     private const string ProviderName = "yandex";
     private const string AlbumPrefix = "ext-yandex-album-";
@@ -27,10 +31,12 @@ public class YandexMetadataService : IMusicMetadataService
     public YandexMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptions<YandexSettings>yandexSettings,
-        ILogger<YandexMetadataService> logger
+        ILogger<YandexMetadataService> logger,
+        YandexWaveService? waveService = null
     )
     {
         _logger = logger;
+        _waveService = waveService;
         _includeUnavailable = yandexSettings.Value.IncludeUnavailable;
         _httpClient = httpClientFactory.CreateClient("Yandex");
     }
@@ -240,6 +246,8 @@ public class YandexMetadataService : IMusicMetadataService
     {
         if (externalProvider != ProviderName) return null;
 
+        if (_waveService != null && externalId == YandexWaveService.WaveExternalId) return await _waveService.GetStationPlaylistAsync();
+
         var yandexPlaylist = await SendApiRequestAsync<YandexPlaylist>($"/playlist/{externalId}");
         if (yandexPlaylist == null) return null;
 
@@ -255,6 +263,12 @@ public class YandexMetadataService : IMusicMetadataService
     public async Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId)
     {
         if (externalProvider != ProviderName) return [];
+
+        // My Wave keeps each track's own album, so a download lands in the artist/album folder
+        if (_waveService != null && externalId == YandexWaveService.WaveExternalId)
+        {
+            return await _waveService.GetNextTracksAsync(_waveService.TracksPerRead);
+        }
 
         var yandexTracklist = await SendApiRequestAsync<YandexPlaylistTracks>($"/playlist/{externalId}");
         if (yandexTracklist == null) return [];
@@ -274,6 +288,32 @@ public class YandexMetadataService : IMusicMetadataService
             .ToList();
     }
 
+    /// <summary>
+    /// Gets the playlists Yandex generates for the user (Playlist of the Day, Premiere, Deja vu,
+    /// Stash, ...) from /feed. Cached for an hour: getPlaylists is called often and they change daily.
+    /// </summary>
+    public async Task<List<ExternalPlaylist>> GetPersonalPlaylistsAsync()
+    {
+        if (_personalPlaylists != null && DateTime.UtcNow - _personalPlaylistsLoadedAt < PersonalPlaylistsTtl)
+        {
+            return _personalPlaylists;
+        }
+
+        var feed = await SendApiRequestAsync<YandexFeed>("/feed");
+        if (feed == null)
+        {
+            // keep serving the last good list through a Yandex hiccup
+            return _personalPlaylists ?? [];
+        }
+
+        _personalPlaylists = feed.GeneratedPlaylists
+            .Where(p => p.Ready && p.Data != null)
+            .Select(p => MapYandexPlaylistToExternalPlaylist(p.Data!))
+            .ToList();
+        _personalPlaylistsLoadedAt = DateTime.UtcNow;
+        return _personalPlaylists;
+    }
+
     #endregion
 
     #region Cross-API mappings
@@ -283,7 +323,7 @@ public class YandexMetadataService : IMusicMetadataService
     /// </summary>
     /// <param name="yandexTrack">Yandex API Track payload.</param>
     /// <returns>Song Domain Model</returns>
-    private static Song MapYandexTrackToSong(YandexTrack yandexTrack)
+    internal static Song MapYandexTrackToSong(YandexTrack yandexTrack)
     {
         YandexArtistShort? yandexArtist = yandexTrack.Artists?.FirstOrDefault();
         string? externalArtistId = yandexArtist?.Id.ToString();
@@ -609,7 +649,7 @@ public class YandexMetadataService : IMusicMetadataService
     /// <param name="originalUri">Uri string obtained from Yandex API.</param>
     /// <param name="size">Size in pixels of a side of square cover image.</param>
     /// <returns>Actual uri with specified size.</returns>
-    private static string? MakeCoverUri(string? originalUri, int size)
+    internal static string? MakeCoverUri(string? originalUri, int size)
     {
         if (string.IsNullOrWhiteSpace(originalUri)) return null;
 

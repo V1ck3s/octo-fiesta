@@ -32,6 +32,7 @@ public class SubsonicController : ControllerBase
     private readonly SubsonicProxyService _proxyService;
     private readonly PlaylistSyncService? _playlistSyncService;
     private readonly ILyricsService? _lyricsService;
+    private readonly IStationService? _stationService;
     private readonly ILogger<SubsonicController> _logger;
     private readonly IHostApplicationLifetime _hostApplicationLifetime;
 
@@ -47,7 +48,8 @@ public class SubsonicController : ControllerBase
         IHostApplicationLifetime hostApplicationLifetime,
         ILogger<SubsonicController> logger,
         PlaylistSyncService? playlistSyncService = null,
-        ILyricsService? lyricsService = null)
+        ILyricsService? lyricsService = null,
+        IStationService? stationService = null)
     {
         _subsonicSettings = subsonicSettings.Value;
         _metadataService = metadataService;
@@ -60,6 +62,7 @@ public class SubsonicController : ControllerBase
         _hostApplicationLifetime = hostApplicationLifetime;
         _playlistSyncService = playlistSyncService;
         _lyricsService = lyricsService;
+        _stationService = stationService;
         _logger = logger;
 
         if (string.IsNullOrWhiteSpace(_subsonicSettings.Url))
@@ -154,6 +157,11 @@ public class SubsonicController : ControllerBase
         }
 
         var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+
+        if (isExternal)
+        {
+            _stationService?.TrackStarted(provider!, externalId!);
+        }
 
         if (!isExternal)
         {
@@ -751,6 +759,194 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
+    /// Lists Navidrome playlists after the provider's station ("My Wave") and the playlists the
+    /// provider generates for the user (daily mix, new releases, ...).
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getPlaylists")]
+    [Route("rest/getPlaylists.view")]
+    public async Task<IActionResult> GetPlaylists()
+    {
+        var parameters = await ExtractAllParameters();
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        (byte[] Body, string? ContentType) relay;
+        try
+        {
+            relay = await _proxyService.RelayAsync("rest/getPlaylists", parameters);
+        }
+        catch (HttpRequestException ex)
+        {
+            return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+        }
+
+        // another user's playlists (username=) never include ours
+        var providerPlaylists = parameters.ContainsKey("username")
+            ? new List<ExternalPlaylist>()
+            : await GetProviderPlaylistsSafeAsync();
+        if (providerPlaylists.Count == 0)
+        {
+            return File(relay.Body, relay.ContentType ?? $"application/{format}");
+        }
+
+        try
+        {
+            var body = Encoding.UTF8.GetString(relay.Body);
+            var isJson = format == "json" || relay.ContentType?.Contains("json") == true;
+            if (isJson)
+            {
+                var root = JsonNode.Parse(body)!;
+                var response = root["subsonic-response"]?.AsObject();
+                if (response?["status"]?.GetValue<string>() != "ok")
+                {
+                    return File(relay.Body, relay.ContentType ?? "application/json");
+                }
+
+                var playlists = response["playlists"] as JsonObject ?? new JsonObject();
+                var list = playlists["playlist"] as JsonArray ?? new JsonArray();
+                for (var i = 0; i < providerPlaylists.Count; i++)
+                {
+                    list.Insert(i, JsonSerializer.SerializeToNode(
+                        _responseBuilder.ConvertPlaylistSummaryToJson(providerPlaylists[i])));
+                }
+                playlists["playlist"] = list;
+                response["playlists"] = playlists;
+                return Content(root.ToJsonString(), "application/json; charset=utf-8");
+            }
+
+            var doc = XDocument.Parse(body);
+            var ns = doc.Root!.Name.Namespace;
+            if ((string?)doc.Root.Attribute("status") != "ok")
+            {
+                return File(relay.Body, relay.ContentType ?? "application/xml");
+            }
+
+            var playlistsElement = doc.Root.Element(ns + "playlists");
+            if (playlistsElement == null)
+            {
+                playlistsElement = new XElement(ns + "playlists");
+                doc.Root.Add(playlistsElement);
+            }
+
+            playlistsElement.AddFirst(providerPlaylists.Select(p => _responseBuilder.CreatePlaylistSummaryXml(p, ns)));
+            return Content(doc.ToString(), "application/xml; charset=utf-8");
+        }
+        catch (Exception ex) when (ex is JsonException or System.Xml.XmlException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "getPlaylists: could not add the station, relaying Navidrome's answer");
+            return File(relay.Body, relay.ContentType ?? $"application/{format}");
+        }
+    }
+
+    /// <summary>
+    /// Serves external playlists (and the station) as playlists; library playlists relay to Navidrome.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getPlaylist")]
+    [Route("rest/getPlaylist.view")]
+    public async Task<IActionResult> GetPlaylist()
+    {
+        var parameters = await ExtractAllParameters();
+        var id = parameters.GetValueOrDefault("id", "");
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (!PlaylistIdHelper.IsExternalPlaylist(id))
+        {
+            try
+            {
+                var result = await _proxyService.RelayAsync("rest/getPlaylist", parameters);
+                return File(result.Body, result.ContentType ?? $"application/{format}");
+            }
+            catch (HttpRequestException ex)
+            {
+                return _responseBuilder.CreateError(format, 0, $"Error connecting to Subsonic server: {ex.Message}");
+            }
+        }
+
+        try
+        {
+            var (provider, externalId) = PlaylistIdHelper.ParsePlaylistId(id);
+            var playlist = await _metadataService.GetPlaylistAsync(provider, externalId);
+            if (playlist == null)
+            {
+                return _responseBuilder.CreateError(format, 70, "Playlist not found");
+            }
+
+            var tracks = await _metadataService.GetPlaylistTracksAsync(provider, externalId);
+            if (_playlistSyncService != null && !IsStationPlaylist(id))
+            {
+                foreach (var track in tracks.Where(t => !string.IsNullOrEmpty(t.ExternalId)))
+                {
+                    _playlistSyncService.AddTrackToPlaylistCache($"ext-{provider}-{track.ExternalId}", id);
+                }
+            }
+
+            return _responseBuilder.CreatePlaylistResponse(format, playlist, tracks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting playlist {Id}", id);
+            return _responseBuilder.CreateError(format, 70, "Playlist not found");
+        }
+    }
+
+    /// <summary>
+    /// The station first, then the provider's personal playlists. A provider failure leaves them out
+    /// rather than costing the user the library playlists.
+    /// </summary>
+    private async Task<List<ExternalPlaylist>> GetProviderPlaylistsSafeAsync()
+    {
+        var playlists = new List<ExternalPlaylist>();
+        if (_stationService != null)
+        {
+            playlists.Add(_stationService.StationPlaylist);
+        }
+
+        try
+        {
+            playlists.AddRange(await _metadataService.GetPersonalPlaylistsAsync());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "getPlaylists: could not read the provider's personal playlists");
+        }
+
+        return playlists;
+    }
+
+    private bool IsStationPlaylist(string? id) =>
+        _stationService != null && !string.IsNullOrEmpty(id) &&
+        string.Equals(id, _stationService.StationPlaylist.Id, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Passes scrobbles of external songs to the station: now-playing starts a track,
+    /// a submission finishes it.
+    /// </summary>
+    private void ReportStationScrobble(Dictionary<string, string> parameters)
+    {
+        if (_stationService == null || !parameters.TryGetValue("id", out var id) || string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+        if (!isExternal || provider == null || externalId == null)
+        {
+            return;
+        }
+
+        var submission = !string.Equals(parameters.GetValueOrDefault("submission", "true"), "false", StringComparison.OrdinalIgnoreCase);
+        if (submission)
+        {
+            _stationService.TrackFinished(provider, externalId);
+        }
+        else
+        {
+            _stationService.TrackStarted(provider, externalId);
+        }
+    }
+
+    /// <summary>
     /// Enriches local albums with external songs.
     /// </summary>
     [HttpGet, HttpPost]
@@ -784,8 +980,9 @@ public class SubsonicController : ControllerBase
                 // Get playlist tracks
                 var tracks = await _metadataService.GetPlaylistTracksAsync(provider, externalId);
                 
-                // Add all tracks to playlist cache so when they're played, we know they belong to this playlist
-                if (_playlistSyncService != null)
+                // Add all tracks to playlist cache so when they're played, we know they belong to this playlist.
+                // A station changes on every read, so its tracks get no M3U.
+                if (_playlistSyncService != null && !IsStationPlaylist(id))
                 {
                     foreach (var track in tracks)
                     {
@@ -1417,6 +1614,12 @@ public class SubsonicController : ControllerBase
 
         // Check if this is a playlist
         var playlistId = GetExternalPlaylistIdFromStarParameters(parameters);
+        if (IsStationPlaylist(playlistId))
+        {
+            _logger.LogInformation("Ignoring star on station playlist {PlaylistId}: it changes on every read", playlistId);
+            return _responseBuilder.CreateResponse(format, "star", new { });
+        }
+
         if (!string.IsNullOrEmpty(playlistId) && PlaylistIdHelper.IsExternalPlaylist(playlistId))
         {
             if (_playlistSyncService == null)
@@ -1588,6 +1791,8 @@ public class SubsonicController : ControllerBase
     {
         var parameters = await ExtractAllParameters();
         var format = parameters.GetValueOrDefault("f", "xml");
+
+        ReportStationScrobble(parameters);
 
         var scrobbleResolution = await ResolveExternalSongIdIfPossible(parameters, "scrobble");
         if (scrobbleResolution is { IsExternalSong: true, Resolved: false })

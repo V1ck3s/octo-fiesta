@@ -123,6 +123,8 @@ services:
       # Available: true, false
       - Yandex__IncludeUnavailable=${YANDEX_INCLUDE_UNAVAILABLE_TRACKS:-false}
       - Yandex__DownloadPath=${YANDEX_DOWNLOAD_PATH:-}
+      # Tracks per opening of the My Wave playlist (default: 20)
+      - Yandex__WaveTracks=${YANDEX_WAVE_TRACKS:-20}
     volumes:
       - ${DOWNLOAD_PATH:-./downloads}:/app/downloads
       # Host folder backing a per-provider download path, one per provider you redirect.
