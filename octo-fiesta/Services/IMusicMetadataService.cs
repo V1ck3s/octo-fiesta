@@ -78,4 +78,14 @@ public interface IMusicMetadataService
     /// <param name="externalId">Playlist ID from the provider</param>
     /// <returns>List of songs in the playlist</returns>
     Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId);
+
+    /// <summary>
+    /// Gets songs the provider recommends as similar to one of its songs (Instant Mix / Song Radio).
+    /// Providers without a recommendation endpoint return an empty list.
+    /// </summary>
+    /// <param name="externalProvider">Provider name of the seed song</param>
+    /// <param name="externalId">ID of the seed song on the provider</param>
+    /// <param name="limit">Maximum number of songs to return</param>
+    Task<List<Song>> GetSimilarSongsAsync(string externalProvider, string externalId, int limit = 50)
+        => Task.FromResult(new List<Song>());
 }

@@ -274,6 +274,29 @@ public class YandexMetadataService : IMusicMetadataService
             .ToList();
     }
 
+    /// <summary>
+    /// Gets the tracks Yandex Music recommends as similar to a track
+    /// </summary>
+    /// <param name="externalProvider">Provider name ("yandex")</param>
+    /// <param name="externalId">Yandex track ID, optionally with its album ("track:album")</param>
+    /// <param name="limit">Maximum number of songs to return</param>
+    /// <returns>Similar songs, empty when Yandex has none or the request fails</returns>
+    public async Task<List<Song>> GetSimilarSongsAsync(string externalProvider, string externalId, int limit = 50)
+    {
+        if (externalProvider != ProviderName || limit <= 0) return [];
+
+        // the endpoint takes the bare track ID; the album part only selects a release
+        string trackId = externalId.Split(':')[0];
+        var similar = await SendApiRequestAsync<YandexSimilarTracks>($"/tracks/{Uri.EscapeDataString(trackId)}/similar");
+        if (similar == null) return [];
+
+        return similar.SimilarTracks
+            .Where(track => track.Error is null && IsTrackAvailable(track))
+            .Select(MapYandexTrackToSong)
+            .Take(limit)
+            .ToList();
+    }
+
     #endregion
 
     #region Cross-API mappings

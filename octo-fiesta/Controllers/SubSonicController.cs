@@ -751,6 +751,210 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
+    /// Merges provider recommendations into Instant Mix / Song Radio.
+    /// </summary>
+    /// <remarks>
+    /// Navidrome answers getSimilarSongs from the local library with a similarity agent
+    /// (Last.fm, ListenBrainz), so a sparse library or a disabled agent leaves the mix short
+    /// or empty and it never surfaces new music. The seed song is resolved to a provider
+    /// track (an external ID directly, a downloaded song through its mapping, otherwise by
+    /// artist and title) and the provider's similar tracks are interleaved with Navidrome's.
+    /// Seeds that are not songs (getSimilarSongs also accepts artists and albums) relay
+    /// unchanged.
+    /// </remarks>
+    [HttpGet, HttpPost]
+    [Route("rest/getSimilarSongs")]
+    [Route("rest/getSimilarSongs.view")]
+    public Task<IActionResult> GetSimilarSongs() => GetSimilarSongsInternal("rest/getSimilarSongs", "similarSongs");
+
+    /// <summary>
+    /// ID3 variant of <see cref="GetSimilarSongs"/>, the one most clients call.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getSimilarSongs2")]
+    [Route("rest/getSimilarSongs2.view")]
+    public Task<IActionResult> GetSimilarSongs2() => GetSimilarSongsInternal("rest/getSimilarSongs2", "similarSongs2");
+
+    private async Task<IActionResult> GetSimilarSongsInternal(string endpoint, string resultName)
+    {
+        var parameters = await ExtractAllParameters();
+        var id = parameters.GetValueOrDefault("id", "");
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return _responseBuilder.CreateError(format, 10, "Missing id parameter");
+        }
+
+        var count = int.TryParse(parameters.GetValueOrDefault("count", "50"), out var parsedCount) && parsedCount > 0
+            ? parsedCount
+            : 50;
+
+        var (isExternal, provider, externalId) = _localLibraryService.ParseSongId(id);
+
+        // Navidrome does not know external IDs, so only a library seed is relayed
+        var navidromeTask = isExternal
+            ? Task.FromResult<(byte[]? Body, string? ContentType, bool Success)>((null, null, false))
+            : _proxyService.RelaySafeAsync(endpoint, parameters);
+        var externalTask = isExternal
+            ? GetProviderSimilarSongsSafeAsync(provider!, externalId!, count)
+            : ResolveSeedAndGetSimilarSongsAsync(id, parameters, count);
+
+        await Task.WhenAll(navidromeTask, externalTask);
+
+        var navidromeResult = await navidromeTask;
+        var externalSongs = await externalTask;
+
+        // XML clients and seeds the provider cannot place keep Navidrome's own answer
+        var isJson = format == "json" || navidromeResult.ContentType?.Contains("json") == true;
+        if (externalSongs.Count == 0 || !isJson)
+        {
+            if (navidromeResult.Success && navidromeResult.Body != null)
+            {
+                return File(navidromeResult.Body, navidromeResult.ContentType ?? "application/json");
+            }
+
+            return _responseBuilder.CreateResponse(format, resultName, new { });
+        }
+
+        var localSongs = new List<object>();
+        var seen = new HashSet<string>();
+
+        if (navidromeResult.Success && navidromeResult.Body != null)
+        {
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(Encoding.UTF8.GetString(navidromeResult.Body));
+                if (jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) &&
+                    response.TryGetProperty(resultName, out var similar) &&
+                    similar.TryGetProperty("song", out var songs) &&
+                    songs.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var song in songs.EnumerateArray())
+                    {
+                        // without a similarity agent Navidrome answers with the seed itself
+                        if (song.TryGetProperty("id", out var songId) && songId.GetString() == id)
+                        {
+                            continue;
+                        }
+
+                        var title = song.TryGetProperty("title", out var t) ? t.GetString() : null;
+                        var artist = song.TryGetProperty("artist", out var a) ? a.GetString() : null;
+                        if (seen.Add(SimilarSongKey(artist, title)))
+                        {
+                            localSongs.Add(_responseBuilder.ConvertSubsonicJsonElement(song, true));
+                        }
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // a malformed relay costs only the local half of the mix
+            }
+        }
+
+        var providerSongs = new List<object>();
+        foreach (var song in externalSongs)
+        {
+            if (seen.Add(SimilarSongKey(song.Artist, song.Title)))
+            {
+                providerSongs.Add(_responseBuilder.ConvertSongToJson(song));
+            }
+        }
+
+        // alternate so a sparse library neither hides nor drowns the recommendations
+        var merged = new List<object>();
+        for (var i = 0; merged.Count < count && (i < localSongs.Count || i < providerSongs.Count); i++)
+        {
+            if (i < localSongs.Count) merged.Add(localSongs[i]);
+            if (merged.Count < count && i < providerSongs.Count) merged.Add(providerSongs[i]);
+        }
+
+        return _responseBuilder.CreateJsonResponse(new Dictionary<string, object>
+        {
+            ["status"] = "ok",
+            ["version"] = "1.16.1",
+            [resultName] = new { song = merged }
+        });
+    }
+
+    private static string SimilarSongKey(string? artist, string? title) =>
+        $"{StringNormalizer.CreateComparisonKey(artist)}|{StringNormalizer.CreateComparisonKey(title)}";
+
+    /// <summary>
+    /// A provider outage must not cost the user the local half of the mix, so failures
+    /// degrade to an empty list.
+    /// </summary>
+    private async Task<List<Song>> GetProviderSimilarSongsSafeAsync(string provider, string externalId, int count)
+    {
+        try
+        {
+            return await _metadataService.GetSimilarSongsAsync(provider, externalId, count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "getSimilarSongs: provider lookup failed for {Provider}:{ExternalId}", provider, externalId);
+            return new List<Song>();
+        }
+    }
+
+    /// <summary>
+    /// Finds the provider track behind a library song: its download mapping when octo-fiesta
+    /// saved it, otherwise a provider search by the library tags.
+    /// </summary>
+    private async Task<List<Song>> ResolveSeedAndGetSimilarSongsAsync(
+        string localId, Dictionary<string, string> parameters, int count)
+    {
+        try
+        {
+            var mapping = await _localLibraryService.GetMappingForLocalIdAsync(localId);
+            if (mapping != null)
+            {
+                return await GetProviderSimilarSongsSafeAsync(mapping.ExternalProvider, mapping.ExternalId, count);
+            }
+
+            var songParameters = new Dictionary<string, string>(parameters) { ["id"] = localId, ["f"] = "json" };
+            var songResult = await _proxyService.RelaySafeAsync("rest/getSong", songParameters);
+            if (!songResult.Success || songResult.Body == null)
+            {
+                return new List<Song>();
+            }
+
+            using var jsonDoc = JsonDocument.Parse(Encoding.UTF8.GetString(songResult.Body));
+            if (!jsonDoc.RootElement.TryGetProperty("subsonic-response", out var response) ||
+                !response.TryGetProperty("song", out var song))
+            {
+                // an artist or album ID: no song seed to resolve
+                return new List<Song>();
+            }
+
+            var title = song.TryGetProperty("title", out var t) ? t.GetString() : null;
+            var artist = song.TryGetProperty("artist", out var a) ? a.GetString() : null;
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist))
+            {
+                return new List<Song>();
+            }
+
+            var candidates = await _metadataService.SearchSongsAsync($"{artist} {title}", 10);
+            var titleKey = StringNormalizer.CreateComparisonKey(title);
+            var seed = candidates.FirstOrDefault(c =>
+                StringNormalizer.CreateComparisonKey(c.Title) == titleKey &&
+                IsSameArtistOrCollaboration(c.Artist, artist));
+            if (seed?.ExternalProvider == null || seed.ExternalId == null)
+            {
+                return new List<Song>();
+            }
+
+            return await GetProviderSimilarSongsSafeAsync(seed.ExternalProvider, seed.ExternalId, count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "getSimilarSongs: could not resolve library seed {LocalId}", localId);
+            return new List<Song>();
+        }
+    }
+
+    /// <summary>
     /// Enriches local albums with external songs.
     /// </summary>
     [HttpGet, HttpPost]

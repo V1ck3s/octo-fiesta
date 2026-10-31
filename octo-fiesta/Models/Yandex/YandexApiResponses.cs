@@ -361,6 +361,18 @@ public record YandexPlaylistTracks
     public string? Title { get; init; }
 }
 
+/// <summary>
+/// Response of /tracks/{id}/similar: the seed track and the tracks Yandex recommends after it.
+/// </summary>
+public record YandexSimilarTracks
+{
+    [JsonPropertyName("track")]
+    public YandexTrack? Track { get; init; }
+
+    [JsonPropertyName("similarTracks")]
+    public List<YandexTrack> SimilarTracks { get; init; } = new();
+}
+
 public record YandexPlaylistTrackWrapper
 {
     [JsonPropertyName("track")]
