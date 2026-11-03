@@ -25,7 +25,7 @@ public class SubsonicControllerExtensionsTests
     [InlineData("jsonp", "rest/getOpenSubsonicExtensions.view", false)]
     [InlineData("jsonp", "rest/getOpenSubsonicExtensions", false)]
     [InlineData("jsonp", "rest/getOpenSubsonicExtensions.view", true)]
-    public async Task ProxyDoesNotAdvertiseUnsupportedPlaybackReport(string format, string endpoint, bool trailingSemicolon)
+    public async Task ProxyHidesPlaybackReportAndAdvertisesItself(string format, string endpoint, bool trailingSemicolon)
     {
         var body = format != "xml"
             ? """{"subsonic-response":{"status":"ok","openSubsonicExtensions":[{"name":"playbackReport","versions":[1]},{"name":"transcoding","versions":[1]}]}}"""
@@ -79,18 +79,18 @@ public class SubsonicControllerExtensionsTests
         {
             var response = XDocument.Parse(returned).Root!;
             Assert.Equal("ok", response.Attribute("status")?.Value);
-            var extension = Assert.Single(response.Elements());
-            Assert.Equal("transcoding", extension.Attribute("name")?.Value);
-            Assert.Equal("1", extension.Element(response.Name.Namespace + "versions")?.Value);
+            var extensions = response.Elements().ToList();
+            Assert.Equal(new[] { "transcoding", "octoFiesta" }, extensions.Select(e => e.Attribute("name")?.Value));
+            Assert.All(extensions, e => Assert.Equal("1", e.Element(response.Name.Namespace + "versions")?.Value));
         }
         else
         {
             using var document = JsonDocument.Parse(returned);
             var response = document.RootElement.GetProperty("subsonic-response");
             Assert.Equal("ok", response.GetProperty("status").GetString());
-            var extension = Assert.Single(response.GetProperty("openSubsonicExtensions").EnumerateArray());
-            Assert.Equal("transcoding", extension.GetProperty("name").GetString());
-            Assert.Equal(1, Assert.Single(extension.GetProperty("versions").EnumerateArray()).GetInt32());
+            var extensions = response.GetProperty("openSubsonicExtensions").EnumerateArray().ToList();
+            Assert.Equal(new[] { "transcoding", "octoFiesta" }, extensions.Select(e => e.GetProperty("name").GetString()));
+            Assert.All(extensions, e => Assert.Equal(1, Assert.Single(e.GetProperty("versions").EnumerateArray()).GetInt32()));
         }
     }
 }
