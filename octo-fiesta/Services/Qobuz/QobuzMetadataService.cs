@@ -1,3 +1,4 @@
+using octo_fiesta.Services.Common;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Download;
@@ -188,6 +189,49 @@ public class QobuzMetadataService : IMusicMetadataService
             _logger.LogError(ex, "Failed to get song {ExternalId}", externalId);
             return null;
         }
+    }
+
+    public async Task<Album?> GetAlbumByBarcodeAsync(string barcode)
+    {
+        try
+        {
+            var appId = await _bundleService.GetAppIdAsync();
+            var url = $"{BaseUrl}catalog/search?query={Uri.EscapeDataString(barcode.TrimStart('0'))}&type=albums&limit=25&app_id={appId}";
+
+            var response = await GetWithAuthAsync(url);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonDocument.Parse(json);
+                if (result.RootElement.TryGetProperty("albums", out var albumsData) &&
+                    albumsData.TryGetProperty("items", out var items))
+                {
+                    // a text search: keep only the album whose own barcode matches
+                    foreach (var item in items.EnumerateArray())
+                    {
+                        var upc = item.TryGetProperty("upc", out var upcEl) ? upcEl.GetString() : null;
+                        var id = item.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+                        if (id != null && BarcodeHelper.AreEqual(upc, barcode))
+                        {
+                            return await GetAlbumAsync("qobuz", id);
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to search album by barcode {Barcode}", barcode);
+        }
+
+        // many Qobuz album ids are the barcode itself
+        foreach (var variant in BarcodeHelper.Variants(barcode))
+        {
+            var album = await GetAlbumAsync("qobuz", variant);
+            if (album != null) return album;
+        }
+
+        return null;
     }
 
     public async Task<Album?> GetAlbumAsync(string externalProvider, string externalId)

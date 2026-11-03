@@ -116,6 +116,9 @@ public class TidalTrack
 
 public class TidalAlbum
 {
+    [JsonPropertyName("upc")]
+    public string? Upc { get; set; }
+
     [JsonPropertyName("id")]
     public long Id { get; set; }
     

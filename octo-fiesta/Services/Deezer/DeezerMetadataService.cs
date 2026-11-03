@@ -1,3 +1,4 @@
+using octo_fiesta.Services.Common;
 using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Models.Download;
@@ -211,6 +212,18 @@ public class DeezerMetadataService : IMusicMetadataService
         }
         
         return song;
+    }
+
+    public async Task<Album?> GetAlbumByBarcodeAsync(string barcode)
+    {
+        // Deezer resolves "upc:<code>" to the album carrying that barcode
+        foreach (var variant in BarcodeHelper.Variants(barcode))
+        {
+            var album = await GetAlbumAsync("deezer", $"upc:{variant}");
+            if (album != null) return album;
+        }
+
+        return null;
     }
 
     public async Task<Album?> GetAlbumAsync(string externalProvider, string externalId)
