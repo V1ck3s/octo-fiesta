@@ -70,4 +70,52 @@ public class DownloadPathResolverTests
 
         Assert.Equal(["/library"], DownloadPathResolver.GetAllRoots(configuration));
     }
+
+    [Fact]
+    public void GetMappingsPath_DefaultsToSharedDownloadPath()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = "/library",
+        });
+
+        Assert.Equal(Path.Combine("/library", ".mappings.json"), DownloadPathResolver.GetMappingsPath(configuration));
+    }
+
+    [Fact]
+    public void GetMappingsPath_PrefersExplicitOverride()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = "/library",
+            ["Library:MappingsPath"] = "/config/.mappings.json",
+        });
+
+        Assert.Equal("/config/.mappings.json", DownloadPathResolver.GetMappingsPath(configuration));
+    }
+
+    [Fact]
+    public void GetMappingsPath_TreatsAnEmptyOverrideAsAbsent()
+    {
+        // Library__MappingsPath= with no value must not redirect mappings to the working directory.
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = "/library",
+            ["Library:MappingsPath"] = "",
+        });
+
+        Assert.Equal(Path.Combine("/library", ".mappings.json"), DownloadPathResolver.GetMappingsPath(configuration));
+    }
+
+    [Fact]
+    public void GetMappingsPath_IgnoresPerProviderDownloadPaths()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Library:DownloadPath"] = "/library",
+            ["Deezer:DownloadPath"] = "/music",
+        });
+
+        Assert.Equal(Path.Combine("/library", ".mappings.json"), DownloadPathResolver.GetMappingsPath(configuration));
+    }
 }
