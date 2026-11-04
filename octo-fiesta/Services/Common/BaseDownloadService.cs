@@ -650,6 +650,20 @@ public abstract class BaseDownloadService : IDownloadService
             else
             {
                 Logger.LogInformation("Cache mode: skipping library registration and scan");
+
+                // In Cache mode with Album download mode, the requested track is in cache;
+                // fetch the rest of the album in the background and permanentize it into the
+                // library (cached tracks are moved, the rest are downloaded directly to
+                // permanent storage). Reuses the existing star-album path.
+                if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
+                {
+                    var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
+                    if (!string.IsNullOrEmpty(albumExternalId))
+                    {
+                        Logger.LogInformation("Cache mode: album download triggered for album {AlbumId}", albumExternalId);
+                        DownloadFullAlbumInBackgroundToPermanent(externalProvider, albumExternalId);
+                    }
+                }
             }
 
             Logger.LogInformation("Download completed: {Path}", localPath);
