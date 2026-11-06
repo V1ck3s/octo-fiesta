@@ -32,8 +32,8 @@ public abstract class BaseDownloadService : IDownloadService
 
     protected readonly string CachePath;
 
-    protected readonly Dictionary<string, DownloadInfo> ActiveDownloads = new();
-    protected readonly SemaphoreSlim DownloadLock = new(1, 1);
+    protected readonly ConcurrentDictionary<string, DownloadInfo> ActiveDownloads = new();
+    protected readonly SemaphoreSlim DownloadLock;
 
     // Small in-memory cache to avoid repeated metadata/network lookups when searching for cached files.
     // Key: "{provider}|{externalId}" -> (path or null, expiry)
@@ -95,6 +95,8 @@ public abstract class BaseDownloadService : IDownloadService
         _serviceProvider = serviceProvider;
         Logger = logger;
 
+        DownloadLock = new(SubsonicSettings.MaxConcurrentDownloads, SubsonicSettings.MaxConcurrentDownloads);
+        
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(CachePath))
@@ -493,6 +495,17 @@ public abstract class BaseDownloadService : IDownloadService
         // In Cache mode, downloads go to cache unless forcePermanent is set (used by star album/playlist)
         var isCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
 
+        // Since we can now run multiple concurrent downloads, it could happen that the same song gets requested twice, if so we should just "ignore" the second request for download.
+        if (ActiveDownloads.TryGetValue(songId, out var downloadInfo))
+        {
+            if (downloadInfo is { Status: DownloadStatus.Completed, LocalPath: not null })
+            {
+                return downloadInfo.LocalPath!;
+            }
+
+            throw new Exception($"Song '{songId}' is already downloaded"); // Couldn't think of anything better on the quick
+        }
+        
         // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
         await DownloadLock.WaitAsync(cancellationToken);
 
