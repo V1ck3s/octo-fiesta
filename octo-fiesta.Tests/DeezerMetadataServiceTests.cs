@@ -607,11 +607,13 @@ public class DeezerMetadataServiceTests
         Assert.DoesNotContain(result, s => s.Title == "Explicit Original");
     }
 
-    [Fact]
-    public async Task SearchSongsAsync_AllFilter_IncludesEverything()
+    [Theory]
+    [InlineData(ExplicitFilter.All)]
+    [InlineData(ExplicitFilter.PreferExplicit)]
+    public async Task SearchSongsAsync_AllAndQobuzPreferenceKeepDeezerResults(ExplicitFilter filter)
     {
         // Arrange
-        _service = CreateService(new SubsonicSettings { ExplicitFilter = ExplicitFilter.All });
+        _service = CreateService(new SubsonicSettings { ExplicitFilter = filter });
         
         var deezerResponse = new
         {
@@ -653,7 +655,9 @@ public class DeezerMetadataServiceTests
         var result = await _service.SearchSongsAsync("test", 20);
 
         // Assert
-        Assert.Equal(3, result.Count);
+        Assert.Equal(new[] { "1", "2", "3" }, result.Select(s => s.ExternalId));
+        Assert.Equal(new int?[] { 1, 3, 0 }, result.Select(s => s.ExplicitContentLyrics));
+        Assert.All(result, song => Assert.Null(song.IsExplicit));
     }
 
     [Fact]

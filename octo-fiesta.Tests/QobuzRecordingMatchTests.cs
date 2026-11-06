@@ -40,4 +40,25 @@ public class QobuzRecordingMatchTests
         }, new(), json);
         Assert.Equal(2, result.MergedSongs.Count);
     }
+
+    [Theory]
+    [InlineData("tidal", true)]
+    [InlineData("tidal", false)]
+    [InlineData("deezer", true)]
+    [InlineData("deezer", false)]
+    public void OtherProvidersKeepExistingTitleArtistDeduplication(string provider, bool json)
+    {
+        var mapper = new octo_fiesta.Services.Subsonic.SubsonicModelMapper(
+            new octo_fiesta.Services.Subsonic.SubsonicResponseBuilder(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<octo_fiesta.Services.Subsonic.SubsonicModelMapper>.Instance);
+        var local = new Dictionary<string, object> { ["title"] = "Song", ["artist"] = "Artist" };
+        var localSongs = new List<object> { json ? local : new System.Xml.Linq.XElement("song",
+            new System.Xml.Linq.XAttribute("title", "Song"), new System.Xml.Linq.XAttribute("artist", "Artist")) };
+        var result = mapper.MergeSearchResults(localSongs, new(), new(), new octo_fiesta.Models.Search.SearchResult
+        {
+            Songs = new() { new Song { Title = "Song", Artist = "Artist", ExternalProvider = provider,
+                ExternalId = "1", Isrc = "GBTEST000001", ExplicitContentLyrics = 1 } }
+        }, new(), json);
+        Assert.Single(result.MergedSongs);
+    }
 }

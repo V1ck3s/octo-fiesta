@@ -6,17 +6,19 @@ namespace octo_fiesta.Tests;
 public class NativeMetadataTagsTests
 {
     [Theory]
-    [InlineData(true, "1")]
-    [InlineData(false, "2")]
-    [InlineData(null, null)]
-    public async Task FlacTagsSurviveReadback(bool? advisory, string? expected)
+    [InlineData("qobuz", true, "1")]
+    [InlineData("qobuz", false, "2")]
+    [InlineData("qobuz", null, null)]
+    [InlineData("tidal", null, null)]
+    [InlineData("deezer", null, null)]
+    public async Task FlacTagsSurviveReadback(string provider, bool? advisory, string? expected)
     {
         var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".flac");
         // A 10 ms silent FLAC generated with ffmpeg; no external fixture or media download.
         File.WriteAllBytes(path, Convert.FromBase64String("ZkxhQwAAACIBuQG5AAANAAANCsRA8AAAAbnl+CiEcM+L0UCXUFCB5jQfhAAADgYAAABmZm1wZWcAAAAA//h5CAABuFUAAACMQw=="));
         try
         {
-            await new MetadataWriter().Write(path, new Song { Title = "Song", Artist = "Artist", Album = "Album",
+            await new MetadataWriter().Write(path, new Song { ExternalProvider = provider, ExplicitContentLyrics = 1, Title = "Song", Artist = "Artist", Album = "Album",
                 Isrc = "GBTEST000001", Barcode = "0012345678901", Label = "Label", IsExplicit = advisory,
                 Copyright = "Copyright Owner" });
             using var reread = TagLib.File.Create(path);
