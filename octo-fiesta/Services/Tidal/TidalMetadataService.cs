@@ -27,12 +27,17 @@ public class TidalMetadataService : IMusicMetadataService
     private readonly SubsonicSettings _subsonicSettings;
     private readonly ILogger<TidalMetadataService> _logger;
 
+    // Configured tier, which decides what downloads deliver
+    private readonly string? _quality;
+
     public TidalMetadataService(
         IHttpClientFactory httpClientFactory,
         TidalAuthService auth,
         IOptions<SubsonicSettings> subsonicSettings,
-        ILogger<TidalMetadataService> logger)
+        ILogger<TidalMetadataService> logger,
+        IOptions<TidalSettings>? tidalSettings = null)
     {
+        _quality = tidalSettings?.Value.Quality;
         _httpClient = httpClientFactory.CreateClient(TidalHttpClientConfiguration.AuthClientName);
         _auth = auth;
         _subsonicSettings = subsonicSettings.Value;
@@ -308,7 +313,7 @@ public class TidalMetadataService : IMusicMetadataService
 
     #region Mapping
 
-    private static Song MapTrackToSong(TidalTrack track)
+    private Song MapTrackToSong(TidalTrack track)
     {
         var artists = track.Artists?
             .Where(a => !string.IsNullOrEmpty(a.Name))
@@ -353,7 +358,8 @@ public class TidalMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = ProviderName,
             ExternalId = track.Id.ToString(),
-            ExplicitContentLyrics = track.Explicit ? 1 : 0
+            ExplicitContentLyrics = track.Explicit ? 1 : 0,
+            ExpectedFormat = TidalQuality.ExpectedFormat(_quality, track.AudioQuality, track.MediaMetadata?.Tags)
         };
     }
 

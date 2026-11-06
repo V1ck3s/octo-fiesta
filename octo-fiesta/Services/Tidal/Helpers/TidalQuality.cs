@@ -1,3 +1,5 @@
+using octo_fiesta.Models.Domain;
+
 namespace octo_fiesta.Services.Tidal;
 
 /// <summary>
@@ -75,6 +77,30 @@ public static class TidalQuality
         Low => "AAC_96",
         _ => "AAC_320"
     };
+
+    /// <summary>
+    /// The format a track will be delivered in at the configured tier, announced while it is
+    /// not downloaded yet. Lossy tiers come as AAC; HI_RES_LOSSLESS comes as FLAC inside MP4
+    /// (DASH) when the track has a hi-res master, and otherwise as plain FLAC at CD quality,
+    /// unless the track is only available lossy. Tidal does not say a track's exact sample
+    /// rate, so hi-res is assumed to be 24-bit/96 kHz.
+    /// </summary>
+    public static AudioFormat ExpectedFormat(string? configuredQuality, string? trackAudioQuality, IReadOnlyCollection<string>? tags)
+    {
+        var quality = Normalize(configuredQuality);
+        if (quality == Low) return AudioFormat.Aac(96);
+        if (quality == High) return AudioFormat.Aac(320);
+
+        bool HasTag(string tag) => tags?.Contains(tag, StringComparer.OrdinalIgnoreCase) == true;
+
+        if (quality == HiResLossless && HasTag("HIRES_LOSSLESS"))
+        {
+            return AudioFormat.Flac(24, 96).InMp4();
+        }
+
+        var lossyOnly = trackAudioQuality is not null && !IsLossless(trackAudioQuality) && !HasTag("LOSSLESS");
+        return lossyOnly ? AudioFormat.Aac(320) : AudioFormat.Flac();
+    }
 
     /// <summary>
     /// Next tier down, or null when already at the lowest one.

@@ -17,11 +17,27 @@ public class DeezerMetadataService : IMusicMetadataService
     private readonly SubsonicSettings _settings;
     private const string BaseUrl = "https://api.deezer.com";
 
-    public DeezerMetadataService(IHttpClientFactory httpClientFactory, IOptions<SubsonicSettings> settings)
+    // What downloads are expected to deliver, announced for tracks not downloaded yet
+    private readonly AudioFormat _expectedFormat;
+
+    public DeezerMetadataService(IHttpClientFactory httpClientFactory, IOptions<SubsonicSettings> settings,
+        IOptions<DeezerSettings>? deezerSettings = null)
     {
         _httpClient = httpClientFactory.CreateClient();
         _settings = settings.Value;
+        _expectedFormat = GetExpectedFormat(deezerSettings?.Value.Quality);
     }
+
+    /// <summary>
+    /// Deezer serves FLAC at CD quality, the MP3 formats when asked for them (the same choice
+    /// the download service makes).
+    /// </summary>
+    internal static AudioFormat GetExpectedFormat(string? quality) => quality?.ToUpperInvariant() switch
+    {
+        "MP3_320" => AudioFormat.Mp3_320,
+        "MP3_128" => AudioFormat.Mp3_128,
+        _ => AudioFormat.Flac()
+    };
 
     public async Task<List<Song>> SearchSongsAsync(string query, int limit = 20)
     {
@@ -406,6 +422,7 @@ public class DeezerMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId,
+            ExpectedFormat = _expectedFormat,
             ExplicitContentLyrics = explicitContentLyrics
         };
     }
@@ -545,6 +562,7 @@ public class DeezerMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "deezer",
             ExternalId = externalId,
+            ExpectedFormat = _expectedFormat,
             ExplicitContentLyrics = explicitContentLyrics
         };
     }

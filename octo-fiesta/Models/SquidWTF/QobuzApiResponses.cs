@@ -49,6 +49,12 @@ public class QobuzArtistList
 
 public class QobuzAlbum
 {
+    [JsonPropertyName("maximum_bit_depth")]
+    public int? MaximumBitDepth { get; set; }
+
+    [JsonPropertyName("maximum_sampling_rate")]
+    public double? MaximumSamplingRate { get; set; }
+
     [JsonPropertyName("id")]
     public string? Id { get; set; }
     
@@ -90,6 +96,12 @@ public class QobuzAlbum
 
 public class QobuzTrack
 {
+    [JsonPropertyName("maximum_bit_depth")]
+    public int? MaximumBitDepth { get; set; }
+
+    [JsonPropertyName("maximum_sampling_rate")]
+    public double? MaximumSamplingRate { get; set; }
+
     [JsonPropertyName("id")]
     public long Id { get; set; }
     

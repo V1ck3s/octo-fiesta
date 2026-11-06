@@ -24,6 +24,9 @@ public class YandexMetadataService : IMusicMetadataService
     private const string AlbumPrefix = "ext-yandex-album-";
     private const string ArtistPrefix = "ext-yandex-artist-";
 
+    // What downloads are expected to deliver, announced for tracks not downloaded yet
+    private readonly AudioFormat _expectedFormat;
+
     public YandexMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptions<YandexSettings>yandexSettings,
@@ -32,6 +35,7 @@ public class YandexMetadataService : IMusicMetadataService
     {
         _logger = logger;
         _includeUnavailable = yandexSettings.Value.IncludeUnavailable;
+        _expectedFormat = YandexQuality.ExpectedFormat(yandexSettings.Value.Quality);
         _httpClient = httpClientFactory.CreateClient("Yandex");
     }
     
@@ -283,7 +287,7 @@ public class YandexMetadataService : IMusicMetadataService
     /// </summary>
     /// <param name="yandexTrack">Yandex API Track payload.</param>
     /// <returns>Song Domain Model</returns>
-    private static Song MapYandexTrackToSong(YandexTrack yandexTrack)
+    private Song MapYandexTrackToSong(YandexTrack yandexTrack)
     {
         YandexArtistShort? yandexArtist = yandexTrack.Artists?.FirstOrDefault();
         string? externalArtistId = yandexArtist?.Id.ToString();
@@ -354,7 +358,8 @@ public class YandexMetadataService : IMusicMetadataService
             ExternalProvider = ProviderName,
             ExternalId = externalTrackId,
             LocalPath = null,
-            ExplicitContentLyrics = explicitWarning
+            ExplicitContentLyrics = explicitWarning,
+            ExpectedFormat = _expectedFormat
         };
     }
 

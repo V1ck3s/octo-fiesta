@@ -706,4 +706,38 @@ public class QobuzMetadataServiceTests
     }
     
     #endregion
+
+    #region Expected format
+
+    [Fact]
+    public async Task GetSongAsync_AnnouncesTheTracksResolution()
+    {
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(@"{""id"": 9, ""title"": ""Hi-res"", ""maximum_bit_depth"": 24, ""maximum_sampling_rate"": 96}")
+            });
+
+        var song = await _service.GetSongAsync("qobuz", "9");
+
+        Assert.Equal(AudioFormat.Flac(24, 96), song!.ExpectedFormat);
+    }
+
+    [Fact]
+    public async Task GetSongAsync_FallsBackOnTheAlbumsResolution()
+    {
+        _httpMessageHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(@"{""id"": 9, ""title"": ""Hi-res"", ""album"": {""id"": ""a"", ""title"": ""A"", ""maximum_bit_depth"": 24, ""maximum_sampling_rate"": 192}}")
+            });
+
+        var song = await _service.GetSongAsync("qobuz", "9");
+
+        Assert.Equal(AudioFormat.Flac(24, 192), song!.ExpectedFormat);
+    }
+
+    #endregion
 }
