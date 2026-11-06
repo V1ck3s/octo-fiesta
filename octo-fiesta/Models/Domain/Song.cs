@@ -32,6 +32,10 @@ public class Song
     /// ISRC (International Standard Recording Code)
     /// </summary>
     public string? Isrc { get; set; }
+    public string? Barcode { get; set; }
+
+    /// <summary>Track advisory from the provider; null means unknown.</summary>
+    public bool? IsExplicit { get; set; }
     
     /// <summary>
     /// Full release date (format: YYYY-MM-DD)

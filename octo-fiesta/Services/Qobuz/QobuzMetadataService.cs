@@ -63,7 +63,7 @@ public class QobuzMetadataService : IMusicMetadataService
             {
                 foreach (var track in items.EnumerateArray())
                 {
-                    var song = ParseQobuzTrack(track);
+                    var song = ParseQobuzTrackFull(track);
                     if (ShouldIncludeSong(song))
                     {
                         songs.Add(song);
@@ -71,7 +71,9 @@ public class QobuzMetadataService : IMusicMetadataService
                 }
             }
             
-            return songs;
+            return _settings.ExplicitFilter == ExplicitFilter.PreferExplicit
+                ? songs.OrderByDescending(song => song.IsExplicit == true).ToList()
+                : songs;
         }
         catch (Exception ex)
         {
@@ -103,7 +105,9 @@ public class QobuzMetadataService : IMusicMetadataService
                 }
             }
             
-            return albums;
+            return _settings.ExplicitFilter == ExplicitFilter.PreferExplicit
+                ? albums.OrderByDescending(album => album.IsExplicit == true).ToList()
+                : albums;
         }
         catch (Exception ex)
         {
@@ -211,12 +215,13 @@ public class QobuzMetadataService : IMusicMetadataService
             {
                 foreach (var track in tracksData.EnumerateArray())
                 {
-                    var song = ParseQobuzTrack(track);
+                    var song = ParseQobuzTrackFull(track);
                     
                     // Ensure album metadata is set (tracks in album response may not have full album object)
                     song.Album = album.Title;
                     song.AlbumId = album.Id;
                     song.AlbumArtist = album.Artist;
+                    ReadReleaseMetadata(song, albumElement);
                     song.Year ??= album.Year;
                     song.Genre ??= album.Genre;
                     song.TotalTracks ??= album.SongCount;
@@ -418,7 +423,7 @@ public class QobuzMetadataService : IMusicMetadataService
                 foreach (var track in itemsArray)
                 {
                     // For playlists, use the track's own artist (not a single album artist)
-                    var song = ParseQobuzTrack(track);
+                    var song = ParseQobuzTrackFull(track);
                     
                     // Override album name to be the playlist name
                     song.Album = playlistName;
@@ -611,6 +616,7 @@ public class QobuzMetadataService : IMusicMetadataService
             CoverArtUrl = GetCoverArtUrl(track),
             IsLocal = false,
             ExternalProvider = "qobuz",
+            IsExplicit = ReadParentalWarning(track),
             ExternalId = externalId
         };
     }
@@ -663,11 +669,38 @@ public class QobuzMetadataService : IMusicMetadataService
                 song.Genre = FormatGenres(genres);
             }
             
+            ReadReleaseMetadata(song, album);
+
             // Get large cover art
             song.CoverArtUrlLarge = GetLargeCoverArtUrl(album);
         }
         
         return song;
+    }
+
+    private static bool? ReadParentalWarning(JsonElement element)
+    {
+        if (!element.TryGetProperty("parental_warning", out var warning)) return null;
+        return warning.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when warning.TryGetInt32(out var value) && value == 1 => true,
+            JsonValueKind.Number when warning.TryGetInt32(out var value) && value == 0 => false,
+            _ => null
+        };
+    }
+
+    private void ReadReleaseMetadata(Song song, JsonElement album)
+    {
+        if (album.TryGetProperty("upc", out var upc) && upc.ValueKind == JsonValueKind.String)
+            song.Barcode = upc.GetString();
+        if (album.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.Object &&
+            label.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+            song.Label = name.GetString();
+        if (string.IsNullOrEmpty(song.Copyright) && album.TryGetProperty("copyright", out var copyright) &&
+            copyright.ValueKind == JsonValueKind.String)
+            song.Copyright = FormatCopyright(copyright.GetString() ?? "");
     }
 
     private Album ParseQobuzAlbum(JsonElement album)
@@ -706,6 +739,7 @@ public class QobuzMetadataService : IMusicMetadataService
         return new Album
         {
             Id = $"ext-qobuz-album-{externalId}",
+            IsExplicit = ReadParentalWarning(album),
             Title = title,
             Artist = artistName,
             ArtistId = album.TryGetProperty("artist", out var artistForId)
@@ -848,14 +882,11 @@ public class QobuzMetadataService : IMusicMetadataService
             .Replace("(C)", "©");
     }
 
-    /// <summary>
-    /// Determines whether a song should be included based on the explicit content filter setting
-    /// Note: Qobuz doesn't have the same explicit content tagging as Deezer, so this is a no-op for now
-    /// </summary>
-    private bool ShouldIncludeSong(Song song)
+    // Unknown advisory remains visible in every mode; absence is not evidence of clean content.
+    private bool ShouldIncludeSong(Song song) => _settings.ExplicitFilter switch
     {
-        // Qobuz API doesn't expose explicit content flags in the same way as Deezer
-        // We could implement this in the future if needed
-        return true;
-    }
+        ExplicitFilter.ExplicitOnly => song.IsExplicit != false,
+        ExplicitFilter.CleanOnly => song.IsExplicit != true,
+        _ => true
+    };
 }

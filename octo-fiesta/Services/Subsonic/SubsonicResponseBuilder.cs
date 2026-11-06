@@ -429,6 +429,9 @@ public class SubsonicResponseBuilder
             ["displayComposer"] = ""
         };
 
+        if (!string.IsNullOrWhiteSpace(song.Isrc)) result["isrc"] = new[] { song.Isrc };
+        if (song.IsExplicit.HasValue) result["explicitStatus"] = song.IsExplicit.Value ? "explicit" : "clean";
+
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
         if (song.IsLocal || !string.IsNullOrEmpty(song.CoverArtUrl))
         {
@@ -587,6 +590,9 @@ public class SubsonicResponseBuilder
             songElement.Add(new XAttribute("created", created));
         }
 
+        if (!string.IsNullOrWhiteSpace(song.Isrc)) songElement.Add(new XElement(ns + "isrc", song.Isrc));
+        if (song.IsExplicit.HasValue)
+            songElement.Add(new XAttribute("explicitStatus", song.IsExplicit.Value ? "explicit" : "clean"));
         return songElement;
     }
 
