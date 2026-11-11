@@ -134,12 +134,10 @@ public class LocalLibraryService : ILocalLibraryService
             var mappings = await LoadMappingsAsync();
             mappings.TryGetValue($"{externalProvider}:{externalId}", out var mapping);
 
-            string? title;
-            string? artist;
+            TrackInfo external;
             if (mapping != null)
             {
-                title = mapping.Title;
-                artist = mapping.Artist;
+                external = new TrackInfo(mapping.Title, mapping.Artist);
             }
             else
             {
@@ -149,18 +147,19 @@ public class LocalLibraryService : ILocalLibraryService
                     return matches;
                 }
 
-                title = externalSong.Title;
-                artist = externalSong.Artist;
+                external = new TrackInfo(externalSong.Title, externalSong.Artist, externalSong.Duration, externalSong.Isrc);
             }
 
-            var queryText = string.Join(" ", new[] { artist, title });
+            // Edition labels ("Album Version", "Explicit") and featured artists are left out of
+            // the query: Subsonic servers match every term, and library tags often lack them.
+            var queryText = string.Join(" ", new[] { TrackMatcher.PrimaryArtist(external.Artist), TrackMatcher.CleanTitle(external.Title) });
             if (string.IsNullOrWhiteSpace(queryText))
             {
                 return matches;
             }
 
             var authQuery = BuildAuthQuery(_subsonicUserCredentials);
-            var searchUrl = $"{_subsonicSettings.Url}/rest/search3?f=json&songCount=10&albumCount=0&artistCount=0&query={Uri.EscapeDataString(queryText)}{authQuery}";
+            var searchUrl = $"{_subsonicSettings.Url}/rest/search3?f=json&songCount=20&albumCount=0&artistCount=0&query={Uri.EscapeDataString(queryText)}{authQuery}";
 
             var response = await _httpClient.GetAsync(searchUrl);
             if (!response.IsSuccessStatusCode)
@@ -180,21 +179,12 @@ public class LocalLibraryService : ILocalLibraryService
                 return matches;
             }
 
-            var titleKey = StringNormalizer.CreateComparisonKey(title);
-            var artistKey = StringNormalizer.CreateComparisonKey(artist);
-
             foreach (var songElement in EnumerateSongs(songNode))
             {
-                var candidateTitleKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("title", out var titleEl) ? titleEl.GetString() : null);
-                var candidateArtistKey = StringNormalizer.CreateComparisonKey(songElement.TryGetProperty("artist", out var artistEl) ? artistEl.GetString() : null);
-
-                var titleMatches = !string.IsNullOrEmpty(titleKey) && titleKey == candidateTitleKey;
-                var artistMatches = !string.IsNullOrEmpty(artistKey) && artistKey == candidateArtistKey;
-
                 // Require both title and artist. Matching on title+album alone let a different
                 // recording from a compilation (same title, different artist) pass as "owned",
                 // and that wrong file then got persisted into the M3U and the library.
-                if (titleMatches && artistMatches)
+                if (TrackMatcher.IsMatch(external, ReadTrackInfo(songElement)))
                 {
                     matches.Add(songElement.Clone());
                 }
@@ -501,6 +491,51 @@ public class LocalLibraryService : ILocalLibraryService
 
         await WaitForScanToFinishAsync(cancellationToken);
         return await GetLocalIdForExternalSongAsync(externalProvider, externalId);
+    }
+
+    /// <summary>
+    /// Reads the tags of a Subsonic song element, including the OpenSubsonic "artists" and
+    /// "isrc" arrays when the server provides them.
+    /// </summary>
+    private static TrackInfo ReadTrackInfo(JsonElement song)
+    {
+        string? GetString(string name) =>
+            song.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+
+        int? duration = song.TryGetProperty("duration", out var durationEl) && durationEl.ValueKind == JsonValueKind.Number &&
+                        durationEl.TryGetInt32(out var seconds)
+            ? seconds
+            : null;
+
+        var artists = new List<string>();
+        if (song.TryGetProperty("artists", out var artistsEl) && artistsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var a in artistsEl.EnumerateArray())
+            {
+                if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty("name", out var nameEl) &&
+                    nameEl.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(nameEl.GetString()))
+                {
+                    artists.Add(nameEl.GetString()!);
+                }
+            }
+        }
+
+        var isrcs = new List<string>();
+        if (song.TryGetProperty("isrc", out var isrcEl))
+        {
+            if (isrcEl.ValueKind == JsonValueKind.Array)
+            {
+                isrcs.AddRange(isrcEl.EnumerateArray()
+                    .Where(i => i.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(i.GetString()))
+                    .Select(i => i.GetString()!));
+            }
+            else if (isrcEl.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(isrcEl.GetString()))
+            {
+                isrcs.Add(isrcEl.GetString()!);
+            }
+        }
+
+        return new TrackInfo(GetString("title"), GetString("artist"), duration, ArtistNames: artists, IsrcList: isrcs);
     }
 
     private static IEnumerable<JsonElement> EnumerateSongs(JsonElement songNode)
