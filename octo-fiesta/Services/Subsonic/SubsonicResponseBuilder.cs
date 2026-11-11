@@ -36,6 +36,24 @@ public class SubsonicResponseBuilder
     }
 
     /// <summary>
+    /// Creates a successful Subsonic response holding an empty element (e.g. albumInfo).
+    /// </summary>
+    public IActionResult CreateEmptyElementResponse(string format, string elementName)
+    {
+        if (format == "json")
+        {
+            return CreateJsonResponse(new Dictionary<string, object>
+            {
+                ["status"] = "ok",
+                ["version"] = SubsonicVersion,
+                [elementName] = new Dictionary<string, object>()
+            });
+        }
+
+        return CreateResponse(format, elementName, new { });
+    }
+
+    /// <summary>
     /// Creates a Subsonic error response.
     /// </summary>
     public IActionResult CreateError(string format, int code, string message)
