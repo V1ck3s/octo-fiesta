@@ -153,6 +153,24 @@ public class TidalMetadataServiceTests : IDisposable
         Assert.Empty(await CreateService(handler).SearchSongsAsync("query"));
     }
 
+    [Theory]
+    [InlineData(ExplicitFilter.All)]
+    [InlineData(ExplicitFilter.PreferExplicit)]
+    public async Task QobuzPreferenceKeepsTidalSearchOrderAndAdvisory(ExplicitFilter filter)
+    {
+        var explicitTrack = TrackJson.Replace("77712242", "77712243").Replace("\"explicit\": false", "\"explicit\": true");
+        var response = "{\"tracks\":{\"items\":[" + TrackJson + "," + explicitTrack + "]}}";
+        var handler = new TidalStubHandler().Respond("/search", response);
+        var songs = await CreateService(handler, new SubsonicSettings { ExplicitFilter = filter }).SearchSongsAsync("get lucky");
+        Assert.Equal(new[] { "77712242", "77712243" }, songs.Select(s => s.ExternalId));
+        Assert.Equal(new int?[] { 0, 1 }, songs.Select(s => s.ExplicitContentLyrics));
+        Assert.All(songs, song => {
+            Assert.Equal("USQX91300108", song.Isrc);
+            Assert.Equal("2013 Daft Life Limited", song.Copyright);
+            Assert.Null(song.IsExplicit);
+        });
+    }
+
     #endregion
 
     #region Album and playlist

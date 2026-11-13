@@ -118,6 +118,24 @@ public class LocalLibraryService : ILocalLibraryService
         return null;
     }
 
+    internal static bool IsQobuzRecordingMatch(Song? source, JsonElement candidate)
+    {
+        if (string.IsNullOrWhiteSpace(source?.Isrc) || !candidate.TryGetProperty("isrc", out var isrc))
+            return false;
+        bool Matches(JsonElement value) => value.ValueKind == JsonValueKind.String &&
+            string.Equals(source.Isrc.Trim(), value.GetString()?.Trim(), StringComparison.OrdinalIgnoreCase);
+        // OpenSubsonic returns an array; accept legacy scalar responses as well.
+        if (!(isrc.ValueKind == JsonValueKind.Array ? isrc.EnumerateArray().Any(Matches) : Matches(isrc)))
+            return false;
+        if (source.IsExplicit.HasValue && candidate.TryGetProperty("explicitStatus", out var status) &&
+            status.ValueKind == JsonValueKind.String)
+        {
+            if (status.GetString() == "explicit" && !source.IsExplicit.Value) return false;
+            if (status.GetString() == "clean" && source.IsExplicit.Value) return false;
+        }
+        return true;
+    }
+
     /// <summary>
     /// Searches the live Subsonic library for an external song and returns the song elements
     /// that match by title+artist or title+album, in Subsonic's result order. Shared by the
@@ -134,6 +152,7 @@ public class LocalLibraryService : ILocalLibraryService
             var mappings = await LoadMappingsAsync();
             mappings.TryGetValue($"{externalProvider}:{externalId}", out var mapping);
 
+            Song? externalSong = null;
             TrackInfo external;
             if (mapping != null)
             {
@@ -141,7 +160,7 @@ public class LocalLibraryService : ILocalLibraryService
             }
             else
             {
-                var externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
+                externalSong = await _metadataService.GetSongAsync(externalProvider, externalId);
                 if (externalSong == null)
                 {
                     return matches;
@@ -149,6 +168,12 @@ public class LocalLibraryService : ILocalLibraryService
 
                 external = new TrackInfo(externalSong.Title, externalSong.Artist, externalSong.Duration, externalSong.Isrc);
             }
+
+            // A Qobuz clean/explicit pair can have identical artist/title tags, and the
+            // shared matcher ignores "Explicit"/"Clean" labels. Reuse a library recording
+            // only when its identifier proves the match.
+            if (externalProvider == "qobuz")
+                externalSong ??= await _metadataService.GetSongAsync(externalProvider, externalId);
 
             // Edition labels ("Album Version", "Explicit") and featured artists are left out of
             // the query: Subsonic servers match every term, and library tags often lack them.
@@ -184,7 +209,8 @@ public class LocalLibraryService : ILocalLibraryService
                 // Require both title and artist. Matching on title+album alone let a different
                 // recording from a compilation (same title, different artist) pass as "owned",
                 // and that wrong file then got persisted into the M3U and the library.
-                if (TrackMatcher.IsMatch(external, ReadTrackInfo(songElement)))
+                if (TrackMatcher.IsMatch(external, ReadTrackInfo(songElement)) &&
+                    (externalProvider != "qobuz" || IsQobuzRecordingMatch(externalSong, songElement)))
                 {
                     matches.Add(songElement.Clone());
                 }

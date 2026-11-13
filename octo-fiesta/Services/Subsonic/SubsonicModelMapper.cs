@@ -141,7 +141,10 @@ public class SubsonicModelMapper
 
         var mergedSongs = localSongs
             .Concat(externalResult.Songs
-                .Where(s => !localSongKeys.Contains(SongKey(s.Title, s.Artist)))
+                .Where(s => s.ExternalProvider == "qobuz"
+                    ? !localSongs.OfType<Dictionary<string, object>>().Any(local =>
+                        octo_fiesta.Services.Local.LocalLibraryService.IsQobuzRecordingMatch(s, JsonSerializer.SerializeToElement(local)))
+                    : !localSongKeys.Contains(SongKey(s.Title, s.Artist)))
                 .Select(s => _responseBuilder.ConvertSongToJson(s)))
             .ToList();
 
@@ -172,6 +175,14 @@ public class SubsonicModelMapper
         }
 
         return (mergedSongs, mergedAlbums, mergedArtists);
+    }
+
+    private static JsonElement XmlRecordingIdentity(XElement song)
+    {
+        var fields = song.Attributes().ToDictionary(a => a.Name.LocalName, a => (object)a.Value);
+        var isrcs = song.Elements().Where(e => e.Name.LocalName == "isrc").Select(e => e.Value).ToArray();
+        if (isrcs.Length > 0) fields["isrc"] = isrcs;
+        return JsonSerializer.SerializeToElement(fields);
     }
 
     private (List<object> MergedSongs, List<object> MergedAlbums, List<object> MergedArtists) MergeSearchResultsXml(
@@ -235,7 +246,14 @@ public class SubsonicModelMapper
         }
         foreach (var song in externalResult.Songs)
         {
-            if (localSongKeys.Contains(SongKey(song.Title, song.Artist))) continue;
+            if (song.ExternalProvider == "qobuz")
+            {
+                if (localSongs.Cast<XElement>().Any(local =>
+                    octo_fiesta.Services.Local.LocalLibraryService.IsQobuzRecordingMatch(song,
+                        XmlRecordingIdentity(local))))
+                    continue;
+            }
+            else if (localSongKeys.Contains(SongKey(song.Title, song.Artist))) continue;
             mergedSongs.Add(_responseBuilder.ConvertSongToXml(song, ns));
         }
 

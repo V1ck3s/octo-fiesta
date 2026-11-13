@@ -1071,6 +1071,8 @@ public abstract class BaseDownloadService : IDownloadService
             if (!string.IsNullOrEmpty(song.ReleaseType))
                 tagFile.Tag.MusicBrainzReleaseType = song.ReleaseType;
 
+            NativeMetadataTags.Write(tagFile, song);
+
             var comments = new List<string>();
             if (!string.IsNullOrEmpty(song.Isrc))
                 comments.Add($"ISRC: {song.Isrc}");
