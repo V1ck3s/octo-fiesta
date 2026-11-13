@@ -76,7 +76,7 @@ public class QobuzNativeMetadataTests
 
     [Theory]
     [InlineData(true, "explicit")]
-    [InlineData(false, "clean")]
+    [InlineData(false, null)]
     [InlineData(null, null)]
     public void ResponsesUseIsrcArraysAndPreserveUnknownAdvisory(bool? advisory, string? expected)
     {

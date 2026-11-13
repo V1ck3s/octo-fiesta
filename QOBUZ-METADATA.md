@@ -19,11 +19,14 @@ track is an edited version. No Apple/iTunes service or MusicBrainz lookup is use
 
 Qobuz metadata is preserved through search, track, album-track, and playlist
 parsing. FLAC downloads receive native `ISRC`, `BARCODE` (album UPC), `LABEL`, and,
-when known, `ITUNESADVISORY` (1 explicit / 2 non-explicit). Copyright continues
+when known, `ITUNESADVISORY` (1 explicit / 0 not explicit). Copyright continues
 through the existing copyright tag writer. MP3 downloads receive ID3 `TSRC`,
 `BARCODE`, and `TPUB`; this change does not add MP3 advisory tags. Existing ISRC
 comments remain for compatibility. Unknown advisory writes no advisory field.
-`ITUNESADVISORY` is a tag convention; its value here comes from Qobuz.
+`ITUNESADVISORY` is a tag convention; its value here comes from Qobuz. Its value 2
+means a clean edit, which `parental_warning` cannot show, so it is never written.
+OpenSubsonic responses carry `explicitStatus: "explicit"` for explicit tracks and
+omit it otherwise; `"clean"` is never emitted for the same reason.
 
 Qobuz library discovery and search-result deduplication require matching ISRCs
 before treating a local file as the requested recording. Known contrary advisory

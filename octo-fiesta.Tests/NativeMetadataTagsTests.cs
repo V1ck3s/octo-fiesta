@@ -7,7 +7,7 @@ public class NativeMetadataTagsTests
 {
     [Theory]
     [InlineData("qobuz", true, "1")]
-    [InlineData("qobuz", false, "2")]
+    [InlineData("qobuz", false, "0")]
     [InlineData("qobuz", null, null)]
     [InlineData("tidal", null, null)]
     [InlineData("deezer", null, null)]

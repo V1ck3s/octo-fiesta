@@ -12,9 +12,11 @@ internal static class NativeMetadataTags
             if (!string.IsNullOrWhiteSpace(song.Isrc)) vorbis.SetField("ISRC", song.Isrc);
             if (!string.IsNullOrWhiteSpace(song.Barcode)) vorbis.SetField("BARCODE", song.Barcode);
             if (!string.IsNullOrWhiteSpace(song.Label)) vorbis.SetField("LABEL", song.Label);
-            // 1 = explicit, 2 = non-explicit. Unknown must not become 0/clean.
+            // iTunes advisory: 1 = explicit, 0 = none, 2 = clean edit. A false flag only says the
+            // track is not explicit, not that it is an edited version, so 2 is never written.
+            // Unknown writes nothing.
             if (song.IsExplicit.HasValue)
-                vorbis.SetField("ITUNESADVISORY", song.IsExplicit.Value ? "1" : "2");
+                vorbis.SetField("ITUNESADVISORY", song.IsExplicit.Value ? "1" : "0");
         }
         if (file is TagLib.Mpeg.AudioFile && file.GetTag(TagLib.TagTypes.Id3v2, true) is TagLib.Id3v2.Tag id3)
         {
