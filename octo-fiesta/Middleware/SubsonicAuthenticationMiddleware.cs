@@ -8,6 +8,21 @@ using octo_fiesta.Services.Subsonic;
 namespace octo_fiesta.Middleware;
 
 /// <summary>
+/// Outcome of validating a client's credentials against the upstream Subsonic server.
+/// Distinguishing these matters for the client-facing error: "unreachable" is an
+/// infrastructure problem (the Subsonic server is down), while "invalid credentials"
+/// is an account problem. Conflating them (the old behavior) made Navidrome outages
+/// look like bad passwords and buried the real cause in a generic log line.
+/// </summary>
+enum PingOutcome
+{
+    Valid,
+    InvalidCredentials,
+    Unreachable,
+    UpstreamError
+}
+
+/// <summary>
 /// Middleware that validates Subsonic authentication parameters by verifying them against the upstream Subsonic server.
 /// This prevents unauthenticated access to external resources (like SquidWTF downloads).
 /// </summary>
@@ -22,6 +37,14 @@ public class SubsonicAuthenticationMiddleware
     // Key: hash of credentials, Value: expiration time
     private readonly ConcurrentDictionary<string, DateTime> _validatedCredentials = new();
     private static readonly TimeSpan CredentialCacheDuration = TimeSpan.FromMinutes(5);
+    
+    // Negative cache: when the upstream Subsonic server is unreachable, remember it for a
+    // short window so a storm of client requests does not pile up slow pings against a dead
+    // server (each of which would otherwise block the client request on the HTTP timeout).
+    private DateTime _upstreamDownUntil = DateTime.MinValue;
+    private static readonly TimeSpan UnreachableCacheDuration = TimeSpan.FromSeconds(30);
+    // Per-ping timeout: fail fast when the upstream is down instead of blocking the request.
+    private static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(10);
     
     // Paths that don't require authentication
     private static readonly HashSet<string> PublicPaths = new(StringComparer.OrdinalIgnoreCase)
@@ -81,7 +104,7 @@ public class SubsonicAuthenticationMiddleware
         if (!hasAuth)
         {
             _logger.LogWarning("Authentication failed: missing credentials for {Path}", path);
-            await WriteSubsonicError(context, 40, "Missing authentication parameters");
+            await WriteSubsonicError(context, httpStatus: 401, code: 40, "Missing authentication parameters");
             return;
         }
         
@@ -95,13 +118,30 @@ public class SubsonicAuthenticationMiddleware
         }
         
         // Validate credentials against the Subsonic server
-        var isValid = await ValidateCredentialsAsync(parameters);
+        var outcome = await ValidateCredentialsAsync(parameters);
         
-        if (!isValid)
+        switch (outcome)
         {
-            _logger.LogWarning("Authentication failed: invalid credentials for user {User} on {Path}", username, path);
-            await WriteSubsonicError(context, 40, "Wrong username or password");
-            return;
+            case PingOutcome.Unreachable:
+                // The upstream Subsonic server could not be reached. Report this distinctly
+                // from bad credentials - the client's password may be perfectly valid.
+                _logger.LogWarning("Authentication failed: Subsonic server unreachable for user {User} on {Path} (upstream down, not a credential problem)", username, path);
+                await WriteSubsonicError(context, httpStatus: 503, code: 1000, "Subsonic server unreachable - please try again shortly");
+                return;
+            
+            case PingOutcome.UpstreamError:
+                _logger.LogWarning("Authentication failed: Subsonic server returned an error for user {User} on {Path}", username, path);
+                await WriteSubsonicError(context, httpStatus: 503, code: 1000, "Subsonic server error - please try again shortly");
+                return;
+            
+            case PingOutcome.InvalidCredentials:
+                _logger.LogWarning("Authentication failed: invalid credentials for user {User} on {Path}", username, path);
+                await WriteSubsonicError(context, httpStatus: 401, code: 40, "Wrong username or password");
+                return;
+            
+            default:
+                await _next(context);
+                return;
         }
         
         // Cache the validated credentials
@@ -138,8 +178,16 @@ public class SubsonicAuthenticationMiddleware
         return Convert.ToBase64String(hash);
     }
 
-    private async Task<bool> ValidateCredentialsAsync(Dictionary<string, string> parameters)
+    private async Task<PingOutcome> ValidateCredentialsAsync(Dictionary<string, string> parameters)
     {
+        // Negative cache: if we recently confirmed the upstream is down, don't fire another
+        // (slow) ping per request - a client request storm would otherwise pile up on a dead server.
+        if (DateTime.UtcNow < _upstreamDownUntil)
+        {
+            _logger.LogDebug("Subsonic upstream marked down until {Until:HH:mm:ss} - rejecting without ping", _upstreamDownUntil);
+            return PingOutcome.Unreachable;
+        }
+
         try
         {
             var httpClient = _httpClientFactory.CreateClient();
@@ -167,43 +215,55 @@ public class SubsonicAuthenticationMiddleware
             var queryString = string.Join("&", authParams);
             var url = $"{_subsonicSettings.Url}/rest/ping?{queryString}";
             
-            var response = await httpClient.GetAsync(url);
+            using var cts = new CancellationTokenSource(PingTimeout);
+            var response = await httpClient.GetAsync(url, cts.Token);
             
             if (!response.IsSuccessStatusCode)
             {
-                return false;
+                // The server answered but not with a 2xx - it's up, just erroring.
+                _logger.LogWarning("Subsonic upstream returned HTTP {StatusCode} during auth ping", (int)response.StatusCode);
+                return PingOutcome.UpstreamError;
             }
             
             var content = await response.Content.ReadAsStringAsync();
             
             // Check for Subsonic error response
             // JSON format: {"subsonic-response":{"status":"ok",...}} or {"subsonic-response":{"status":"failed","error":{"code":40,...}}}
-            if (content.Contains("\"status\":\"ok\"", StringComparison.OrdinalIgnoreCase))
+            if (content.Contains("\"status\":\"ok\"", StringComparison.OrdinalIgnoreCase) ||
+                content.Contains("status=\"ok\"", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                return PingOutcome.Valid;
             }
             
-            // XML format: <subsonic-response status="ok" ...> or <subsonic-response status="failed" ...>
-            if (content.Contains("status=\"ok\"", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-            
-            return false;
+            // Server up and answering, but rejected the credentials (code 40/41/70, etc.)
+            return PingOutcome.InvalidCredentials;
+        }
+        catch (TaskCanceledException)
+        {
+            _logger.LogWarning("Subsonic server timed out during auth ping (no response within {Timeout}s)", (int)PingTimeout.TotalSeconds);
+            _upstreamDownUntil = DateTime.UtcNow.Add(UnreachableCacheDuration);
+            return PingOutcome.Unreachable;
+        }
+        catch (HttpRequestException ex)
+        {
+            // Connection refused / DNS failure - the Subsonic server is down.
+            _logger.LogWarning("Subsonic server unreachable during auth ping: {Detail}", ex.Message);
+            _upstreamDownUntil = DateTime.UtcNow.Add(UnreachableCacheDuration);
+            return PingOutcome.Unreachable;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error validating credentials against Subsonic server");
-            // On connection error, deny access for security
-            return false;
+            _logger.LogError(ex, "Unexpected error validating credentials against Subsonic server");
+            _upstreamDownUntil = DateTime.UtcNow.Add(UnreachableCacheDuration);
+            return PingOutcome.Unreachable;
         }
     }
 
-    private async Task WriteSubsonicError(HttpContext context, int code, string message)
+    private async Task WriteSubsonicError(HttpContext context, int httpStatus, int code, string message)
     {
         var format = context.Request.Query["f"].FirstOrDefault() ?? "xml";
         
-        context.Response.StatusCode = 401;
+        context.Response.StatusCode = httpStatus;
         
         if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
         {
