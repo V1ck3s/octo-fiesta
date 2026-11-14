@@ -310,6 +310,49 @@ public class SubsonicController : ControllerBase
     }
 
     /// <summary>
+    /// getAlbumInfo/getArtistInfo (and their ID3 variants). External ids have no record on
+    /// the backing Subsonic server, which answers "not found"; clients that fetch info
+    /// alongside the item (e.g. Music Assistant) then treat the album or artist as missing.
+    /// Info is optional metadata, so answer external ids with an empty info element.
+    /// </summary>
+    [HttpGet, HttpPost]
+    [Route("rest/getAlbumInfo")]
+    [Route("rest/getAlbumInfo.view")]
+    public Task<IActionResult> GetAlbumInfo() => GetItemInfo("rest/getAlbumInfo", "albumInfo");
+
+    [HttpGet, HttpPost]
+    [Route("rest/getAlbumInfo2")]
+    [Route("rest/getAlbumInfo2.view")]
+    public Task<IActionResult> GetAlbumInfo2() => GetItemInfo("rest/getAlbumInfo2", "albumInfo");
+
+    [HttpGet, HttpPost]
+    [Route("rest/getArtistInfo")]
+    [Route("rest/getArtistInfo.view")]
+    public Task<IActionResult> GetArtistInfo() => GetItemInfo("rest/getArtistInfo", "artistInfo");
+
+    [HttpGet, HttpPost]
+    [Route("rest/getArtistInfo2")]
+    [Route("rest/getArtistInfo2.view")]
+    public Task<IActionResult> GetArtistInfo2() => GetItemInfo("rest/getArtistInfo2", "artistInfo2");
+
+    private async Task<IActionResult> GetItemInfo(string endpoint, string elementName)
+    {
+        var parameters = await ExtractAllParameters();
+        var id = parameters.GetValueOrDefault("id", "");
+        var format = parameters.GetValueOrDefault("f", "xml");
+
+        var (isExternal, _, _, _) = _localLibraryService.ParseExternalId(id);
+        if (!isExternal)
+        {
+            var result = await _proxyService.RelayAsync(endpoint, parameters);
+            var contentType = result.ContentType ?? $"application/{format}";
+            return File(result.Body, contentType);
+        }
+
+        return _responseBuilder.CreateEmptyElementResponse(format, elementName);
+    }
+
+    /// <summary>
     /// OpenSubsonic getLyricsBySongId. Local tracks are answered by the backing Subsonic
     /// server (which reads embedded and external .lrc lyrics). For an external, not-yet-local
     /// track we fetch synced lyrics live (LRCLIB) so the client shows them on the first listen,
