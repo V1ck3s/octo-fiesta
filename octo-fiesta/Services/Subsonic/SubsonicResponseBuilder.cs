@@ -455,6 +455,7 @@ public class SubsonicResponseBuilder
             ["artist"] = album.Artist ?? "",
             ["artistId"] = album.ArtistId ?? "",
             ["songCount"] = album.SongCount ?? 0,
+            ["duration"] = album.Songs?.Sum(s => s.Duration ?? 0) ?? 0,
             ["created"] = System.DateTime.UtcNow.ToString("o"),
             ["isExternal"] = !album.IsLocal,
             ["displayArtist"] = album.Artist ?? "",

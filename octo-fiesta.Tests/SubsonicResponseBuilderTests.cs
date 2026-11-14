@@ -349,4 +349,22 @@ public class SubsonicResponseBuilderTests
         Assert.Equal(0, albumData.GetProperty("songCount").GetInt32());
         Assert.Equal(0, albumData.GetProperty("duration").GetInt32());
     }
+
+    [Fact]
+    public void ConvertAlbumToJson_IncludesRequiredDuration()
+    {
+        var withSongs = new Album
+        {
+            Id = "ext-deezer-album-1",
+            Title = "Album",
+            Songs = new List<Song> { new() { Duration = 100 }, new() { Duration = 50 } }
+        };
+        var withoutSongs = new Album { Id = "ext-deezer-album-2", Title = "Album", SongCount = 10 };
+
+        var json1 = JsonDocument.Parse(JsonSerializer.Serialize(_builder.ConvertAlbumToJson(withSongs)));
+        var json2 = JsonDocument.Parse(JsonSerializer.Serialize(_builder.ConvertAlbumToJson(withoutSongs)));
+
+        Assert.Equal(150, json1.RootElement.GetProperty("duration").GetInt32());
+        Assert.Equal(0, json2.RootElement.GetProperty("duration").GetInt32());
+    }
 }
