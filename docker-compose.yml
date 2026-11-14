@@ -11,6 +11,9 @@ services:
       - ASPNETCORE_URLS=http://+:${INTERNAL_PORT:-8080}
       # Download path inside container
       - Library__DownloadPath=/app/downloads
+      # Mappings file path inside container (default: inside the download path)
+      # Point it at the /config volume when downloads live on a remote mount
+      - Library__MappingsPath=${MAPPINGS_PATH:-}
       
       # ===== SUBSONIC SETTINGS =====
       # Navidrome/Subsonic server URL
