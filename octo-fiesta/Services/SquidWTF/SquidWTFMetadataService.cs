@@ -790,7 +790,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             Copyright = track.Copyright ?? track.Album?.Copyright,
             Contributors = contributors,
             TotalTracks = track.Album?.TracksCount,
-            CoverArtUrl = track.Album?.Image?.Thumbnail ?? track.Album?.Image?.Small,
+            CoverArtUrl = track.Album?.Image?.Large ?? track.Album?.Image?.Small ?? track.Album?.Image?.Thumbnail,
             CoverArtUrlLarge = track.Album?.Image?.Large,
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -818,7 +818,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             ArtistId = album.Artist != null ? $"ext-squidwtf-artist-{album.Artist.Id}" : null,
             Year = year,
             SongCount = album.TracksCount,
-            CoverArtUrl = album.Image?.Small ?? album.Image?.Thumbnail,
+            CoverArtUrl = album.Image?.Large ?? album.Image?.Small ?? album.Image?.Thumbnail,
             CoverArtUrlLarge = album.Image?.Large,
             Genre = album.Genre?.Name,
             ReleaseType = album.ReleaseType,
@@ -896,7 +896,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             ReleaseType = track.Album?.Type,
             Copyright = track.Copyright,
             TotalTracks = track.Album?.NumberOfTracks,
-            CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "320x320"),
+            CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "640x640"),
             CoverArtUrlLarge = GetTidalCoverUrl(track.Album?.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -948,7 +948,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             Bpm = track.Bpm,
             Copyright = track.Copyright,
             TotalTracks = track.Album?.NumberOfTracks,
-            CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "320x320"),
+            CoverArtUrl = GetTidalCoverUrl(track.Album?.Cover, "640x640"),
             CoverArtUrlLarge = GetTidalCoverUrl(track.Album?.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -982,7 +982,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             Year = year,
             SongCount = album.NumberOfTracks,
             ReleaseType = album.Type,
-            CoverArtUrl = GetTidalCoverUrl(album.Cover, "320x320"),
+            CoverArtUrl = GetTidalCoverUrl(album.Cover, "640x640"),
             CoverArtUrlLarge = GetTidalCoverUrl(album.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -1033,7 +1033,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
             Year = year,
             SongCount = albumData.NumberOfTracks,
             ReleaseType = albumData.Type,
-            CoverArtUrl = GetTidalCoverUrl(albumData.Cover, "320x320"),
+            CoverArtUrl = GetTidalCoverUrl(albumData.Cover, "640x640"),
             CoverArtUrlLarge = GetTidalCoverUrl(albumData.Cover, "1280x1280"),
             IsLocal = false,
             ExternalProvider = "squidwtf",
@@ -1078,11 +1078,11 @@ public class SquidWTFMetadataService : IMusicMetadataService
             ExternalId = playlist.Uuid ?? "",
             TrackCount = playlist.NumberOfTracks,
             Duration = playlist.Duration,
-            CoverUrl = GetTidalCoverUrl(playlist.SquareImage ?? playlist.Image, "320x320")
+            CoverUrl = GetTidalCoverUrl(playlist.SquareImage ?? playlist.Image, "640x640")
         };
     }
 
-    private static string? GetTidalCoverUrl(string? coverId, string size = "320x320")
+    private static string? GetTidalCoverUrl(string? coverId, string size = "640x640")
     {
         if (string.IsNullOrEmpty(coverId)) return null;
         
@@ -1096,7 +1096,7 @@ public class SquidWTFMetadataService : IMusicMetadataService
         if (string.IsNullOrEmpty(pictureId)) return null;
         
         var formattedId = pictureId.Replace("-", "/");
-        return $"https://resources.tidal.com/images/{formattedId}/320x320.jpg";
+        return $"https://resources.tidal.com/images/{formattedId}/750x750.jpg";
     }
 
     #endregion

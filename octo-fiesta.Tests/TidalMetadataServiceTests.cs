@@ -118,7 +118,7 @@ public class TidalMetadataServiceTests : IDisposable
         var song = Assert.Single(await CreateService(handler).SearchSongsAsync("get lucky"));
 
         Assert.Equal(
-            "https://resources.tidal.com/images/11111111/2222/3333/4444/555555555555/320x320.jpg",
+            "https://resources.tidal.com/images/11111111/2222/3333/4444/555555555555/640x640.jpg",
             song.CoverArtUrl);
         Assert.Equal(
             "https://resources.tidal.com/images/11111111/2222/3333/4444/555555555555/1280x1280.jpg",
