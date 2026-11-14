@@ -635,21 +635,21 @@ public abstract class BaseDownloadService : IDownloadService
                         Logger.LogWarning(ex, "Failed to trigger library scan after download");
                     }
                 });
-
-                // If download mode is Album and triggering is enabled, start background download of remaining tracks
-                if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
-                {
-                    var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
-                    if (!string.IsNullOrEmpty(albumExternalId))
-                    {
-                        Logger.LogInformation("Download mode is Album, triggering background download for album {AlbumId}", albumExternalId);
-                        DownloadRemainingAlbumTracksInBackground(externalProvider, albumExternalId, externalId);
-                    }
-                }
             }
             else
             {
                 Logger.LogInformation("Cache mode: skipping library registration and scan");
+            }
+
+            // If download mode is Album and triggering is enabled, start background download of remaining tracks
+            if (triggerAlbumDownload && SubsonicSettings.DownloadMode == DownloadMode.Album && !string.IsNullOrEmpty(song.AlbumId))
+            {
+                var albumExternalId = ExtractExternalIdFromAlbumId(song.AlbumId);
+                if (!string.IsNullOrEmpty(albumExternalId))
+                {
+                    Logger.LogInformation("Download mode is Album, triggering background download for album {AlbumId}", albumExternalId);
+                    DownloadRemainingAlbumTracksInBackground(externalProvider, albumExternalId, externalId);
+                }
             }
 
             Logger.LogInformation("Download completed: {Path}", localPath);
