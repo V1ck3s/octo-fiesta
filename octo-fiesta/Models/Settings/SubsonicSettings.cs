@@ -130,7 +130,8 @@ public class SubsonicSettings
     public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
     
     /// <summary>
-    /// Defines how many downloads can concurrently run (default: 1, max: 5).
+    /// Defines how many background downloads (album, playlist, star, quality upgrade) can
+    /// concurrently run (default: 1, max: 5). The track being played never waits for a slot.
     /// Environment variable: MAX_CONCURRENT_DOWNLOADS
     /// </summary>
     public int MaxConcurrentDownloads { get; set; } = 1;
@@ -182,6 +183,14 @@ public class SubsonicSettings
     /// the track will be re-downloaded in FLAC
     /// </summary>
     public bool AutoUpgradeQuality { get; set; } = false;
+
+    /// <summary>
+    /// Seconds of audio downloaded before playback of a track that is not downloaded yet
+    /// starts (default: 3). Playback follows the download from then on; this head start
+    /// keeps the beginning from stuttering while the provider connection gets up to speed.
+    /// Environment variable: STREAM_PREBUFFER_SECONDS. 0 starts as soon as the format is known.
+    /// </summary>
+    public double StreamPrebufferSeconds { get; set; } = 3;
     
     /// <summary>
     /// Template for organizing downloaded files into folders (default: {artist}/{album}/{track} - {title})

@@ -33,8 +33,23 @@ public abstract class BaseDownloadService : IDownloadService
     protected readonly string CachePath;
 
     protected readonly ConcurrentDictionary<string, DownloadInfo> ActiveDownloads = new();
-    protected readonly SemaphoreSlim DownloadLock;
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _songLocks = new();
+
+    // The download running for each track, which every other request for that track joins.
+    // Key: "ext-{provider}-{externalId}"
+    private readonly ConcurrentDictionary<string, TrackDownload> _runningDownloads = new();
+
+    // Album, playlist, star and quality-upgrade downloads take one of MaxConcurrentDownloads
+    // slots. Playback requests skip this queue, so a background album never holds up the
+    // track being listened to.
+    private readonly SemaphoreSlim _backgroundQueue;
+
+    // Scratch files for progressive downloads. Kept out of the download folder so library
+    // watchers never see half-written tracks.
+    private static readonly string StreamingPath = Path.Combine(Path.GetTempPath(), "octo-fiesta-stream");
+    private static readonly TimeSpan StaleStreamingFileAge = TimeSpan.FromHours(6);
+
+    // Enough bytes to recognise the audio format before the content type is sent
+    private const int FormatHeaderBytes = 12;
 
     // Small in-memory cache to avoid repeated metadata/network lookups when searching for cached files.
     // Key: "{provider}|{externalId}" -> (path or null, expiry)
@@ -97,13 +112,39 @@ public abstract class BaseDownloadService : IDownloadService
         Logger = logger;
 
         var maxConcurrentDownloads = Math.Clamp(SubsonicSettings.MaxConcurrentDownloads, 1, SubsonicSettings.MaxConcurrentDownloadsLimit);
-        DownloadLock = new(maxConcurrentDownloads, maxConcurrentDownloads);
+        _backgroundQueue = new(maxConcurrentDownloads, maxConcurrentDownloads);
 
         CachePath = PathHelper.GetCachePath();
 
         if (!Directory.Exists(CachePath))
         {
             Directory.CreateDirectory(CachePath);
+        }
+
+        DeleteStaleStreamingFiles();
+    }
+
+    // Scratch files left behind by a crash. Age-based, since several provider services share the folder.
+    private void DeleteStaleStreamingFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(StreamingPath))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(StreamingPath, "*.part"))
+            {
+                if (DateTime.UtcNow - IOFile.GetLastWriteTimeUtc(file) > StaleStreamingFileAge)
+                {
+                    TryDeleteIncompleteFile(file);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to clean up streaming scratch files");
         }
     }
 
@@ -119,9 +160,30 @@ public abstract class BaseDownloadService : IDownloadService
         return await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: true, forcePermanent: true, cancellationToken);
     }
 
+    /// <summary>
+    /// Returns a stream as soon as the first bytes of the track are on disk, when the provider
+    /// supports it. Tagging, library registration and album queueing finish in the background.
+    /// Otherwise (or when the track is already local) the finished file is served.
+    /// </summary>
     public async Task<(Stream Stream, string FilePath)> DownloadAndStreamAsync(string externalProvider, string externalId, CancellationToken cancellationToken = default)
     {
-        var localPath = await DownloadSongInternalAsync(externalProvider, externalId, triggerAlbumDownload: true, forcePermanent: false, cancellationToken);
+        EnsureProvider(externalProvider);
+
+        // Playback skips the background queue, and follows the track's download if one is already running
+        var download = await StartOrJoinAsync(new DownloadRequest(externalId, TriggerAlbumDownload: true, ForcePermanent: false), cancellationToken);
+
+        if (await download.Readable.WaitAsync(cancellationToken) is { } progressive)
+        {
+            // A head start, so the player does not run dry while the download gets up to speed
+            await progressive.WaitForSecondsAsync(SubsonicSettings.StreamPrebufferSeconds, cancellationToken);
+            if (progressive.TryOpenReader() is { } reader)
+            {
+                Logger.LogInformation("Streaming {SongId} while it downloads", download.SongId);
+                return (reader, progressive.TargetPath);
+            }
+        }
+
+        var localPath = await download.Completed.WaitAsync(cancellationToken);
         // FileShare.Delete allows move/rename operations while the file is being streamed (required for cache-to-permanent on star)
         var stream = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         return (stream, localPath);
@@ -443,7 +505,14 @@ public abstract class BaseDownloadService : IDownloadService
     /// <paramref name="Mp4DurationSeconds"/>, when set for an MP4/M4A file, is written into the moov
     /// duration fields after download — fragmented MP4 (Tidal HI_RES FLAC-in-MP4) otherwise reports 0:00.
     /// </summary>
-    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null);
+    public record DownloadResult(Stream DownloadStream, string Extension, string? DownloadedQuality, double? Mp4DurationSeconds = null)
+    {
+        /// <summary>
+        /// Exact size of <see cref="DownloadStream"/> when the provider announces it. Set only when
+        /// the stream yields exactly that many bytes; it lets playback start before the download ends.
+        /// </summary>
+        public long? ContentLength { get; init; }
+    }
 
     /// <summary>
     /// Downloads a track and saves it to disk.
@@ -479,38 +548,149 @@ public abstract class BaseDownloadService : IDownloadService
     #region Common Download Logic
 
     /// <summary>
-    /// Internal method for downloading a song with control over album download triggering
+    /// What to download and where it goes.
     /// </summary>
-    /// <param name="externalProvider">The external provider name</param>
-    /// <param name="externalId">The external track ID</param>
-    /// <param name="triggerAlbumDownload">Whether to trigger album download in Album mode</param>
-    /// <param name="forcePermanent">If true, downloads to permanent storage even in Cache mode (used for star album/playlist)</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    protected async Task<string> DownloadSongInternalAsync(string externalProvider, string externalId, bool triggerAlbumDownload, bool forcePermanent = false, CancellationToken cancellationToken = default)
+    /// <param name="ExternalId">The external track ID</param>
+    /// <param name="TriggerAlbumDownload">Whether to trigger album download in Album mode</param>
+    /// <param name="ForcePermanent">If true, downloads to permanent storage even in Cache mode (used for star album/playlist)</param>
+    /// <param name="Metadata">The track as already fetched with its album, which spares the provider the metadata lookups</param>
+    private sealed record DownloadRequest(string ExternalId, bool TriggerAlbumDownload, bool ForcePermanent, Song? Metadata = null);
+
+    /// <summary>
+    /// A track download in progress. Every request for the same track shares it.
+    /// </summary>
+    private sealed class TrackDownload(string songId, bool toCache)
+    {
+        private readonly TaskCompletionSource<ProgressiveDownload?> _readable = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<string> _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public string SongId { get; } = songId;
+
+        public bool ToCache { get; } = toCache;
+
+        /// <summary>
+        /// The download as soon as its first bytes can be read, or null, at the latest just before
+        /// <see cref="Completed"/>, when the track is only served once finished.
+        /// </summary>
+        public Task<ProgressiveDownload?> Readable => _readable.Task;
+
+        /// <summary>The finished track's path.</summary>
+        public Task<string> Completed => _completed.Task;
+
+        public void SetReadable(ProgressiveDownload download) => _readable.TrySetResult(download);
+
+        public void Complete(string path)
+        {
+            _readable.TrySetResult(null);
+            _completed.TrySetResult(path);
+        }
+
+        public void Fail(Exception error)
+        {
+            _readable.TrySetResult(null);
+            _completed.TrySetException(error);
+            // Logged by the download itself; a reader that started early may never look at it
+            _ = _completed.Task.Exception;
+        }
+    }
+
+    private void EnsureProvider(string externalProvider)
     {
         if (externalProvider != ProviderName)
         {
             throw new NotSupportedException($"Provider '{externalProvider}' is not supported");
         }
+    }
 
-        var songId = $"ext-{externalProvider}-{externalId}";
-        // In Cache mode, downloads go to cache unless forcePermanent is set (used by star album/playlist)
-        var isCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
+    /// <summary>
+    /// Downloads a track as a background job, in one of the MaxConcurrentDownloads slots.
+    /// Playback never waits for a slot.
+    /// </summary>
+    private async Task<string> DownloadSongInternalAsync(string externalProvider, string externalId, bool triggerAlbumDownload, bool forcePermanent = false, CancellationToken cancellationToken = default, Song? metadata = null)
+    {
+        EnsureProvider(externalProvider);
 
-        // A second request for the same song waits for the first one, then finds the downloaded file.
-        // The song lock is taken before a download slot so waiting requests don't hold a slot.
-        var songLock = _songLocks.GetOrAdd(songId, _ => new SemaphoreSlim(1, 1));
-        await songLock.WaitAsync(cancellationToken);
+        await _backgroundQueue.WaitAsync(cancellationToken);
         try
         {
-            // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
-            await DownloadLock.WaitAsync(cancellationToken);
+            var download = await StartOrJoinAsync(new DownloadRequest(externalId, triggerAlbumDownload, forcePermanent, metadata), cancellationToken);
+            return await download.Completed.WaitAsync(cancellationToken);
         }
-        catch
+        finally
         {
-            songLock.Release();
-            throw;
+            _backgroundQueue.Release();
         }
+    }
+
+    /// <summary>
+    /// Returns the download running for the track, or starts one. A request that only joins
+    /// keeps its own cancellation token for waiting; the download runs with the starter's.
+    /// </summary>
+    private async Task<TrackDownload> StartOrJoinAsync(DownloadRequest request, CancellationToken cancellationToken)
+    {
+        var songId = $"ext-{ProviderName}-{request.ExternalId}";
+        // In Cache mode, downloads go to cache unless forcePermanent is set (used by star album/playlist)
+        var toCache = SubsonicSettings.StorageMode == StorageMode.Cache && !request.ForcePermanent;
+
+        while (true)
+        {
+            var candidate = new TrackDownload(songId, toCache);
+            var running = _runningDownloads.GetOrAdd(songId, candidate);
+            if (running == candidate)
+            {
+                _ = RunAsync(candidate, request, cancellationToken);
+                return candidate;
+            }
+            if (running.ToCache == toCache)
+            {
+                return running;
+            }
+
+            // Same track for the other storage (e.g. starred while it plays from the cache):
+            // once that download ends, this one finds its file or downloads its own copy
+            try
+            {
+                await running.Completed.WaitAsync(cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Its failure belongs to its own requests
+            }
+        }
+    }
+
+    private async Task RunAsync(TrackDownload download, DownloadRequest request, CancellationToken cancellationToken)
+    {
+        string? path = null;
+        Exception? error = null;
+        try
+        {
+            path = await DownloadSongCoreAsync(download, request, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            error = ex;
+        }
+
+        // Dropped before completing, so a request after a failure retries instead of joining it
+        _runningDownloads.TryRemove(new KeyValuePair<string, TrackDownload>(download.SongId, download));
+        if (error != null)
+        {
+            download.Fail(error);
+        }
+        else
+        {
+            download.Complete(path!);
+        }
+    }
+
+    private async Task<string> DownloadSongCoreAsync(TrackDownload download, DownloadRequest request, CancellationToken cancellationToken)
+    {
+        var externalProvider = ProviderName;
+        var externalId = request.ExternalId;
+        var songId = download.SongId;
+        var isCache = download.ToCache;
+        var triggerAlbumDownload = request.TriggerAlbumDownload;
 
         // Tell other concurrent tasks we are started downloading routine
         // and keep reference to it for easy access
@@ -599,12 +779,12 @@ public abstract class BaseDownloadService : IDownloadService
                 }
             }
 
-            Song song = await GetSongMetadataForTrackAsync(externalProvider, externalId);
+            Song song = request.Metadata ?? await GetSongMetadataForTrackAsync(externalProvider, externalId);
             var downloadResult = await DownloadTrackAsync(externalId, song, cancellationToken);
             string localPath;
             await using (downloadResult.DownloadStream)
             {
-                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, isCache, cancellationToken);
+                localPath = await SaveDownloadStreamToFileAsync(downloadResult, song, isCache, cancellationToken, download.SetReadable);
             }
             song.LocalPath = localPath;
 
@@ -717,9 +897,6 @@ public abstract class BaseDownloadService : IDownloadService
                     Logger.LogWarning(deleteEx, "Failed to delete backup file: {BackupPath}", ourDownloadInfo.BackupPath);
                 }
             }
-
-            DownloadLock.Release();
-            songLock.Release();
         }
     }
 
@@ -780,7 +957,8 @@ public abstract class BaseDownloadService : IDownloadService
     /// <param name="result">DownloadResult containing download Stream and quality string.</param>
     /// <param name="song">Song metadata to interpolate into storage template.</param>
     /// <returns></returns>
-    protected async Task<string> SaveDownloadStreamToFileAsync(DownloadResult result, Song song, bool toCache, CancellationToken cancellationToken)
+    /// <param name="onReadable">When set and the provider announced the size, receives the download as soon as it can be streamed.</param>
+    protected async Task<string> SaveDownloadStreamToFileAsync(DownloadResult result, Song song, bool toCache, CancellationToken cancellationToken, Action<ProgressiveDownload>? onReadable = null)
     {
         var basePath = toCache ? CachePath : DownloadPath;
         var outputPath = PathHelper.BuildTrackPath(basePath, song, result.Extension, SubsonicSettings.FolderTemplate, result.DownloadedQuality);
@@ -792,12 +970,28 @@ public abstract class BaseDownloadService : IDownloadService
         // Resolve unique path if file already exists
         outputPath = PathHelper.ResolveUniquePath(outputPath);
 
+        ProgressiveDownload? progressive = null;
         try
         {
-            // Download the file with progress logging and stall detection
-            await using var outputFile = IOFile.Create(outputPath);
-            await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
-            await outputFile.DisposeAsync();
+            // Fragmented MP4 is patched after download, so it is only ever served finished
+            if (onReadable != null && result.ContentLength is > 0 && result.Mp4DurationSeconds == null)
+            {
+                progressive = await DownloadProgressivelyAsync(result, song, outputPath, onReadable, cancellationToken);
+
+                // Readers keep following the raw scratch file; tagging rewrites the start of
+                // a file, so it works on a copy of its own.
+                await using var part = new FileStream(progressive.PartPath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete, bufferSize: 81920, useAsync: true);
+                await using var outputFile = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write,
+                    FileShare.None, bufferSize: 81920, useAsync: true);
+                await part.CopyToAsync(outputFile, cancellationToken);
+            }
+            else
+            {
+                // Download the file with progress logging and stall detection
+                await using var outputFile = IOFile.Create(outputPath);
+                await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
+            }
 
             // Detect actual audio format from magic bytes and rename if the extension is wrong.
             // This catches cases where the stream is raw FLAC but we assumed MP4 container.
@@ -830,6 +1024,109 @@ public abstract class BaseDownloadService : IDownloadService
             TryDeleteIncompleteFile(outputPath);
             throw;
         }
+        finally
+        {
+            // Readers already streaming keep their open handle; new requests use the finished file
+            if (progressive != null)
+            {
+                TryDeleteStreamingFile(progressive.PartPath);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Copies the provider stream into a scratch file, handing it to <paramref name="onReadable"/>
+    /// once the format is known. Returns when the whole track is on disk.
+    /// </summary>
+    private async Task<ProgressiveDownload> DownloadProgressivelyAsync(DownloadResult result, Song song, string outputPath, Action<ProgressiveDownload> onReadable, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(StreamingPath);
+        var partPath = Path.Combine(StreamingPath, $"{Guid.NewGuid():N}.part");
+        var length = result.ContentLength!.Value;
+        ProgressiveDownload? progressive = null;
+
+        ProgressiveDownload Open()
+        {
+            var extension = DetectAudioExtension(partPath) ?? Path.GetExtension(outputPath);
+            var opened = new ProgressiveDownload(partPath, length, Path.ChangeExtension(outputPath, extension), song.Duration);
+            onReadable(opened);
+            return opened;
+        }
+
+        try
+        {
+            // bufferSize 0: every chunk reaches the OS right away, where readers can see it
+            await using (var part = new FileStream(partPath, FileMode.CreateNew, FileAccess.Write,
+                FileShare.Read | FileShare.Delete, bufferSize: 0, useAsync: true))
+            {
+                await CopyWithProgressAsync(result.DownloadStream, part, song.Title, cancellationToken, totalBytes =>
+                {
+                    if (progressive == null && totalBytes >= FormatHeaderBytes)
+                    {
+                        progressive = Open();
+                    }
+                    progressive?.ReportProgress(totalBytes);
+                });
+            }
+
+            // Shorter than a format header: still hand it to any waiting reader
+            progressive ??= Open();
+
+            var written = new FileInfo(partPath).Length;
+            if (written != length)
+            {
+                Logger.LogWarning("Download of '{Title}' ended at {Written} bytes, {Expected} were announced",
+                    song.Title, written, length);
+            }
+            progressive.ReportProgress(written);
+            progressive.Complete();
+            return progressive;
+        }
+        catch (Exception ex)
+        {
+            progressive?.Fail(ex);
+            TryDeleteStreamingFile(partPath);
+            throw;
+        }
+    }
+
+    private void TryDeleteStreamingFile(string path)
+    {
+        try
+        {
+            IOFile.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to delete streaming scratch file: {Path}", path);
+        }
+    }
+
+    private static string? DetectAudioExtension(string path)
+    {
+        Span<byte> header = stackalloc byte[FormatHeaderBytes];
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var read = file.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
+        return DetectAudioExtension(header[..read]);
+    }
+
+    /// <summary>
+    /// Recognises containers whose extension may be wrong: ".flac" for raw FLAC, ".m4a" for
+    /// ISOBMFF/MP4. Null when the header matches neither.
+    /// </summary>
+    internal static string? DetectAudioExtension(ReadOnlySpan<byte> header)
+    {
+        // Raw FLAC: starts with fLaC (0x66 0x4C 0x61 0x43)
+        if (header.Length >= 4 && header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43)
+        {
+            return ".flac";
+        }
+        // ISOBMFF/MP4: bytes 4-7 are 'ftyp' (0x66 0x74 0x79 0x70)
+        if (header.Length >= 8 && header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70)
+        {
+            return ".m4a";
+        }
+        return null;
     }
 
     // Reads the first bytes of the written file, detects the audio format, and renames
@@ -838,7 +1135,7 @@ public abstract class BaseDownloadService : IDownloadService
     {
         try
         {
-            Span<byte> header = stackalloc byte[12];
+            Span<byte> header = stackalloc byte[FormatHeaderBytes];
             using var f = IOFile.OpenRead(path);
             int read = f.Read(header);
             if (read < 4) return path;
@@ -847,15 +1144,9 @@ public abstract class BaseDownloadService : IDownloadService
                 Path.GetFileName(path), read,
                 string.Join(" ", header[..read].ToArray().Select(b => b.ToString("X2"))));
 
-            // Raw FLAC: starts with fLaC (0x66 0x4C 0x61 0x43)
-            bool isFlac = header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43;
-            // ISOBMFF/MP4: bytes 4-7 are 'ftyp' (0x66 0x74 0x79 0x70)
-            bool isMp4 = read >= 8 && header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70;
-
+            var detectedExt = DetectAudioExtension(header[..read]);
             var currentExt = Path.GetExtension(path).ToLowerInvariant();
-            string? correctExt = null;
-            if (isFlac && currentExt != ".flac") correctExt = ".flac";
-            else if (isMp4 && currentExt != ".m4a") correctExt = ".m4a";
+            var correctExt = detectedExt != null && detectedExt != currentExt ? detectedExt : null;
 
             if (correctExt == null) return path;
 
@@ -873,7 +1164,7 @@ public abstract class BaseDownloadService : IDownloadService
     }
 
     // Log progress every 10 MB and cancel if no bytes flow for 90 seconds (stall detection).
-    private async Task CopyWithProgressAsync(Stream source, Stream dest, string? title, CancellationToken cancellationToken)
+    private async Task CopyWithProgressAsync(Stream source, Stream dest, string? title, CancellationToken cancellationToken, Action<long>? onProgress = null)
     {
         const int bufferSize = 81920; // 80 KB
         const long logEveryBytes = 10 * 1024 * 1024; // 10 MB
@@ -903,6 +1194,7 @@ public abstract class BaseDownloadService : IDownloadService
 
             await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             totalBytes += read;
+            onProgress?.Invoke(totalBytes);
 
             if (totalBytes - lastLoggedAt >= logEveryBytes)
             {
@@ -1026,7 +1318,8 @@ public abstract class BaseDownloadService : IDownloadService
                 }
 
                 Logger.LogInformation("Downloading track '{Title}' from album '{Album}'", track.Title, album.Title);
-                await DownloadSongInternalAsync(ProviderName, track.ExternalId!, triggerAlbumDownload: false, forcePermanent, cancellationToken);
+                // The album listing already carries the track's full metadata, album artist included
+                await DownloadSongInternalAsync(ProviderName, track.ExternalId!, triggerAlbumDownload: false, forcePermanent, cancellationToken, metadata: track);
             }
             catch (Exception ex)
             {

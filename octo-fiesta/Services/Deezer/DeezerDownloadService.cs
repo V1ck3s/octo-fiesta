@@ -139,7 +139,11 @@ public class DeezerDownloadService : BaseDownloadService
         var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
         var downloadStream = new DeezerDecryptedStream(responseStream, downloadInfo.TrackId);
 
-        return new DownloadResult(downloadStream, extension, downloadedQuality);
+        // Decryption works in place on 2048-byte chunks, so the size is unchanged
+        return new DownloadResult(downloadStream, extension, downloadedQuality)
+        {
+            ContentLength = response.Content.Headers.ContentLength
+        };
     }
 
     #endregion

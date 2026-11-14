@@ -125,7 +125,10 @@ public class QobuzDownloadService : BaseDownloadService
 
         var responseStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
 
-        return new DownloadResult(responseStream, extension, downloadedQuality);
+        return new DownloadResult(responseStream, extension, downloadedQuality)
+        {
+            ContentLength = response.Content.Headers.ContentLength
+        };
     }
 
     #endregion
