@@ -447,6 +447,10 @@ public class SubsonicResponseBuilder
             ["displayComposer"] = ""
         };
 
+        if (!string.IsNullOrWhiteSpace(song.Isrc)) result["isrc"] = new[] { song.Isrc };
+        // "clean" means an edited version; a non-explicit flag does not establish one.
+        if (song.IsExplicit == true) result["explicitStatus"] = "explicit";
+
         // Only include coverArt if the song has a cover URL (avoids broken images for songs without covers)
         if (song.IsLocal || !string.IsNullOrEmpty(song.CoverArtUrl))
         {
@@ -606,6 +610,9 @@ public class SubsonicResponseBuilder
             songElement.Add(new XAttribute("created", created));
         }
 
+        if (!string.IsNullOrWhiteSpace(song.Isrc)) songElement.Add(new XElement(ns + "isrc", song.Isrc));
+        if (song.IsExplicit == true)
+            songElement.Add(new XAttribute("explicitStatus", "explicit"));
         return songElement;
     }
 

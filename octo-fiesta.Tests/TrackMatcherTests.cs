@@ -91,6 +91,19 @@ public class TrackMatcherTests
         Assert.True(TrackMatcher.IsMatch(external, candidate));
     }
 
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(true, null, true)]
+    [InlineData(null, false, true)]
+    public void IsMatch_ExplicitStatus_RejectsKnownConflict(bool? externalExplicit, bool? candidateExplicit, bool expected)
+    {
+        var external = new TrackInfo("Song (Explicit)", "Artist", IsExplicit: externalExplicit);
+        var candidate = new TrackInfo("Song (Clean)", "Artist", IsExplicit: candidateExplicit);
+        Assert.Equal(expected, TrackMatcher.IsMatch(external, candidate));
+    }
+
     [Fact]
     public void IsMatch_UsesOpenSubsonicArtistsArray()
     {

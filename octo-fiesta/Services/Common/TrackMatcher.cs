@@ -100,7 +100,7 @@ public static class TrackMatcher
     /// <summary>
     /// True when the candidate is the same recording: equal ISRC, or equal cleaned title with
     /// an overlapping artist credit. Loose title or artist matches must also agree on duration
-    /// when both durations are known.
+    /// when both durations are known. A known explicit/clean conflict never matches.
     /// </summary>
     public static bool IsMatch(TrackInfo external, TrackInfo candidate)
     {
@@ -108,6 +108,11 @@ public static class TrackMatcher
             candidate.Isrcs.Any(i => string.Equals(i, external.Isrc, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
+        }
+
+        if (external.IsExplicit.HasValue && candidate.IsExplicit.HasValue && external.IsExplicit != candidate.IsExplicit)
+        {
+            return false;
         }
 
         var externalTitle = StringNormalizer.CreateComparisonKey(external.Title);
@@ -261,7 +266,8 @@ public record TrackInfo(
     int? Duration = null,
     string? Isrc = null,
     IReadOnlyList<string>? ArtistNames = null,
-    IReadOnlyList<string>? IsrcList = null)
+    IReadOnlyList<string>? IsrcList = null,
+    bool? IsExplicit = null)
 {
     public IReadOnlyList<string> Artists => ArtistNames ?? Array.Empty<string>();
     public IReadOnlyList<string> Isrcs => IsrcList ?? (string.IsNullOrEmpty(Isrc) ? Array.Empty<string>() : new[] { Isrc });

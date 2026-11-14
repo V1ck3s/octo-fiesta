@@ -1196,4 +1196,47 @@ public class LocalLibraryServiceTests : IDisposable
         Assert.Contains("query=Kanye West Welcome To Heartbreak", Uri.UnescapeDataString(searchUrl));
         Assert.DoesNotContain("Album", searchUrl);
     }
+
+    [Fact]
+    public async Task GetLocalIdForExternalSongAsync_ExplicitTrack_SkipsCleanLibraryCopy()
+    {
+        _mockMetadataService
+            .Setup(x => x.GetSongAsync("qobuz", "43"))
+            .ReturnsAsync(new Song
+            {
+                Title = "Gold Digger (Explicit)",
+                Artist = "Kanye West",
+                Duration = 207,
+                IsExplicit = true,
+                ExternalProvider = "qobuz",
+                ExternalId = "43"
+            });
+
+        _mockHandler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync((HttpRequestMessage req, CancellationToken _) =>
+            {
+                if (req.RequestUri?.ToString().Contains("search3") == true)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"subsonic-response\":{\"searchResult3\":{\"song\":[" +
+                            "{\"id\":\"clean\",\"title\":\"Gold Digger (Clean)\",\"artist\":\"Kanye West\",\"duration\":207,\"explicitStatus\":\"clean\"}," +
+                            "{\"id\":\"explicit\",\"title\":\"Gold Digger\",\"artist\":\"Kanye West\",\"duration\":207,\"explicitStatus\":\"explicit\"}" +
+                            "]}}}")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"subsonic-response\":{\"status\":\"ok\"}}")
+                };
+            });
+
+        var result = await _service.GetLocalIdForExternalSongAsync("qobuz", "43");
+
+        Assert.Equal("explicit", result);
+    }
 }

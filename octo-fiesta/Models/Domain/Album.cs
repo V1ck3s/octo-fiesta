@@ -6,6 +6,7 @@ namespace octo_fiesta.Models.Domain;
 public class Album
 {
     public string Id { get; set; } = string.Empty;
+    public bool? IsExplicit { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Artist { get; set; } = string.Empty;
     public string? ArtistId { get; set; }
