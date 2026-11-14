@@ -10,12 +10,29 @@ public static class DownloadPathResolver
 {
     private const string SharedSection = "Library";
     private const string PathKey = "DownloadPath";
+    private const string MappingsKey = "MappingsPath";
+    private const string MappingsFileName = ".mappings.json";
     private const string DefaultPath = "./downloads";
 
     public static string GetSharedPath(IConfiguration configuration)
     {
         var shared = configuration[$"{SharedSection}:{PathKey}"];
         return string.IsNullOrWhiteSpace(shared) ? DefaultPath : shared;
+    }
+
+    /// <summary>
+    /// Path of the LocalLibraryService mappings file. Defaults to ".mappings.json"
+    /// inside the shared download path; can be pointed at a local disk when the
+    /// download directory lives on a remote/virtual filesystem where small
+    /// writes are unreliable. Per-provider download paths do not affect this.
+    /// An empty override counts as absent.
+    /// </summary>
+    public static string GetMappingsPath(IConfiguration configuration)
+    {
+        var mappings = configuration[$"{SharedSection}:{MappingsKey}"];
+        return string.IsNullOrWhiteSpace(mappings)
+            ? Path.Combine(GetSharedPath(configuration), MappingsFileName)
+            : mappings;
     }
 
     /// <summary>
