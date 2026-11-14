@@ -36,6 +36,8 @@ services:
       - Subsonic__ExplicitFilter=${EXPLICIT_FILTER:-All}
       # Download mode: Track (only requested track), Album (full album when playing a track)
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
+      # Maximum number of downloads running at the same time (default: 1, max: 5)
+      - Subsonic__MaxConcurrentDownloads=${MAX_CONCURRENT_DOWNLOADS:-1}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
       # Disable triggering a library scan after a download completes (default: false)

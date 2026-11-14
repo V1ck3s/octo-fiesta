@@ -32,8 +32,9 @@ public abstract class BaseDownloadService : IDownloadService
 
     protected readonly string CachePath;
 
-    protected readonly Dictionary<string, DownloadInfo> ActiveDownloads = new();
-    protected readonly SemaphoreSlim DownloadLock = new(1, 1);
+    protected readonly ConcurrentDictionary<string, DownloadInfo> ActiveDownloads = new();
+    protected readonly SemaphoreSlim DownloadLock;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _songLocks = new();
 
     // Small in-memory cache to avoid repeated metadata/network lookups when searching for cached files.
     // Key: "{provider}|{externalId}" -> (path or null, expiry)
@@ -94,6 +95,9 @@ public abstract class BaseDownloadService : IDownloadService
         SubsonicSettings = subsonicSettings;
         _serviceProvider = serviceProvider;
         Logger = logger;
+
+        var maxConcurrentDownloads = Math.Clamp(SubsonicSettings.MaxConcurrentDownloads, 1, SubsonicSettings.MaxConcurrentDownloadsLimit);
+        DownloadLock = new(maxConcurrentDownloads, maxConcurrentDownloads);
 
         CachePath = PathHelper.GetCachePath();
 
@@ -493,8 +497,20 @@ public abstract class BaseDownloadService : IDownloadService
         // In Cache mode, downloads go to cache unless forcePermanent is set (used by star album/playlist)
         var isCache = SubsonicSettings.StorageMode == StorageMode.Cache && !forcePermanent;
 
-        // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
-        await DownloadLock.WaitAsync(cancellationToken);
+        // A second request for the same song waits for the first one, then finds the downloaded file.
+        // The song lock is taken before a download slot so waiting requests don't hold a slot.
+        var songLock = _songLocks.GetOrAdd(songId, _ => new SemaphoreSlim(1, 1));
+        await songLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Acquire lock BEFORE checking existence to prevent race conditions with concurrent requests
+            await DownloadLock.WaitAsync(cancellationToken);
+        }
+        catch
+        {
+            songLock.Release();
+            throw;
+        }
 
         // Tell other concurrent tasks we are started downloading routine
         // and keep reference to it for easy access
@@ -703,6 +719,7 @@ public abstract class BaseDownloadService : IDownloadService
             }
 
             DownloadLock.Release();
+            songLock.Release();
         }
     }
 
