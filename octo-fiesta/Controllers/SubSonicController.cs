@@ -1784,6 +1784,13 @@ public class SubsonicController : ControllerBase
         return null;
     }
 
+    /// <summary>
+    /// Extension added to getOpenSubsonicExtensions so clients can tell they talk to the
+    /// server through octo-fiesta, where external (ext-) items may trigger provider downloads.
+    /// </summary>
+    public const string ProxyExtensionName = "octoFiesta";
+    public const int ProxyExtensionVersion = 1;
+
     // Generic endpoint to handle all subsonic API calls
     [HttpGet, HttpPost]
     [Route("{**endpoint}")]
@@ -1831,15 +1838,28 @@ public class SubsonicController : ControllerBase
                     }
 
                     var response = JsonNode.Parse(body[jsonStart..jsonEnd])!;
-                    if (response["subsonic-response"]?["openSubsonicExtensions"] is JsonArray extensions)
+                    if (response["subsonic-response"] is JsonObject subsonicResponse)
                     {
+                        if (subsonicResponse["openSubsonicExtensions"] is not JsonArray extensions)
+                        {
+                            extensions = new JsonArray();
+                            subsonicResponse["openSubsonicExtensions"] = extensions;
+                        }
+
                         for (var i = extensions.Count - 1; i >= 0; i--)
                         {
-                            if (extensions[i]?["name"]?.GetValue<string>() == "playbackReport")
+                            var name = extensions[i]?["name"]?.GetValue<string>();
+                            if (name == "playbackReport" || name == ProxyExtensionName)
                             {
                                 extensions.RemoveAt(i);
                             }
                         }
+
+                        extensions.Add(new JsonObject
+                        {
+                            ["name"] = ProxyExtensionName,
+                            ["versions"] = new JsonArray(ProxyExtensionVersion)
+                        });
                     }
                     var filteredBody = body[..jsonStart] + response.ToJsonString() + body[jsonEnd..];
                     return File(Encoding.UTF8.GetBytes(filteredBody), contentType);
@@ -1847,7 +1867,14 @@ public class SubsonicController : ControllerBase
 
                 var xml = XDocument.Parse(Encoding.UTF8.GetString(result.Body));
                 xml.Root?.Elements().Where(e => e.Name.LocalName == "openSubsonicExtensions" &&
-                    (string?)e.Attribute("name") == "playbackReport").Remove();
+                    (string?)e.Attribute("name") is "playbackReport" or ProxyExtensionName).Remove();
+                if (xml.Root != null)
+                {
+                    var ns = xml.Root.Name.Namespace;
+                    xml.Root.Add(new XElement(ns + "openSubsonicExtensions",
+                        new XAttribute("name", ProxyExtensionName),
+                        new XElement(ns + "versions", ProxyExtensionVersion)));
+                }
                 return File(Encoding.UTF8.GetBytes(xml.ToString(SaveOptions.DisableFormatting)), contentType);
             }
 
