@@ -126,12 +126,12 @@ public class SubsonicAuthenticationMiddleware
                 // The upstream Subsonic server could not be reached. Report this distinctly
                 // from bad credentials - the client's password may be perfectly valid.
                 _logger.LogWarning("Authentication failed: Subsonic server unreachable for user {User} on {Path} (upstream down, not a credential problem)", username, path);
-                await WriteSubsonicError(context, httpStatus: 503, code: 1000, "Subsonic server unreachable - please try again shortly");
+                await WriteSubsonicError(context, httpStatus: 503, code: 0, "Subsonic server unreachable - please try again shortly");
                 return;
             
             case PingOutcome.UpstreamError:
                 _logger.LogWarning("Authentication failed: Subsonic server returned an error for user {User} on {Path}", username, path);
-                await WriteSubsonicError(context, httpStatus: 503, code: 1000, "Subsonic server error - please try again shortly");
+                await WriteSubsonicError(context, httpStatus: 503, code: 0, "Subsonic server error - please try again shortly");
                 return;
             
             case PingOutcome.InvalidCredentials:
@@ -140,8 +140,7 @@ public class SubsonicAuthenticationMiddleware
                 return;
             
             default:
-                await _next(context);
-                return;
+                break;
         }
         
         // Cache the validated credentials
@@ -254,8 +253,7 @@ public class SubsonicAuthenticationMiddleware
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error validating credentials against Subsonic server");
-            _upstreamDownUntil = DateTime.UtcNow.Add(UnreachableCacheDuration);
-            return PingOutcome.Unreachable;
+            return PingOutcome.UpstreamError;
         }
     }
 
