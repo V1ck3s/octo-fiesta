@@ -44,7 +44,7 @@ public enum ExplicitFilter
 }
 
 /// <summary>
-/// Which provider image is served as the cover of external albums, songs and artists
+/// Which provider image is served as the cover of external albums and songs
 /// </summary>
 public enum CoverArtSize
 {
@@ -154,7 +154,7 @@ public class SubsonicSettings
     public const int MaxConcurrentDownloadsLimit = 5;
 
     /// <summary>
-    /// Size of the covers served for external albums, songs and artists (default: Display)
+    /// Size of the covers served for external albums and songs (default: Display)
     /// Environment variable: COVER_ART_SIZE
     /// Values: "Display" (500-640 px), "Large" (the provider's largest image)
     /// Downloads always embed the largest image, whatever this says.
