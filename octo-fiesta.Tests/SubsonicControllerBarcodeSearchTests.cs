@@ -144,6 +144,22 @@ public class SubsonicControllerBarcodeSearchTests
     }
 
     [Fact]
+    public async Task Search3_FailingBarcodeLookup_FallsBackToTextSearch()
+    {
+        var metadata = new Mock<IMusicMetadataService>();
+        metadata.Setup(x => x.GetAlbumByBarcodeAsync(It.IsAny<string>())).ThrowsAsync(new JsonException("not json"));
+        metadata.Setup(x => x.SearchAllAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync(new SearchResult());
+        var controller = CreateController(new Mock<ILocalLibraryService>(), metadata,
+            "?query=888880127631&f=json", out _);
+
+        var result = await controller.Search3();
+
+        Assert.IsType<JsonResult>(result);
+        metadata.Verify(x => x.SearchAllAsync("888880127631", It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Search3_TextQuery_DoesNotLookUpBarcodes()
     {
         var metadata = new Mock<IMusicMetadataService>();

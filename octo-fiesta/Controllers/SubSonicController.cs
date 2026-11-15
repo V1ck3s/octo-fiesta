@@ -117,7 +117,16 @@ public class SubsonicController : ControllerBase
         // When the provider can't resolve it, fall through to the regular search.
         if (BarcodeHelper.IsBarcode(cleanQuery))
         {
-            var barcodeAlbum = await _metadataService.GetAlbumByBarcodeAsync(cleanQuery);
+            Album? barcodeAlbum = null;
+            try
+            {
+                barcodeAlbum = await _metadataService.GetAlbumByBarcodeAsync(cleanQuery);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Barcode lookup failed for {Barcode}, falling back to text search", cleanQuery);
+            }
+
             if (barcodeAlbum != null)
             {
                 var barcodeSubsonicResult = await _proxyService.RelaySafeAsync("rest/search3", parameters);
