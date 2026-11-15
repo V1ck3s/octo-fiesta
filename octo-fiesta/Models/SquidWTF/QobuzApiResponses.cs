@@ -86,6 +86,9 @@ public class QobuzAlbum
     
     [JsonPropertyName("label")]
     public QobuzLabel? Label { get; set; }
+
+    [JsonPropertyName("upc")]
+    public string? Upc { get; set; }
 }
 
 public class QobuzTrack

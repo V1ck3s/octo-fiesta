@@ -78,4 +78,10 @@ public interface IMusicMetadataService
     /// <param name="externalId">Playlist ID from the provider</param>
     /// <returns>List of songs in the playlist</returns>
     Task<List<Song>> GetPlaylistTracksAsync(string externalProvider, string externalId);
+
+    /// <summary>
+    /// Gets an album (with its songs) by its barcode (UPC/EAN), or null when the provider
+    /// has none or does not support barcode lookups.
+    /// </summary>
+    Task<Album?> GetAlbumByBarcodeAsync(string barcode) => Task.FromResult<Album?>(null);
 }

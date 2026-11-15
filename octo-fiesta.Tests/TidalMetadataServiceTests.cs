@@ -212,6 +212,37 @@ public class TidalMetadataServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetAlbumByBarcodeAsync_PicksTheAlbumWhoseUpcMatches()
+    {
+        var handler = new TidalStubHandler()
+            .Respond("/search", """
+                {
+                  "albums": {
+                    "items": [
+                      { "id": 11111111, "title": "Other edition", "upc": "886443927094" },
+                      { "id": 77712233, "title": "Random Access Memories", "upc": "0886443927087" }
+                    ]
+                  }
+                }
+                """)
+            .Respond("/albums/77712233/items", """{ "items": [] }""")
+            .Respond("/albums/77712233", """{ "id": 77712233, "title": "Random Access Memories" }""");
+
+        var album = await CreateService(handler).GetAlbumByBarcodeAsync("886443927087");
+
+        Assert.Equal("ext-tidal-album-77712233", album!.Id);
+    }
+
+    [Fact]
+    public async Task GetAlbumByBarcodeAsync_WhenNoUpcMatches_ReturnsNull()
+    {
+        var handler = new TidalStubHandler()
+            .Respond("/search", """{ "albums": { "items": [ { "id": 1, "upc": "886443927094" } ] } }""");
+
+        Assert.Null(await CreateService(handler).GetAlbumByBarcodeAsync("886443927087"));
+    }
+
+    [Fact]
     public async Task GetPlaylistTracksAsync_NumbersTracksInPlaylistOrder()
     {
         var handler = new TidalStubHandler().Respond("/playlists/uuid-1/items", $$"""
