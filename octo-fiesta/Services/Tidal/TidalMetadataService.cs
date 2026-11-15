@@ -428,7 +428,7 @@ public class TidalMetadataService : IMusicMetadataService
     /// <summary>
     /// Cover and picture ids are UUIDs whose dashes become path separators on the CDN.
     /// </summary>
-    private static string? BuildCoverUrl(string? coverId, string size = "320x320")
+    private static string? BuildCoverUrl(string? coverId, string size = "640x640")
     {
         if (string.IsNullOrEmpty(coverId)) return null;
         return $"https://resources.tidal.com/images/{coverId.Replace("-", "/")}/{size}.jpg";

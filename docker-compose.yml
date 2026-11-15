@@ -38,6 +38,8 @@ services:
       - Subsonic__DownloadMode=${DOWNLOAD_MODE:-Track}
       # Maximum number of downloads running at the same time (default: 1, max: 5)
       - Subsonic__MaxConcurrentDownloads=${MAX_CONCURRENT_DOWNLOADS:-1}
+      # Cover size for external content: Display (500-640 px) or Large (largest available) (default: Display)
+      - Subsonic__CoverArtSize=${COVER_ART_SIZE:-Display}
       # Auto upgrade quality: re-download tracks when higher quality is available (default: false)
       - Subsonic__AutoUpgradeQuality=${AUTO_UPGRADE_QUALITY:-false}
       # Disable triggering a library scan after a download completes (default: false)

@@ -44,6 +44,22 @@ public enum ExplicitFilter
 }
 
 /// <summary>
+/// Which provider image is served as the cover of external albums and songs
+/// </summary>
+public enum CoverArtSize
+{
+    /// <summary>
+    /// The provider's display-size image (500-640 px): light and quick to load
+    /// </summary>
+    Display,
+
+    /// <summary>
+    /// The largest image the provider has (1000 px and up; a Qobuz original can weigh several MB)
+    /// </summary>
+    Large
+}
+
+/// <summary>
 /// Storage mode for downloaded tracks
 /// </summary>
 public enum StorageMode
@@ -136,6 +152,14 @@ public class SubsonicSettings
     public int MaxConcurrentDownloads { get; set; } = 1;
 
     public const int MaxConcurrentDownloadsLimit = 5;
+
+    /// <summary>
+    /// Size of the covers served for external albums and songs (default: Display)
+    /// Environment variable: COVER_ART_SIZE
+    /// Values: "Display" (500-640 px), "Large" (the provider's largest image)
+    /// Downloads always embed the largest image, whatever this says.
+    /// </summary>
+    public CoverArtSize CoverArtSize { get; set; } = CoverArtSize.Display;
     
     /// <summary>
     /// Music service to use (default: Deezer)
