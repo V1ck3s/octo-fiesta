@@ -96,13 +96,15 @@ public class ExternalCoverArtServiceTests
     public async Task GetAsync_ConcurrentRequestsFromManyThreads_ShareOneDownload()
     {
         var (service, images, _) = CreateService(delay: TimeSpan.FromMilliseconds(200));
-        using var start = new Barrier(16);
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var covers = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() =>
+        var requests = Enumerable.Range(0, 16).Select(_ => Task.Run(async () =>
         {
-            start.SignalAndWait();
-            return service.GetAsync("qobuz", "song", "1");
-        })));
+            await start.Task;
+            return await service.GetAsync("qobuz", "song", "1");
+        })).ToList();
+        start.SetResult();
+        var covers = await Task.WhenAll(requests);
 
         Assert.All(covers, Assert.NotNull);
         Assert.Single(images.Requests);
