@@ -92,10 +92,57 @@ public class ExternalCoverArtServiceTests
         Assert.Equal(2, images.Requests.Count);
     }
 
-    private static (ExternalCoverArtService Service, FakeImages Images, Mock<IMusicMetadataService> Metadata) CreateService(
-        TimeSpan? delay = null, HttpStatusCode status = HttpStatusCode.OK, CoverArtSize size = CoverArtSize.Display)
+    [Fact]
+    public async Task GetAsync_ConcurrentRequestsFromManyThreads_ShareOneDownload()
     {
-        var images = new FakeImages(delay ?? TimeSpan.Zero, status);
+        var (service, images, _) = CreateService(delay: TimeSpan.FromMilliseconds(200));
+        using var start = new Barrier(16);
+
+        var covers = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            return service.GetAsync("qobuz", "song", "1");
+        })));
+
+        Assert.All(covers, Assert.NotNull);
+        Assert.Single(images.Requests);
+    }
+
+    [Fact]
+    public async Task GetAsync_OverTheByteBudget_EvictsTheLeastRecentlyUsedCover()
+    {
+        var (service, images, _) = CreateService(imageBytes: 40 * 1024 * 1024);
+
+        await service.GetAsync("qobuz", "song", "1");
+        await Task.Delay(20);
+        await service.GetAsync("qobuz", "song", "2");
+        await Task.Delay(20);
+        await service.GetAsync("qobuz", "song", "1");
+        await Task.Delay(20);
+        await service.GetAsync("qobuz", "song", "3");
+
+        await service.GetAsync("qobuz", "song", "1");
+        Assert.Equal(3, images.Requests.Count);
+        await service.GetAsync("qobuz", "song", "2");
+        Assert.Equal(4, images.Requests.Count);
+    }
+
+    [Fact]
+    public async Task GetAsync_AfterATimeout_ReturnsNullAndTriesAgain()
+    {
+        var (service, images, _) = CreateService(timesOut: true);
+
+        Assert.Null(await service.GetAsync("qobuz", "song", "1"));
+        Assert.Null(await service.GetAsync("qobuz", "song", "1"));
+
+        Assert.Equal(2, images.Requests.Count);
+    }
+
+    private static (ExternalCoverArtService Service, FakeImages Images, Mock<IMusicMetadataService> Metadata) CreateService(
+        TimeSpan? delay = null, HttpStatusCode status = HttpStatusCode.OK, CoverArtSize size = CoverArtSize.Display,
+        int imageBytes = 3, bool timesOut = false)
+    {
+        var images = new FakeImages(delay ?? TimeSpan.Zero, status, imageBytes, timesOut);
         var httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(images, disposeHandler: false));
 
@@ -112,7 +159,7 @@ public class ExternalCoverArtServiceTests
         return (service, images, metadata);
     }
 
-    private sealed class FakeImages(TimeSpan delay, HttpStatusCode status) : HttpMessageHandler
+    private sealed class FakeImages(TimeSpan delay, HttpStatusCode status, int imageBytes, bool timesOut) : HttpMessageHandler
     {
         private readonly ConcurrentQueue<string> _requests = new();
 
@@ -122,9 +169,14 @@ public class ExternalCoverArtServiceTests
         {
             _requests.Enqueue(request.RequestUri!.ToString());
             await Task.Delay(delay, cancellationToken);
+            if (timesOut)
+            {
+                throw new TaskCanceledException("timed out");
+            }
+
             return new HttpResponseMessage(status)
             {
-                Content = new ByteArrayContent([0xFF, 0xD8, 0xFF])
+                Content = new ByteArrayContent(new byte[imageBytes])
                 {
                     Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg") }
                 }

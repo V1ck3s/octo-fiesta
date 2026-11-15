@@ -1105,7 +1105,7 @@ public class SubsonicController : ControllerBase
             }
         }
 
-        // The display-size image whatever size is asked for; the large one is for downloads
+        // The configured cover size whatever size is asked for
         try
         {
             var cover = await _coverArt.GetAsync(coverProvider!, type ?? "song", coverExternalId!);

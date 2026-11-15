@@ -15,7 +15,8 @@ public sealed class ExternalCoverArtService
     public sealed record CoverImage(byte[] Data, string ContentType);
 
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
-    private const int MaxCachedCovers = 256;
+    private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(15);
+    private const long CacheBudgetBytes = 100 * 1024 * 1024;
 
     // Used when no IHttpClientFactory is given (tests, manual construction)
     private static readonly Lazy<HttpClient> SharedClient = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
@@ -24,8 +25,21 @@ public sealed class ExternalCoverArtService
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<string, CacheEntry> _covers = new();
+    private readonly object _trimLock = new();
 
-    private sealed record CacheEntry(Task<CoverImage?> Image, DateTime Expiry);
+    // Lazy, so concurrent requests racing to add the same key still start a single download
+    private sealed class CacheEntry(Func<Task<CoverImage?>> fetch, DateTime expiry)
+    {
+        public Lazy<Task<CoverImage?>> Image { get; } = new(fetch);
+        public DateTime Expiry { get; } = expiry;
+        public long LastAccessTicks = expiry.Ticks;
+
+        public bool IsUsable(DateTime now) => Expiry > now && !(Image.IsValueCreated && Image.Value.IsFaulted);
+
+        public long CachedBytes => Image.IsValueCreated && Image.Value.IsCompletedSuccessfully
+            ? Image.Value.Result?.Data.Length ?? 0
+            : 0;
+    }
 
     private readonly bool _large;
 
@@ -70,18 +84,17 @@ public sealed class ExternalCoverArtService
     private async Task<CoverImage?> GetCachedAsync(string key, Func<Task<string?>> resolveUrl)
     {
         var now = DateTime.UtcNow;
-        TrimCache(now);
-
         var entry = _covers.AddOrUpdate(key,
-            _ => new CacheEntry(FetchAsync(resolveUrl), now + CacheTtl),
-            (_, existing) => existing.Expiry > now && !existing.Image.IsFaulted
+            _ => new CacheEntry(() => FetchAsync(resolveUrl), now + CacheTtl),
+            (_, existing) => existing.IsUsable(now)
                 ? existing
-                : new CacheEntry(FetchAsync(resolveUrl), now + CacheTtl));
+                : new CacheEntry(() => FetchAsync(resolveUrl), now + CacheTtl));
+        Interlocked.Exchange(ref entry.LastAccessTicks, now.Ticks);
 
         CoverImage? image;
         try
         {
-            image = await entry.Image;
+            image = await entry.Image.Value;
         }
         catch
         {
@@ -93,6 +106,10 @@ public sealed class ExternalCoverArtService
         {
             // Not cached: a cover that failed is asked again next time
             _covers.TryRemove(new KeyValuePair<string, CacheEntry>(key, entry));
+        }
+        else
+        {
+            TrimCache(now);
         }
         return image;
     }
@@ -109,16 +126,25 @@ public sealed class ExternalCoverArtService
         }
 
         var client = _httpClientFactory?.CreateClient("CoverArtClient") ?? SharedClient.Value;
-        using var response = await client.GetAsync(url);
-        if (!response.IsSuccessStatusCode)
+        using var timeout = new CancellationTokenSource(FetchTimeout);
+        try
         {
-            _logger.LogWarning("Cover art fetch failed for {Url}: HTTP {Status}", url, (int)response.StatusCode);
+            using var response = await client.GetAsync(url, timeout.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Cover art fetch failed for {Url}: HTTP {Status}", url, (int)response.StatusCode);
+                return null;
+            }
+
+            var data = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+            var contentType = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
+            return new CoverImage(data, contentType);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Cover art fetch timed out after {Seconds}s for {Url}", FetchTimeout.TotalSeconds, url);
             return null;
         }
-
-        var data = await response.Content.ReadAsByteArrayAsync();
-        var contentType = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
-        return new CoverImage(data, contentType);
     }
 
     private async Task<string?> ResolveUrlAsync(string provider, string type, string externalId)
@@ -147,27 +173,37 @@ public sealed class ExternalCoverArtService
     // The configured size, the other one when the provider lacks it
     private string? Pick(string? display, string? large) => _large ? large ?? display : display ?? large;
 
+    // Drops expired covers, then the least recently used ones until the cache fits its byte budget
     private void TrimCache(DateTime now)
     {
-        if (_covers.Count < MaxCachedCovers)
+        lock (_trimLock)
         {
-            return;
-        }
-
-        foreach (var (key, value) in _covers)
-        {
-            if (value.Expiry <= now)
+            foreach (var (key, value) in _covers)
             {
-                _covers.TryRemove(new KeyValuePair<string, CacheEntry>(key, value));
+                if (value.Expiry <= now)
+                {
+                    _covers.TryRemove(new KeyValuePair<string, CacheEntry>(key, value));
+                }
             }
-        }
 
-        // Still full: drop the oldest half
-        if (_covers.Count >= MaxCachedCovers)
-        {
-            foreach (var (key, value) in _covers.OrderBy(e => e.Value.Expiry).Take(MaxCachedCovers / 2).ToList())
+            var total = _covers.Values.Sum(e => e.CachedBytes);
+            if (total <= CacheBudgetBytes)
             {
-                _covers.TryRemove(new KeyValuePair<string, CacheEntry>(key, value));
+                return;
+            }
+
+            foreach (var (key, value) in _covers.Where(e => e.Value.CachedBytes > 0)
+                         .OrderBy(e => Interlocked.Read(ref e.Value.LastAccessTicks)).ToList())
+            {
+                if (_covers.TryRemove(new KeyValuePair<string, CacheEntry>(key, value)))
+                {
+                    total -= value.CachedBytes;
+                }
+
+                if (total <= CacheBudgetBytes)
+                {
+                    return;
+                }
             }
         }
     }
