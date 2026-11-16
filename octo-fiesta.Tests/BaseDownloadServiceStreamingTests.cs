@@ -19,6 +19,7 @@ public class BaseDownloadServiceStreamingTests : IDisposable
     private static readonly byte[] FlacHeader = "fLaC"u8.ToArray().Concat(new byte[12]).ToArray();
 
     private readonly string _downloadPath;
+    private readonly List<BaseDownloadService> _services = new();
 
     public BaseDownloadServiceStreamingTests()
     {
@@ -28,6 +29,10 @@ public class BaseDownloadServiceStreamingTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var service in _services)
+        {
+            service.Dispose();
+        }
         if (Directory.Exists(_downloadPath))
         {
             Directory.Delete(_downloadPath, true);
@@ -95,7 +100,7 @@ public class BaseDownloadServiceStreamingTests : IDisposable
     {
         var service = CreateService();
         var first = service.AddTrack("a", length: FlacHeader.Length);
-        service.AddTrack("b", length: FlacHeader.Length);
+        var second = service.AddTrack("b", length: FlacHeader.Length);
 
         var firstDownload = service.DownloadSongAsync("fake", "a");
         await first.WriteAsync(FlacHeader);
@@ -109,6 +114,10 @@ public class BaseDownloadServiceStreamingTests : IDisposable
         await firstDownload.WaitAsync(Timeout);
         await WaitUntilAsync(() => service.RequestedTracks.Contains("b"));
         Assert.False(secondDownload.IsCompleted);
+
+        await second.WriteAsync(FlacHeader);
+        await second.CompleteAsync();
+        await secondDownload.WaitAsync(Timeout);
     }
 
     [Fact]
@@ -266,6 +275,156 @@ public class BaseDownloadServiceStreamingTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadAndStreamAsync_WhenDisabled_ServesTheFinishedFile()
+    {
+        var service = CreateService(streamWhileDownloading: false);
+        var track = service.AddTrack("1", length: FlacHeader.Length + 2);
+
+        await track.WriteAsync(FlacHeader);
+        var streamTask = service.DownloadAndStreamAsync("fake", "1");
+        await Task.Delay(100);
+        Assert.False(streamTask.IsCompleted);
+
+        await track.WriteAsync([1, 2]);
+        await track.CompleteAsync();
+        var (stream, filePath) = await streamTask.WaitAsync(Timeout);
+        await using (stream)
+        {
+            Assert.IsType<FileStream>(stream);
+            Assert.True(File.Exists(filePath));
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAndStreamAsync_WhenDisabled_WaitsForADownloadSlot()
+    {
+        var service = CreateService(streamWhileDownloading: false);
+        var background = service.AddTrack("bg", length: FlacHeader.Length);
+        var played = service.AddTrack("fg", length: FlacHeader.Length);
+        await played.WriteAsync(FlacHeader);
+        await played.CompleteAsync();
+
+        var backgroundDownload = service.DownloadSongAsync("fake", "bg");
+        await WaitForStatusAsync(service, "ext-fake-bg", DownloadStatus.InProgress);
+
+        var streamTask = service.DownloadAndStreamAsync("fake", "fg");
+        await Task.Delay(100);
+        Assert.DoesNotContain("fg", service.RequestedTracks);
+
+        await background.WriteAsync(FlacHeader);
+        await background.CompleteAsync();
+        await backgroundDownload.WaitAsync(Timeout);
+        var (stream, _) = await streamTask.WaitAsync(Timeout);
+        await stream.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DownloadAndStreamAsync_WhenDisabled_JoinsTheRunningDownloadWithoutASlot()
+    {
+        var service = CreateService(streamWhileDownloading: false, maxConcurrentDownloads: 2);
+        var track = service.AddTrack("1", length: FlacHeader.Length);
+        var other = service.AddTrack("2", length: FlacHeader.Length);
+
+        var first = service.DownloadAndStreamAsync("fake", "1");
+        await WaitForStatusAsync(service, "ext-fake-1", DownloadStatus.InProgress);
+        var second = service.DownloadAndStreamAsync("fake", "1");
+        await Task.Delay(100);
+
+        // The second slot is still free for another track
+        var otherDownload = service.DownloadSongAsync("fake", "2");
+        await WaitUntilAsync(() => service.RequestedTracks.Contains("2"));
+
+        await track.WriteAsync(FlacHeader);
+        await track.CompleteAsync();
+        foreach (var request in new[] { first, second })
+        {
+            var (stream, _) = await request.WaitAsync(Timeout);
+            await stream.DisposeAsync();
+        }
+        Assert.Single(service.RequestedTracks, "1");
+
+        await other.WriteAsync(FlacHeader);
+        await other.CompleteAsync();
+        await otherDownload.WaitAsync(Timeout);
+    }
+
+    [Fact]
+    public async Task DownloadAndStreamAsync_AfterTheDownload_KeepsServingTheSameBytes()
+    {
+        var service = CreateService();
+        var track = service.AddTrack("1", length: FlacHeader.Length + 3);
+
+        await track.WriteAsync(FlacHeader);
+        var (first, _) = await service.DownloadAndStreamAsync("fake", "1").WaitAsync(Timeout);
+        await first.DisposeAsync();
+        await track.WriteAsync([1, 2, 3]);
+        await track.CompleteAsync();
+        var status = await WaitForStatusAsync(service, "ext-fake-1", DownloadStatus.Completed);
+
+        // Tagging gives the finished file another layout
+        await File.WriteAllBytesAsync(status.LocalPath!, new byte[] { 9, 9 });
+
+        var (again, _) = await service.DownloadAndStreamAsync("fake", "1").WaitAsync(Timeout);
+        await using (again)
+        {
+            using var buffer = new MemoryStream();
+            await again.CopyToAsync(buffer).WaitAsync(Timeout);
+            Assert.Equal(FlacHeader.Concat(new byte[] { 1, 2, 3 }), buffer.ToArray());
+        }
+        Assert.Single(service.RequestedTracks, "1");
+    }
+
+    [Fact]
+    public async Task DownloadAndStreamAsync_AfterABackgroundDownloadNobodyStreamed_ServesTheFinishedFile()
+    {
+        var service = CreateService();
+        var track = service.AddTrack("1", length: FlacHeader.Length);
+        await track.WriteAsync(FlacHeader);
+        await track.CompleteAsync();
+        await service.DownloadSongAsync("fake", "1").WaitAsync(Timeout);
+
+        var (stream, _) = await service.DownloadAndStreamAsync("fake", "1").WaitAsync(Timeout);
+        await using (stream)
+        {
+            Assert.IsType<FileStream>(stream);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAndStreamAsync_TwoTracksOnTheSamePath_KeepBothFiles()
+    {
+        var metadata = new Mock<IMusicMetadataService>();
+        metadata
+            .Setup(x => x.GetSongAsync("fake", It.IsAny<string>()))
+            .ReturnsAsync((string _, string id) => new Song { ExternalId = id, Title = "Same", Artist = "Artist", Album = "Album" });
+        var service = CreateService(metadata);
+        var a = service.AddTrack("a", length: FlacHeader.Length + 1);
+        var b = service.AddTrack("b", length: FlacHeader.Length + 1);
+
+        // Both pick the same free path before either is written
+        await a.WriteAsync(FlacHeader);
+        await b.WriteAsync(FlacHeader);
+        var streams = await Task.WhenAll(
+            service.DownloadAndStreamAsync("fake", "a"),
+            service.DownloadAndStreamAsync("fake", "b")).WaitAsync(Timeout);
+        foreach (var (stream, _) in streams)
+        {
+            await stream.DisposeAsync();
+        }
+
+        await a.WriteAsync([1]);
+        await a.CompleteAsync();
+        var first = await WaitForStatusAsync(service, "ext-fake-a", DownloadStatus.Completed);
+        await b.WriteAsync([2]);
+        await b.CompleteAsync();
+        var second = await WaitForStatusAsync(service, "ext-fake-b", DownloadStatus.Completed);
+
+        Assert.NotEqual(first.LocalPath, second.LocalPath);
+        Assert.Equal(FlacHeader.Append((byte)1), await File.ReadAllBytesAsync(first.LocalPath!));
+        Assert.Equal(FlacHeader.Append((byte)2), await File.ReadAllBytesAsync(second.LocalPath!));
+    }
+
+    [Fact]
     public async Task AlbumDownload_TakesTrackMetadataFromTheAlbumListing()
     {
         var metadata = new Mock<IMusicMetadataService>();
@@ -298,7 +457,7 @@ public class BaseDownloadServiceStreamingTests : IDisposable
         metadata.Verify(x => x.GetSongAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
-    private FakeStreamingDownloadService CreateService(Mock<IMusicMetadataService>? metadataOverride = null, double prebufferSeconds = 0)
+    private FakeStreamingDownloadService CreateService(Mock<IMusicMetadataService>? metadataOverride = null, double prebufferSeconds = 0, bool streamWhileDownloading = true, int maxConcurrentDownloads = 1)
     {
         // Behaves like the real library: a registered download is found on the next lookup
         var registered = new ConcurrentDictionary<string, LocalSongMapping>();
@@ -334,14 +493,21 @@ public class BaseDownloadServiceStreamingTests : IDisposable
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Library:DownloadPath"] = _downloadPath })
             .Build();
 
-        return new FakeStreamingDownloadService(
+        var service = new FakeStreamingDownloadService(
             new Mock<IHttpClientFactory>().Object,
             config,
             localLibrary.Object,
             metadata.Object,
-            new SubsonicSettings { StreamPrebufferSeconds = prebufferSeconds },
+            new SubsonicSettings
+            {
+                StreamWhileDownloading = streamWhileDownloading,
+                StreamPrebufferSeconds = prebufferSeconds,
+                MaxConcurrentDownloads = maxConcurrentDownloads
+            },
             new Mock<IServiceProvider>().Object,
             NullLogger.Instance);
+        _services.Add(service);
+        return service;
     }
 
     private static async Task<DownloadInfo> WaitForStatusAsync(BaseDownloadService service, string songId, DownloadStatus status)

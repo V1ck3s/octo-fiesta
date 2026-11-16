@@ -36,6 +36,9 @@ public sealed class ProgressiveDownload
     /// <summary>Where the finished track will land; its extension gives the content type.</summary>
     public string TargetPath { get; }
 
+    /// <summary>Whether a reader was ever opened on the scratch file.</summary>
+    public bool WasStreamed { get; private set; }
+
     public long BytesWritten
     {
         get { lock (_sync) return _bytesWritten; }
@@ -109,6 +112,7 @@ public sealed class ProgressiveDownload
             // bufferSize 0: no read-ahead, so a reader never caches the end of a file still growing
             var file = new FileStream(PartPath, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, bufferSize: 0, useAsync: true);
+            WasStreamed = true;
             return new ProgressiveDownloadStream(this, file);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)

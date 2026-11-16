@@ -130,8 +130,8 @@ public class SubsonicSettings
     public DownloadMode DownloadMode { get; set; } = DownloadMode.Track;
     
     /// <summary>
-    /// Defines how many background downloads (album, playlist, star, quality upgrade) can
-    /// concurrently run (default: 1, max: 5). The track being played never waits for a slot.
+    /// Defines how many downloads can concurrently run (default: 1, max: 5).
+    /// With StreamWhileDownloading, the track being played does not wait for a slot.
     /// Environment variable: MAX_CONCURRENT_DOWNLOADS
     /// </summary>
     public int MaxConcurrentDownloads { get; set; } = 1;
@@ -185,9 +185,21 @@ public class SubsonicSettings
     public bool AutoUpgradeQuality { get; set; } = false;
 
     /// <summary>
+    /// Play a track that is not downloaded yet while it downloads (default: false)
+    /// Environment variable: STREAM_WHILE_DOWNLOADING
+    /// Works with providers that announce the file size: Deezer, Qobuz, Yandex, and Tidal at LOSSLESS.
+    /// The track being played then skips the MaxConcurrentDownloads queue, so skipping through
+    /// tracks downloads them side by side. The file sent during the download, and for a while
+    /// after it so seeking stays consistent, has no tags. A seek past what is downloaded waits
+    /// for that part to arrive.
+    /// </summary>
+    public bool StreamWhileDownloading { get; set; } = false;
+
+    /// <summary>
     /// Seconds of audio downloaded before playback of a track that is not downloaded yet
     /// starts (default: 3). Playback follows the download from then on; this head start
     /// keeps the beginning from stuttering while the provider connection gets up to speed.
+    /// Only used with StreamWhileDownloading.
     /// Environment variable: STREAM_PREBUFFER_SECONDS. 0 starts as soon as the format is known.
     /// </summary>
     public double StreamPrebufferSeconds { get; set; } = 3;
