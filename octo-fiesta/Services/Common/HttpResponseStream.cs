@@ -26,6 +26,11 @@ public class HttpResponseStream : Stream
         return new(response, await response.Content.ReadAsStreamAsync(cancellationToken));
     }
 
+    /// <summary>
+    /// Size of the body as announced by the server, null when it did not say.
+    /// </summary>
+    public long? ContentLength => _response.Content.Headers.ContentLength;
+
     protected override void Dispose(bool disposing)
     {
         _responseStream.Dispose();

@@ -153,7 +153,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         var downloadUrl = downloadResponse.Data.Url;
         Logger.LogInformation("Got download URL for track {TrackId}: {Title}", trackId, song.Title);
 
-        Stream downloadStream = await GetDownloadStreamAsync(downloadUrl, cancellationToken);        
+        Stream downloadStream = await GetDownloadStreamAsync(downloadUrl, cancellationToken);
         // Determine file extension based on quality
         // Qobuz: 27/7/6 = FLAC, 5 = MP3
         var extension = quality == "5" ? ".mp3" : ".flac";
@@ -166,7 +166,10 @@ public class SquidWTFDownloadService : BaseDownloadService
             _ => "FLAC"
         };
 
-        return new DownloadResult(downloadStream, extension, downloadedQuality);
+        return new DownloadResult(downloadStream, extension, downloadedQuality)
+        {
+            ContentLength = (downloadStream as HttpResponseStream)?.ContentLength
+        };
     }
 
     private async Task<HttpResponseMessage> SendQobuzDownloadRequestAsync(string url, bool forceCaptchaRefresh, CancellationToken cancellationToken)
@@ -214,6 +217,7 @@ public class SquidWTFDownloadService : BaseDownloadService
         }
 
         Stream downloadStream;
+        long? contentLength = null;
         if (manifest.Urls.Count > 1)
         {
             Logger.LogInformation(
@@ -227,6 +231,7 @@ public class SquidWTFDownloadService : BaseDownloadService
                 "Got download URL for track {TrackId}: {Title} (quality: {Quality})",
                 trackId, song.Title, actualQuality);
             downloadStream = await GetDownloadStreamAsync(manifest.Urls[0], cancellationToken);
+            contentLength = (downloadStream as HttpResponseStream)?.ContentLength;
         }
 
         var extension = GetExtensionFromMimeType(manifest.MimeType, manifest.Codecs);
@@ -238,7 +243,11 @@ public class SquidWTFDownloadService : BaseDownloadService
             ? manifest.DurationSeconds ?? (double?)song.Duration
             : null;
 
-        return new DownloadResult(downloadStream, extension, downloadedQuality, mp4Duration);
+        // A single file streams while it downloads; DASH segments have no total size
+        return new DownloadResult(downloadStream, extension, downloadedQuality, mp4Duration)
+        {
+            ContentLength = contentLength
+        };
     }
 
     /// <summary>

@@ -86,6 +86,7 @@ public class TidalDownloadService : BaseDownloadService
         }
 
         Stream stream;
+        long? contentLength = null;
         if (manifest.Urls.Count > 1)
         {
             Logger.LogInformation(
@@ -99,6 +100,7 @@ public class TidalDownloadService : BaseDownloadService
                 "Got download URL for track {TrackId}: {Title} (quality: {Quality})",
                 trackId, song.Title, quality);
             stream = await OpenStreamAsync(manifest.Urls[0], cancellationToken);
+            contentLength = (stream as HttpResponseStream)?.ContentLength;
         }
 
         if (!string.IsNullOrEmpty(manifest.KeyId))
@@ -116,7 +118,12 @@ public class TidalDownloadService : BaseDownloadService
             ? manifest.DurationSeconds ?? song.Duration
             : null;
 
-        return new DownloadResult(stream, extension, downloadedQuality, mp4Duration);
+        // A single file streams while it downloads (AES-CTR decryption keeps its size);
+        // DASH segments have no total size and are patched afterwards, so they don't
+        return new DownloadResult(stream, extension, downloadedQuality, mp4Duration)
+        {
+            ContentLength = contentLength
+        };
     }
 
     #endregion

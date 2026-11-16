@@ -137,7 +137,7 @@ public class YandexDownloadService : BaseDownloadService
             return null;
         }
 
-        Stream? downloadStream = await GetDecryptedDownloadStreamModernAsync(downloadInfo!, cancellationToken);
+        var (downloadStream, contentLength) = await GetDecryptedDownloadStreamModernAsync(downloadInfo!, cancellationToken);
         if (downloadStream is null)
         {
             _logger.LogWarning("Failed to get decrypted stream for track {TrackId}", trackId);
@@ -147,7 +147,7 @@ public class YandexDownloadService : BaseDownloadService
         string extension =  YandexQuality.CodecToExtension(downloadInfo.Codec);
         string actualQuality = YandexQuality.FromApiParams(downloadInfo!.Codec, downloadInfo.Bitrate);
 
-        return new DownloadResult(downloadStream, extension, actualQuality);
+        return new DownloadResult(downloadStream, extension, actualQuality) { ContentLength = contentLength };
     }
 
     private async Task<YandexDownloadInfo?> GetYandexDownloadInfoModernAsync(string trackId, CancellationToken cancellationToken)
@@ -222,7 +222,8 @@ public class YandexDownloadService : BaseDownloadService
         return downloadInfoWrapper.Result!.DownloadInfo!;
     }
 
-    private async Task<Stream?> GetDecryptedDownloadStreamModernAsync(YandexDownloadInfo downloadInfo, CancellationToken cancellationToken)
+    // AES-CTR decryption keeps the size, so the announced length is the decrypted one
+    private async Task<(Stream? Stream, long? ContentLength)> GetDecryptedDownloadStreamModernAsync(YandexDownloadInfo downloadInfo, CancellationToken cancellationToken)
     {
         List<string> urls = [downloadInfo.Url];
         urls.AddRange(downloadInfo.Urls);
@@ -234,6 +235,7 @@ public class YandexDownloadService : BaseDownloadService
             if (response.IsSuccessStatusCode)
             {
                 var encryptedStream = await HttpResponseStream.CreateAsync(response, cancellationToken);
+                var contentLength = encryptedStream.ContentLength;
 
                 // initialize decryption machinery
                 byte[] keyHex = Convert.FromHexString(downloadInfo.Key);
@@ -243,7 +245,7 @@ public class YandexDownloadService : BaseDownloadService
                 var parameters = new ParametersWithIV(new KeyParameter(keyHex), counter);
                 bufferedCipher.Init(false, parameters);
                 
-                return new CipherStream(encryptedStream, bufferedCipher, null);
+                return (new CipherStream(encryptedStream, bufferedCipher, null), contentLength);
             }
 
             _logger.LogWarning(
@@ -253,7 +255,7 @@ public class YandexDownloadService : BaseDownloadService
         }
 
         _logger.LogWarning("Unable to download track by any of provided urls.");
-        return null;
+        return (null, null);
     }
 
     #endregion
@@ -289,7 +291,7 @@ public class YandexDownloadService : BaseDownloadService
             return null;
         }
 
-        Stream downloadStream = await HttpResponseStream.CreateAsync(downloadResponse, cancellationToken);
+        var downloadStream = await HttpResponseStream.CreateAsync(downloadResponse, cancellationToken);
         string extension = YandexQuality.CodecToExtension(downloadOption.Codec);
         string actualQuality = YandexQuality.FromApiParams(downloadOption.Codec, downloadOption.BitRate);
 
@@ -297,7 +299,10 @@ public class YandexDownloadService : BaseDownloadService
             downloadStream,
             extension,
             actualQuality
-        );
+        )
+        {
+            ContentLength = downloadStream.ContentLength
+        };
     }
 
     private async Task<YandexDownloadOptionLegacy?> GetDownloadOptionLegacyAsync(string trackId, CancellationToken cancellationToken)

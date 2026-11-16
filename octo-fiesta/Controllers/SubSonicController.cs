@@ -216,10 +216,11 @@ public class SubsonicController : ControllerBase
         // Otherwise download from the provider and stream (quality upgrade logic applies)
         try
         {
-            // The download is deliberately not tied to RequestAborted. Nothing is sent to the
-            // client until the file is complete, so a client that gives up waiting would kill
-            // the download, drop the partial file, and restart from zero on every retry. Only
-            // application shutdown cancels it.
+            // The download is deliberately not tied to RequestAborted: a client that gives up
+            // (or skips) would otherwise kill the download, drop the partial file, and restart
+            // from zero on every retry. Only application shutdown cancels it. For providers that
+            // announce the size, the stream returned here starts with the first bytes and
+            // follows the download as it grows.
             var (downloadStream, filePath) = await _downloadService.DownloadAndStreamAsync(
                 provider!, externalId!, _hostApplicationLifetime.ApplicationStopping);
             return File(downloadStream, GetContentType(filePath), enableRangeProcessing: true);

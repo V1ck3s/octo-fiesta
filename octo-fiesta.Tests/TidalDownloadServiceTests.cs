@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services;
+using octo_fiesta.Services.Common;
 using octo_fiesta.Services.Local;
 using octo_fiesta.Services.Subsonic;
 using octo_fiesta.Services.Tidal;
@@ -148,6 +149,40 @@ public class TidalDownloadServiceTests : IDisposable
         Assert.Equal("LOSSLESS", quality);
         Assert.Equal("audio/flac", manifest!.MimeType);
         Assert.Equal("https://cdn.example/track.flac", Assert.Single(manifest.Urls!));
+    }
+
+    [Fact]
+    public async Task DownloadTrackAsync_ASingleFile_AnnouncesItsSizeSoItCanStream()
+    {
+        var handler = new TidalStubHandler()
+            .Respond("playbackinfopostpaywall", PlaybackInfo(BtsManifest, "application/vnd.tidal.bts"))
+            .Respond("cdn.example/track.flac", "fLaC-audio-bytes");
+
+        var result = await DownloadTrackAsync(CreateService(handler, "LOSSLESS"));
+
+        Assert.Equal(".flac", result.Extension);
+        Assert.Equal("fLaC-audio-bytes".Length, result.ContentLength);
+    }
+
+    [Fact]
+    public async Task DownloadTrackAsync_DashSegments_AreNotStreamed()
+    {
+        var handler = new TidalStubHandler()
+            .Respond("playbackinfopostpaywall", PlaybackInfo(DashManifest, "application/dash+xml", "HI_RES_LOSSLESS"))
+            .Respond("cdn.example/", "segment");
+
+        var result = await DownloadTrackAsync(CreateService(handler));
+
+        Assert.Null(result.ContentLength);
+        Assert.NotNull(result.Mp4DurationSeconds);
+    }
+
+    private static async Task<BaseDownloadService.DownloadResult> DownloadTrackAsync(TidalDownloadService service)
+    {
+        var method = typeof(TidalDownloadService).GetMethod("DownloadTrackAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var song = new octo_fiesta.Models.Domain.Song { Title = "Track", Duration = 200 };
+        return await (Task<BaseDownloadService.DownloadResult>)method.Invoke(service, ["12345", song, CancellationToken.None])!;
     }
 
     [Fact]

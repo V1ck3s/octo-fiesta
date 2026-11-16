@@ -231,7 +231,8 @@ foreach (var url in app.Urls)
 
 Console.WriteLine();
 
-// Wait for shutdown
+// Wait for shutdown, then dispose the services as app.Run() would
 app.WaitForShutdown();
+await app.DisposeAsync();
 
 return 0;
