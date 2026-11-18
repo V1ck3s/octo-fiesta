@@ -25,10 +25,10 @@ public static class QobuzQuality
         return quality.ToUpperInvariant() switch
         {
             "FLAC" => Flac24High,
-            "FLAC_24_HIGH" or "24_192" or "27" => Flac24High,
-            "FLAC_24_LOW" or "24_96" or "7" => Flac24Low,
-            "FLAC_16" or "CD" or "6" => Flac16,
-            "MP3_320" or "MP3" or "5" => Mp3320,
+            "FLAC_24_HIGH" or "24_192" => Flac24High,
+            "FLAC_24_LOW" or "24_96" => Flac24Low,
+            "FLAC_16" or "CD" => Flac16,
+            "MP3_320" or "MP3" => Mp3320,
             _ => Flac24High
         };
     }

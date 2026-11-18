@@ -58,7 +58,12 @@ public static class SquidWTFQuality
 
     /// <summary>
     /// What the Tidal backend delivers for a track with the given audio quality and tags.
+    /// Instances often serve only a preview at HI_RES_LOSSLESS and the download then falls back
+    /// to LOSSLESS, so lossless is announced as plain FLAC at CD quality rather than hi-res MP4.
     /// </summary>
     public static AudioFormat ExpectedTidalFormat(string? quality, string? trackAudioQuality, IReadOnlyCollection<string>? tags)
-        => Tidal.TidalQuality.ExpectedFormat(TidalQuality(quality), trackAudioQuality, tags);
+    {
+        var format = Tidal.TidalQuality.ExpectedFormat(TidalQuality(quality), trackAudioQuality, tags);
+        return format.Codec == "flac" ? AudioFormat.Flac() : format;
+    }
 }

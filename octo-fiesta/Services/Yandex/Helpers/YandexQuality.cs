@@ -95,11 +95,11 @@ public static class YandexQuality
     public static AudioFormat ExpectedFormat(string? quality) => quality?.Trim().ToUpperInvariant() switch
     {
         MP3_320 => AudioFormat.Mp3_320,
-        MP3_192 => new AudioFormat("mp3", "audio/mpeg", 192),
+        MP3_192 => new AudioFormat("mp3", "audio/mpeg", 192, "mp3"),
         MP3_128 => AudioFormat.Mp3_128,
-        AAC_256 => new AudioFormat("aac", "audio/aac", 256),
-        AAC_192 => new AudioFormat("aac", "audio/aac", 192),
-        AAC_64 => new AudioFormat("aac", "audio/aac", 64),
+        AAC_256 => new AudioFormat("aac", "audio/aac", 256, "aac"),
+        AAC_192 => new AudioFormat("aac", "audio/aac", 192, "aac"),
+        AAC_64 => new AudioFormat("aac", "audio/aac", 64, "aac"),
         _ => AudioFormat.Flac()
     };
 

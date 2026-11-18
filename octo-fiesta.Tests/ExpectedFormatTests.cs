@@ -63,7 +63,7 @@ public class ExpectedFormatTests
     }
 
     [Theory]
-    [InlineData(null, "m4a", 4608)]
+    [InlineData(null, "flac", 1411)]       // hi-res often falls back to LOSSLESS on instances
     [InlineData("FLAC", "flac", 1411)]
     [InlineData("AAC_320", "m4a", 320)]
     public void SquidWTF_Tidal_FollowsTheConfiguredTier(string? quality, string suffix, int bitRate)
@@ -130,6 +130,31 @@ public class ExpectedFormatTests
         var json = JsonSerializer.Serialize(result.Value);
 
         Assert.Contains("\"container\":\"flac\"", json);
+        Assert.Contains("\"codec\":\"flac\"", json);
         Assert.Contains("\"audioBitrate\":1411000", json);
     }
+
+    [Theory]
+    [InlineData("HI_RES_LOSSLESS", "m4a", "flac")] // FLAC inside MP4
+    [InlineData("HIGH", "m4a", "aac")]
+    public void TranscodeDecision_ReportsTheCodecNotTheContainer(string quality, string container, string codec)
+    {
+        var song = new Song
+        {
+            Title = "Track", ExternalProvider = "tidal", ExternalId = "1",
+            ExpectedFormat = TidalQuality.ExpectedFormat(quality, "LOSSLESS", ["LOSSLESS", "HIRES_LOSSLESS"])
+        };
+
+        var result = (Microsoft.AspNetCore.Mvc.JsonResult)new SubsonicResponseBuilder().CreateTranscodeDecisionResponse(song, "http");
+        var json = JsonSerializer.Serialize(result.Value);
+
+        Assert.Contains($"\"container\":\"{container}\"", json);
+        Assert.Contains($"\"codec\":\"{codec}\"", json);
+    }
+
+    [Theory]
+    [InlineData("27")]
+    [InlineData("6")]
+    public void Qobuz_NumericQualityIsNotAnAlias(string quality)
+        => Assert.Equal(QobuzQuality.Flac24High, QobuzQuality.GetFormatId(quality));
 }

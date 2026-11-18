@@ -705,12 +705,17 @@ public class SubsonicResponseBuilder
     public IActionResult CreateTranscodeDecisionResponse(Song? song, string protocol)
     {
         string container = "mp3";
+        string codec = "mp3";
         int bitRate = 128;
         if (song != null)
         {
             var (suffix, _, br) = GetSuffixContentTypeAndBitrate(song);
             container = suffix;
             bitRate = br > 0 ? br : 128;
+            // A downloaded .m4a is assumed to hold AAC; its extension can't tell FLAC-in-MP4 apart.
+            codec = string.IsNullOrEmpty(song.LocalPath) && !song.IsLocal && song.ExpectedFormat is { } expected
+                ? expected.Codec
+                : suffix == "m4a" ? "aac" : suffix;
         }
 
         return CreateJsonResponse(new
@@ -726,7 +731,7 @@ public class SubsonicResponseBuilder
                 {
                     protocol,
                     container,
-                    codec = container,
+                    codec,
                     audioChannels = 2,
                     audioBitrate = bitRate * 1000
                 }
