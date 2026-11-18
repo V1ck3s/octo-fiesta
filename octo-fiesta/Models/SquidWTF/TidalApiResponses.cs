@@ -75,6 +75,12 @@ public class TidalSearchResponse
 
 public class TidalTrack
 {
+    [JsonPropertyName("audioQuality")]
+    public string? AudioQuality { get; set; }
+
+    [JsonPropertyName("mediaMetadata")]
+    public TidalMediaMetadata? MediaMetadata { get; set; }
+
     [JsonPropertyName("id")]
     public long Id { get; set; }
     
@@ -320,6 +326,12 @@ public class TidalTrackInfoResponseWrapper
 /// </summary>
 public class TidalTrackInfoResponse
 {
+    [JsonPropertyName("audioQuality")]
+    public string? AudioQuality { get; set; }
+
+    [JsonPropertyName("mediaMetadata")]
+    public TidalMediaMetadata? MediaMetadata { get; set; }
+
     [JsonPropertyName("id")]
     public long Id { get; set; }
     
@@ -481,3 +493,12 @@ public class TidalArtistCover
 }
 
 #endregion
+
+/// <summary>
+/// The audio tiers a track is available in, e.g. LOSSLESS, HIRES_LOSSLESS.
+/// </summary>
+public class TidalMediaMetadata
+{
+    [JsonPropertyName("tags")]
+    public List<string>? Tags { get; set; }
+}

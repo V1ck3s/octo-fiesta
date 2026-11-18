@@ -122,7 +122,7 @@ public class SquidWTFDownloadService : BaseDownloadService
 
     private async Task<DownloadResult> DownloadTrackQobuzAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-        var quality = GetQobuzQuality();
+        var quality = SquidWTFQuality.QobuzQuality(_squidWTFSettings.Quality);
         var url = $"{QobuzBaseUrl}/api/download-music?track_id={trackId}&quality={quality}";
 
         var response = await SendQobuzDownloadRequestAsync(url, forceCaptchaRefresh: false, cancellationToken);
@@ -181,34 +181,13 @@ public class SquidWTFDownloadService : BaseDownloadService
         return await _httpClient.SendAsync(request, cancellationToken);
     }
 
-    private string GetQobuzQuality()
-    {
-        var quality = _squidWTFSettings.Quality;
-        
-        if (string.IsNullOrEmpty(quality))
-        {
-            return "27"; // Default to highest quality FLAC (24-bit/192kHz)
-        }
-        
-        // Map common quality names to Qobuz quality codes
-        // 27 = FLAC 24-bit/192kHz, 7 = FLAC 24-bit/96kHz, 6 = FLAC 16-bit/44kHz, 5 = MP3 320kbps
-        return quality.ToUpperInvariant() switch
-        {
-            "FLAC_24_192" or "FLAC_24" or "27" => "27",
-            "FLAC_24_96" or "7" => "7",
-            "FLAC_16" or "FLAC" or "6" => "6",
-            "MP3_320" or "MP3" or "5" => "5",
-            _ => "27"
-        };
-    }
-
     #endregion
 
     #region Tidal Download
 
     private async Task<DownloadResult> DownloadTrackTidalAsync(string trackId, Song song, CancellationToken cancellationToken)
     {
-        var requestedQuality = GetTidalQuality();
+        var requestedQuality = SquidWTFQuality.TidalQuality(_squidWTFSettings.Quality);
         var (manifest, actualQuality) = await GetTidalManifestAsync(trackId, requestedQuality, song.Duration, cancellationToken);
 
         if (manifest?.Urls == null || manifest.Urls.Count == 0)
@@ -345,26 +324,6 @@ public class SquidWTFDownloadService : BaseDownloadService
            || (manifestDurationSeconds is > 0
                && expectedDurationSeconds is > PreviewMinExpectedDurationSeconds
                && manifestDurationSeconds.Value < expectedDurationSeconds.Value * PreviewMaxDurationRatio);
-
-    private string GetTidalQuality()
-    {
-        var quality = _squidWTFSettings.Quality;
-        
-        if (string.IsNullOrEmpty(quality))
-        {
-            return "HI_RES_LOSSLESS"; // Default to highest quality
-        }
-        
-        // Map common quality names to Tidal quality codes
-        return quality.ToUpperInvariant() switch
-        {
-            "HI_RES_LOSSLESS" or "HI_RES" or "FLAC_24" => "HI_RES_LOSSLESS",
-            "LOSSLESS" or "FLAC" or "FLAC_16" => "LOSSLESS",
-            "HIGH" or "AAC_320" or "AAC_HIGH" => "HIGH",
-            "LOW" or "AAC_96" or "AAC_LOW" => "LOW",
-            _ => "HI_RES_LOSSLESS"
-        };
-    }
 
     #endregion
 

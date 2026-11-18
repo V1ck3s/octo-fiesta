@@ -21,6 +21,9 @@ public class QobuzMetadataService : IMusicMetadataService
     private readonly ILogger<QobuzMetadataService> _logger;
     private readonly string? _userAuthToken;
     private readonly string? _userId;
+
+    // Format ID downloads ask for, which caps what a track is delivered in
+    private readonly int _formatId;
     
     private const string BaseUrl = "https://www.qobuz.com/api.json/0.2/";
 
@@ -39,6 +42,7 @@ public class QobuzMetadataService : IMusicMetadataService
         var qobuzConfig = qobuzSettings.Value;
         _userAuthToken = qobuzConfig.UserAuthToken;
         _userId = qobuzConfig.UserId;
+        _formatId = QobuzQuality.GetFormatId(qobuzConfig.Quality);
         
         // Set up default headers
         _httpClient.DefaultRequestHeaders.Add("User-Agent", 
@@ -661,8 +665,28 @@ public class QobuzMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "qobuz",
             IsExplicit = ReadParentalWarning(track),
-            ExternalId = externalId
+            ExternalId = externalId,
+            ExpectedFormat = QobuzQuality.ExpectedFormat(_formatId,
+                GetMaximum(track, "maximum_bit_depth") is { } depth ? (int)depth : null,
+                GetMaximum(track, "maximum_sampling_rate"))
         };
+    }
+
+    /// <summary>
+    /// A track's maximum resolution field, taken from its album when the track lacks it.
+    /// </summary>
+    private static double? GetMaximum(JsonElement track, string property)
+    {
+        if (track.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number)
+        {
+            return value.GetDouble();
+        }
+        if (track.TryGetProperty("album", out var album) && album.ValueKind == JsonValueKind.Object
+            && album.TryGetProperty(property, out var albumValue) && albumValue.ValueKind == JsonValueKind.Number)
+        {
+            return albumValue.GetDouble();
+        }
+        return null;
     }
 
     private Song ParseQobuzTrackFull(JsonElement track)

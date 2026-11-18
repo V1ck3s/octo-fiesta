@@ -849,7 +849,10 @@ public class SquidWTFMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId,
-            ExplicitContentLyrics = track.ParentalWarning ? 1 : 0
+            ExplicitContentLyrics = track.ParentalWarning ? 1 : 0,
+            ExpectedFormat = SquidWTFQuality.ExpectedQobuzFormat(_settings.Quality,
+                track.MaximumBitDepth ?? track.Album?.MaximumBitDepth,
+                track.MaximumSamplingRate ?? track.Album?.MaximumSamplingRate)
         };
     }
 
@@ -955,7 +958,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId,
-            ExplicitContentLyrics = track.Explicit ? 1 : 0
+            ExplicitContentLyrics = track.Explicit ? 1 : 0,
+            ExpectedFormat = SquidWTFQuality.ExpectedTidalFormat(_settings.Quality, track.AudioQuality, track.MediaMetadata?.Tags)
         };
     }
 
@@ -1007,7 +1011,8 @@ public class SquidWTFMetadataService : IMusicMetadataService
             IsLocal = false,
             ExternalProvider = "squidwtf",
             ExternalId = externalId,
-            ExplicitContentLyrics = track.Explicit ? 1 : 0
+            ExplicitContentLyrics = track.Explicit ? 1 : 0,
+            ExpectedFormat = SquidWTFQuality.ExpectedTidalFormat(_settings.Quality, track.AudioQuality, track.MediaMetadata?.Tags)
         };
     }
 

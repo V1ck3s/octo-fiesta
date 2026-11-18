@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using octo_fiesta.Models.Domain;
 
 namespace octo_fiesta.Services.Yandex;
 
@@ -85,6 +86,22 @@ public static class YandexQuality
 
         return (level, codecs.ToList());
     }
+
+    /// <summary>
+    /// The format downloads at the configured quality are expected to arrive in, announced
+    /// while a track is not downloaded yet. Yandex picks the container itself (FLAC or AAC may
+    /// come raw or inside MP4), so this is the raw codec at the requested bit rate.
+    /// </summary>
+    public static AudioFormat ExpectedFormat(string? quality) => quality?.Trim().ToUpperInvariant() switch
+    {
+        MP3_320 => AudioFormat.Mp3_320,
+        MP3_192 => new AudioFormat("mp3", "audio/mpeg", 192, "mp3"),
+        MP3_128 => AudioFormat.Mp3_128,
+        AAC_256 => new AudioFormat("aac", "audio/aac", 256, "aac"),
+        AAC_192 => new AudioFormat("aac", "audio/aac", 192, "aac"),
+        AAC_64 => new AudioFormat("aac", "audio/aac", 64, "aac"),
+        _ => AudioFormat.Flac()
+    };
 
     public static string CodecToExtension(string codec)
     {
