@@ -32,6 +32,7 @@ public class DeezerDownloadService : BaseDownloadService
     
     private string? _apiToken;
     private string? _licenseToken;
+    private readonly DeezerAccount? _account;
     
     private DateTime _lastRequestTime = DateTime.MinValue;
     private readonly int _minRequestIntervalMs = 200;
@@ -48,7 +49,8 @@ public class DeezerDownloadService : BaseDownloadService
         IOptions<SubsonicSettings> subsonicSettings,
         IOptions<DeezerSettings> deezerSettings,
         IServiceProvider serviceProvider,
-        ILogger<DeezerDownloadService> logger)
+        ILogger<DeezerDownloadService> logger,
+        DeezerAccount? account = null)
         : base(httpClientFactory, configuration, localLibraryService, metadataService, subsonicSettings.Value, serviceProvider, logger)
     {
         _httpClient = httpClientFactory.CreateClient();
@@ -57,6 +59,7 @@ public class DeezerDownloadService : BaseDownloadService
         _arl = deezer.Arl;
         _arlFallback = deezer.ArlFallback;
         _preferredQuality = deezer.Quality;
+        _account = account;
     }
 
     #region BaseDownloadService Implementation
@@ -177,11 +180,14 @@ public class DeezerDownloadService : BaseDownloadService
             {
                 _apiToken = checkForm.GetString();
                 
-                if (results.TryGetProperty("USER", out var user) &&
-                    user.TryGetProperty("OPTIONS", out var options) &&
-                    options.TryGetProperty("license_token", out var licenseToken))
+                if (results.TryGetProperty("USER", out var user))
                 {
-                    _licenseToken = licenseToken.GetString();
+                    _account?.Update(user);
+                    if (user.TryGetProperty("OPTIONS", out var options) &&
+                        options.TryGetProperty("license_token", out var licenseToken))
+                    {
+                        _licenseToken = licenseToken.GetString();
+                    }
                 }
                 
                 Logger.LogInformation("Deezer token refreshed successfully");

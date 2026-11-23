@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using octo_fiesta.Models.Domain;
 using octo_fiesta.Models.Settings;
 using octo_fiesta.Services.Validation;
 
@@ -12,13 +13,15 @@ namespace octo_fiesta.Services.Deezer;
 public class DeezerStartupValidator : BaseStartupValidator
 {
     private readonly DeezerSettings _settings;
+    private readonly DeezerAccount? _account;
 
     public override string ServiceName => "Deezer";
 
-    public DeezerStartupValidator(IOptions<DeezerSettings> settings, HttpClient httpClient)
+    public DeezerStartupValidator(IOptions<DeezerSettings> settings, HttpClient httpClient, DeezerAccount? account = null)
         : base(httpClient)
     {
         _settings = settings.Value;
+        _account = account;
     }
 
     public override async Task<ValidationResult> ValidateAsync(CancellationToken cancellationToken)
@@ -95,6 +98,11 @@ public class DeezerStartupValidator : BaseStartupValidator
                                 ? n
                                 : "Unknown";
                         
+                        // Downloads use the primary ARL
+                        if (label == "primary")
+                        {
+                            _account?.Update(user);
+                        }
                         var offerName = GetOfferName(user);
                         
                         WriteStatus(fieldName, "VALID", ConsoleColor.Green);
@@ -129,27 +137,14 @@ public class DeezerStartupValidator : BaseStartupValidator
         }
     }
 
+    // Check actual streaming capabilities, not just license_token presence
     private static string GetOfferName(JsonElement user)
     {
-        if (!user.TryGetProperty("OPTIONS", out var options))
-        {
-            return "Free";
-        }
-
-        // Check actual streaming capabilities, not just license_token presence
-        var hasLossless = options.TryGetProperty("web_lossless", out var webLossless) && webLossless.GetBoolean();
-        var hasHq = options.TryGetProperty("web_hq", out var webHq) && webHq.GetBoolean();
-
-        if (hasLossless)
+        var best = DeezerAccount.BestFormatOf(user);
+        if (best == AudioFormat.Flac())
         {
             return "Premium+ (Lossless)";
         }
-        
-        if (hasHq)
-        {
-            return "Premium (HQ)";
-        }
-        
-        return "Free";
+        return best == AudioFormat.Mp3_320 ? "Premium (HQ)" : "Free";
     }
 }
