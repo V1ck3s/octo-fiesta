@@ -424,6 +424,51 @@ public class BaseDownloadServiceStreamingTests : IDisposable
         Assert.Equal(FlacHeader.Append((byte)2), await File.ReadAllBytesAsync(second.LocalPath!));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DownloadSongAsync_ShowsTheTrackOnlyOnceItIsComplete(bool streamWhileDownloading)
+    {
+        var service = CreateService(streamWhileDownloading: streamWhileDownloading);
+        var track = service.AddTrack("1", length: FlacHeader.Length + 1);
+
+        var download = service.DownloadSongAsync("fake", "1");
+        await track.WriteAsync(FlacHeader);
+        await WaitForStatusAsync(service, "ext-fake-1", DownloadStatus.InProgress);
+        await Task.Delay(100);
+
+        // A library scan at this point must not pick up a partial, untagged file
+        Assert.Empty(VisibleFiles());
+
+        await track.WriteAsync([1]);
+        await track.CompleteAsync();
+        var path = await download.WaitAsync(Timeout);
+
+        Assert.Equal([path], VisibleFiles());
+        Assert.Equal(FlacHeader.Append((byte)1), await File.ReadAllBytesAsync(path));
+        Assert.Empty(HiddenFiles());
+    }
+
+    [Fact]
+    public async Task DownloadSongAsync_WhenTheDownloadFails_LeavesNoFile()
+    {
+        var service = CreateService(streamWhileDownloading: false);
+        var track = service.AddTrack("1", length: null);
+
+        var download = service.DownloadSongAsync("fake", "1");
+        await track.WriteAsync(FlacHeader);
+        await track.CompleteAsync(new IOException("connection lost"));
+
+        await Assert.ThrowsAsync<IOException>(() => download.WaitAsync(Timeout));
+        Assert.Empty(Directory.GetFiles(_downloadPath, "*", SearchOption.AllDirectories));
+    }
+
+    private string[] VisibleFiles() => Directory.GetFiles(_downloadPath, "*", SearchOption.AllDirectories)
+        .Where(f => !Path.GetFileName(f).StartsWith('.')).ToArray();
+
+    private string[] HiddenFiles() => Directory.GetFiles(_downloadPath, "*", SearchOption.AllDirectories)
+        .Where(f => Path.GetFileName(f).StartsWith('.')).ToArray();
+
     [Fact]
     public async Task AlbumDownload_TakesTrackMetadataFromTheAlbumListing()
     {

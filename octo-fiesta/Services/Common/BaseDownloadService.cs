@@ -1011,11 +1011,10 @@ public abstract class BaseDownloadService : IDownloadService, IDisposable
         var albumFolder = Path.GetDirectoryName(outputPath)!;
         EnsureDirectoryExists(albumFolder);
 
-        // Resolve unique path if file already exists
-        outputPath = PathHelper.ResolveUniquePath(outputPath);
-
-        // Only a file this download created is cleaned up on failure
-        var created = false;
+        // The file is written and tagged under a hidden name, then renamed. A library scan
+        // during the download would otherwise index it without tags, and Navidrome would no
+        // longer match it with the file it replaces, leaving that one as missing.
+        var workPath = Path.Combine(albumFolder, $".{Guid.NewGuid():N}{Path.GetExtension(outputPath)}");
         try
         {
             // Fragmented MP4 is patched after download, so it is only ever served finished
@@ -1028,47 +1027,28 @@ public abstract class BaseDownloadService : IDownloadService, IDisposable
                 // a file, so it works on a copy of its own.
                 await using var part = new FileStream(progressive.PartPath, FileMode.Open, FileAccess.Read,
                     FileShare.ReadWrite | FileShare.Delete, bufferSize: 81920, useAsync: true);
-                FileStream outputFile;
-                while (true)
-                {
-                    try
-                    {
-                        outputFile = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write,
-                            FileShare.None, bufferSize: 81920, useAsync: true);
-                        break;
-                    }
-                    catch (IOException) when (IOFile.Exists(outputPath))
-                    {
-                        // Another track took this path while this one was downloading
-                        outputPath = PathHelper.ResolveUniquePath(outputPath);
-                    }
-                }
-                created = true;
-                await using (outputFile)
-                {
-                    await part.CopyToAsync(outputFile, cancellationToken);
-                }
+                await using var outputFile = IOFile.Create(workPath);
+                await part.CopyToAsync(outputFile, cancellationToken);
             }
             else
             {
                 // Download the file with progress logging and stall detection
-                await using var outputFile = IOFile.Create(outputPath);
-                created = true;
+                await using var outputFile = IOFile.Create(workPath);
                 await CopyWithProgressAsync(result.DownloadStream, outputFile, song.Title, cancellationToken);
             }
 
             // Detect actual audio format from magic bytes and rename if the extension is wrong.
             // This catches cases where the stream is raw FLAC but we assumed MP4 container.
-            outputPath = CorrectExtensionIfNeeded(outputPath);
+            workPath = CorrectExtensionIfNeeded(workPath);
 
-            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
-
-            // Write metadata
-            await WriteMetadataAsync(outputPath, song, cancellationToken);
+            await WriteMetadataAsync(workPath, song, cancellationToken);
 
             // Fragmented MP4 (Tidal HI_RES FLAC-in-MP4) carries no top-level duration; patch it
             // so tag scanners don't report 0:00. Done last so it survives the metadata write.
-            PatchMp4DurationIfNeeded(outputPath, result);
+            PatchMp4DurationIfNeeded(workPath, result);
+
+            outputPath = MoveToUniquePath(workPath, Path.ChangeExtension(outputPath, Path.GetExtension(workPath)));
+            Logger.LogInformation("Downloaded file to: {Path}", outputPath);
 
             // For permanent files, drop a .lrc sidecar so the backing server serves synced
             // lyrics on later listens and to other clients. Fire-and-forget: never delay or
@@ -1085,11 +1065,28 @@ public abstract class BaseDownloadService : IDownloadService, IDisposable
         }
         catch
         {
-            if (created)
-            {
-                TryDeleteIncompleteFile(outputPath);
-            }
+            TryDeleteIncompleteFile(workPath);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Moves the file to the path, or to a numbered variant when another track already took it.
+    /// </summary>
+    private static string MoveToUniquePath(string sourcePath, string path)
+    {
+        while (true)
+        {
+            var target = PathHelper.ResolveUniquePath(path);
+            try
+            {
+                IOFile.Move(sourcePath, target);
+                return target;
+            }
+            catch (IOException) when (IOFile.Exists(target))
+            {
+                // Taken between the check and the move
+            }
         }
     }
 
