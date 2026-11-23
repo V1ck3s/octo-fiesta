@@ -101,6 +101,23 @@ public class ExpectedFormatTests
         Assert.Equal(bitRate, format.BitRate);
     }
 
+    [Theory]
+    [InlineData("""{"web_lossless":false,"web_hq":false}""", null, "mp3", 128)]
+    [InlineData("""{"web_lossless":false,"web_hq":true}""", null, "mp3", 320)]
+    [InlineData("""{"web_lossless":true,"web_hq":true}""", null, "flac", 1411)]
+    [InlineData("""{"web_lossless":false,"web_hq":true}""", "MP3_128", "mp3", 128)]
+    [InlineData("""{"web_lossless":true,"web_hq":true}""", "MP3_320", "mp3", 320)]
+    public void Deezer_NeverAnnouncesMoreThanTheAccountCanStream(string options, string? quality, string suffix, int bitRate)
+    {
+        var account = new DeezerAccount();
+        account.Update(JsonDocument.Parse($$"""{"OPTIONS":{{options}}}""").RootElement);
+
+        var format = DeezerMetadataService.GetExpectedFormat(quality, account.BestFormat);
+
+        Assert.Equal(suffix, format.Suffix);
+        Assert.Equal(bitRate, format.BitRate);
+    }
+
     [Fact]
     public void UndownloadedSong_IsAnnouncedInItsExpectedFormat()
     {

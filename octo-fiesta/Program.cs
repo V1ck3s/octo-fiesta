@@ -157,6 +157,9 @@ else
     builder.Services.AddSingleton<IDownloadService, DeezerDownloadService>();
 }
 
+// Read by the Deezer services and validator, whichever role Deezer has
+builder.Services.AddSingleton<DeezerAccount>();
+
 // Startup validation - register validators
 builder.Services.AddSingleton<IStartupValidator, SubsonicStartupValidator>();
 builder.Services.AddSingleton<IStartupValidator, DeezerStartupValidator>();
